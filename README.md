@@ -8,7 +8,7 @@ Implemented now:
 - React + Vite frontend entry point.
 - Local MongoDB connection through Mongoose.
 - Database initialization scripts.
-- All 14 Mongoose models from the brief.
+- 17 Mongoose models covering reservations, payments, policies, roles, and room operations.
 
 The remaining application folders are intentionally empty so their files can be
 implemented manually later. No controllers, routes, middleware, services, auth,
@@ -21,7 +21,7 @@ server/
   scripts/                  # Database setup scripts
   src/
     config/                 # MongoDB connection
-    models/                 # Implemented Mongoose models
+    models/                 # 17 implemented Mongoose models
     controllers/            # Reserved for manual implementation
     routes/                 # Reserved for manual implementation
     middleware/             # Reserved for manual implementation
@@ -67,8 +67,12 @@ MONGO_URI=mongodb://127.0.0.1:27017/hotel_booking
 npm run db:init --prefix server
 ```
 
-This creates the 14 collections and synchronizes their indexes using the Mongoose
-models.
+This creates the 17 collections and synchronizes their indexes using the Mongoose
+models. See `docs/use-case-collection-design.md` for the collection map and
+business rules required in the future service layer.
+
+Each model lives in its own file under `server/src/models`; import only the
+models needed by a route or service (for example, `require('./models/Booking')`).
 
 ## Run the base project
 

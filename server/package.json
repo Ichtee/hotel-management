@@ -2,11 +2,10 @@
   "name": "hotel-booking-models",
   "version": "1.0.0",
   "private": true,
-  "main": "src/models/index.js",
   "scripts": {
     "db:init": "node scripts/initDatabase.js",
     "db:watch": "node scripts/watchDatabase.js",
-    "test": "node -e \"const models = require('./src/models'); if (Object.keys(models).length !== 14) process.exit(1); console.log('Loaded 14 Mongoose models successfully')\""
+    "test": "node test/models.test.js"
   },
   "dependencies": {
     "dotenv": "^16.6.1",

@@ -1,7 +1,7 @@
 const layers = [
   { name: 'Frontend', detail: 'React + Vite', state: 'Ready' },
   { name: 'Database', detail: 'MongoDB + Mongoose', state: 'Configured' },
-  { name: 'Data models', detail: '14 collections from the brief', state: 'Ready' }
+  { name: 'Data models', detail: '17 MongoDB collections', state: 'Ready' }
 ];
 
 export default function App() {

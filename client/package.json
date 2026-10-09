@@ -4,15 +4,22 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test:e2e": "playwright test",
     "dev": "vite --configLoader runner",
     "build": "vite build --configLoader runner",
     "preview": "vite preview --configLoader runner"
   },
   "dependencies": {
+    "@fontsource/dm-sans": "^5.3.0",
+    "@fontsource/instrument-serif": "^5.3.0",
     "@vitejs/plugin-react": "^5.0.2",
-    "vite": "^7.1.5",
+    "lucide-react": "^1.53.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "react-router-dom": "^7.18.4",
+    "vite": "^7.1.5"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "@playwright/test": "^1.64.0"
+  }
 }

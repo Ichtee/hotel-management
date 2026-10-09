@@ -8,6 +8,7 @@ const userSchema = new Schema({
   phone: String,
   status: { type: String, enum: ['active', 'suspended', 'deleted'], default: 'active' },
   lastLogin: Date,
+  authVersion: { type: Number, default: 0, select: false },
   customerProfile: { fullName: String, address: String, dateOfBirth: Date, loyaltyPoints: { type: Number, default: 0, min: 0 }, idDocumentNo: { type: String, select: false } },
   employeeProfile: { hotelId: { type: Schema.Types.ObjectId, ref: 'Hotel' }, position: String, hireDate: Date, shift: String }
 }, { timestamps: true });

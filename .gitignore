@@ -23,3 +23,8 @@ Thumbs.db
 # Local MongoDB data
 data/
 *.pid
+
+# Playwright / MCP artifacts
+.playwright-mcp/
+playwright-report/
+test-results/

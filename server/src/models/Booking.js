@@ -31,6 +31,7 @@ const bookingEventSchema = new Schema({
 });
 
 const schema = new Schema({
+  bookingReference: { type: String, unique: true, sparse: true, uppercase: true, trim: true },
   customerId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   hotelId: { type: Schema.Types.ObjectId, ref: 'Hotel', required: true },
   createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },

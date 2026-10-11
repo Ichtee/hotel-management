@@ -38,6 +38,8 @@ async function validateModels() {
   assert.equal(new models.RoomIssue({ roomId: id(), reportedBy: id(), title: 'Air conditioner' }).validateSync(), undefined);
   const eventBooking = new models.Booking({ ...baseBooking, events: [{ actorId: id(), type: 'room_changed', oldValue: { room: '101' }, newValue: { room: '102' } }] });
   assert.equal(eventBooking.validateSync(), undefined);
+  const fields = { RoomType: 'bedType roomSizeSqm', Room: 'viewType', Service: 'category description', Booking: 'bookingReference', Coupon: 'description minSpendRequirement', Refund: 'requestedBy', Invoice: 'invoiceNumber subtotal status billingAddress', Review: 'title hotelResponse', Notification: 'title' };
+  for (const [name, list] of Object.entries(fields)) for (const f of list.split(' ')) assert.ok(models[name].schema.path(f), `${name}.${f} missing`);
   console.log('Validated 17 Mongoose models and key booking/payment/policy rules');
 }
 

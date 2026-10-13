@@ -3,12 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
     "db:init": "node scripts/initDatabase.js",
     "db:watch": "node scripts/watchDatabase.js",
     "test": "node test/models.test.js"
   },
   "dependencies": {
     "dotenv": "^16.6.1",
+    "express": "^5.1.0",
     "mongoose": "^8.14.1"
   }
 }

@@ -2,14 +2,16 @@ const User = require("../models/User");
 const Role = require("../models/Role");
 const v = require("../utils/validation");
 const { hashPassword } = require("../utils/password");
-const safe = (user) => {
-  const data = user.toObject();
+// Users store roleId; the API keeps exposing the role key (e.g. "manager").
+const safe = (user, role) => {
+  const data = { ...user.toObject(), role: role.key };
   delete data.passwordHash;
   delete data.authVersion;
   if (data.customerProfile) delete data.customerProfile.idDocumentNo;
   return data;
 };
 const staffRoles = ["receptionist", "housekeeping"];
+const roleIds = (keys) => Role.find({ key: { $in: keys } }).distinct("_id");
 async function roleFor(key, requireActive = true) {
   const role = await Role.findOne({
     key,
@@ -56,7 +58,7 @@ function editable(body, isStaff, creating) {
   return out;
 }
 function apply(user, data) {
-  for (const key of ["username", "email", "phone", "role", "status"])
+  for (const key of ["username", "email", "phone", "status"])
     if (data[key] !== undefined) user[key] = data[key];
   if (data.fullName !== undefined)
     user.customerProfile.fullName = data.fullName;
@@ -79,9 +81,7 @@ const listing = (isStaff) => async (req, res) => {
       { "customerProfile.fullName": regex },
     ],
   };
-  if (isStaff) {
-    filter.role = { $in: staffRoles };
-  }
+  if (isStaff) filter.roleId = { $in: await roleIds(staffRoles) };
   if (req.query.status)
     filter.status = v.choice(req.query.status, "status", [
       "active",
@@ -89,35 +89,43 @@ const listing = (isStaff) => async (req, res) => {
       "deleted",
     ]);
   if (req.query.role)
-    filter.role = isStaff
-      ? v.choice(req.query.role, "role", staffRoles)
-      : v.text(req.query.role, "role", 2, 40);
-  res.json(await v.list(User, filter, req.query));
+    filter.roleId = {
+      $in: await roleIds([
+        isStaff
+          ? v.choice(req.query.role, "role", staffRoles)
+          : v.text(req.query.role, "role", 2, 40),
+      ]),
+    };
+  const result = await v.list(User, filter, req.query);
+  const keys = new Map(
+    (await Role.find().select("key").lean()).map((r) => [String(r._id), r.key]),
+  );
+  for (const u of result.data) u.role = keys.get(String(u.roleId));
+  res.json(result);
 };
 const create = (isStaff) => async (req, res) => {
   const data = editable(req.body, isStaff, true);
   const role = await roleFor(data.role || "customer");
   checkEmployment(req.body, role);
-  data.role = role.key;
-  if (isStaff) v.choice(data.role, "role", staffRoles);
+  if (isStaff) v.choice(role.key, "role", staffRoles);
   if (role.scope === "hotel") data.phone = v.phone(req.body.phone, true);
   const user = new User({
+    roleId: role._id,
     passwordHash: await hashPassword(req.body.password),
   });
   apply(user, data);
   await user.save();
-  res.status(201).json({ data: safe(user) });
+  res.status(201).json({ data: safe(user, role) });
 };
 const update = (isStaff) => async (req, res) => {
   const data = editable(req.body, isStaff, false);
   const filter = { _id: v.id(req.params.id) };
-  if (isStaff) {
-    filter.role = { $in: staffRoles };
-  }
+  if (isStaff) filter.roleId = { $in: await roleIds(staffRoles) };
   const user = await User.findOne(filter).select("+authVersion");
   if (!user) throw new v.HttpError(404, "Account not found.");
+  const currentKey = (await Role.findById(user.roleId).select("key"))?.key;
   if (
-    user.role === "admin" &&
+    currentKey === "admin" &&
     ((data.role && data.role !== "admin") ||
       (data.status && data.status !== "active"))
   )
@@ -127,20 +135,21 @@ const update = (isStaff) => async (req, res) => {
     );
   if (isStaff && data.role) v.choice(data.role, "role", staffRoles);
   const role = await roleFor(
-    data.role || user.role,
-    Boolean(data.role && data.role !== user.role),
+    data.role || currentKey,
+    Boolean(data.role && data.role !== currentKey),
   );
   checkEmployment(req.body, role);
   if (role.scope !== "hotel") user.employeeProfile = undefined;
   if (role.scope === "hotel") v.phone(data.phone ?? user.phone, true);
   if (
-    (data.role && data.role !== user.role) ||
+    (data.role && data.role !== currentKey) ||
     (data.status && data.status !== user.status)
   )
     user.authVersion = (user.authVersion || 0) + 1;
+  user.roleId = role._id;
   apply(user, data);
   await user.save();
-  res.json({ data: safe(user) });
+  res.json({ data: safe(user, role) });
 };
 async function deactivateStaff(req, res) {
   req.body = { status: "suspended" };

@@ -2,6 +2,7 @@ const mongoose = require("mongoose");
 const { seedRoles } = require("../src/services/roles");
 const { hashPassword } = require("../src/utils/password");
 const User = require("../src/models/User");
+const Role = require("../src/models/Role");
 const RoomType = require("../src/models/RoomType");
 const Booking = require("../src/models/Booking");
 const Payment = require("../src/models/Payment");
@@ -23,7 +24,7 @@ async function seedDemo() {
   for (const [username, role, fullName] of accounts)
     users[role] = await User.create({
       username,
-      role,
+      roleId: (await Role.findOne({ key: role }))._id,
       email: `${username}@demo.hotel`,
       passwordHash,
       phone: "0912345678",

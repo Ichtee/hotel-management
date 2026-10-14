@@ -4,7 +4,7 @@ const userSchema = new Schema({
   username: { type: String, required: true, unique: true, trim: true },
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
   passwordHash: { type: String, required: true, select: false },
-  role: { type: String, required: true, default: 'customer', lowercase: true, trim: true },
+  roleId: { type: Schema.Types.ObjectId, ref: 'Role', required: true, index: true },
   phone: String,
   status: { type: String, enum: ['active', 'suspended', 'deleted'], default: 'active' },
   lastLogin: Date,

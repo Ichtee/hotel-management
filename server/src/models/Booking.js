@@ -50,7 +50,19 @@ const schema = new Schema({
   },
   rooms: {
     type: [bookingRoomSchema], required: true,
-    validate: [items => items.length > 0, 'At least one room is required']
+    validate: [
+      {
+        validator: items => items.length > 0,
+        message: 'At least one room is required'
+      },
+      {
+        validator: items => {
+          const ids = items.filter(item => item.roomId).map(item => String(item.roomId));
+          return ids.length === new Set(ids).size;
+        },
+        message: 'A room cannot be assigned twice in one booking'
+      }
+    ]
   },
   services: [bookingServiceSchema],
   events: [bookingEventSchema],

@@ -8,6 +8,7 @@ function publicUser(user, role) {
   if (data.customerProfile) delete data.customerProfile.idDocumentNo;
   return {
     ...data,
+    role: role.key,
     permissions: role.permissions,
     roleName: role.name,
     scope: role.scope,
@@ -23,7 +24,7 @@ async function authenticate(req, res, next) {
     (user.authVersion || 0) !== req.session.authVersion
   )
     throw new HttpError(401, "Your session has ended. Please sign in.");
-  const role = await Role.findOne({ key: user.role, isActive: true });
+  const role = await Role.findOne({ _id: user.roleId, isActive: true });
   if (!role)
     throw new HttpError(
       401,

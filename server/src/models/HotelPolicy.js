@@ -7,12 +7,11 @@ const cancellationTierSchema = new Schema({
 }, { _id: false });
 
 const schema = new Schema({
-  hotelId: { type: Schema.Types.ObjectId, ref: 'Hotel', required: true },
   kind: { type: String, enum: ['deposit', 'cancellation'], required: true },
   name: { type: String, required: true, trim: true },
   description: String,
   deposit: {
-    type: { type: String, enum: ['percentage', 'fixed_amount'] },
+    type: { type: String, enum: ['percentage'] },
     value: { type: Number, min: 0 }
   },
   cancellationTiers: [cancellationTierSchema],
@@ -28,13 +27,13 @@ schema.pre('validate', function () {
   if (this.kind === 'deposit' && (!this.deposit?.type || this.deposit.value == null)) {
     this.invalidate('deposit', 'Deposit policy requires type and value');
   }
-  if (this.kind === 'deposit' && this.deposit?.type === 'percentage' && this.deposit.value > 100) {
-    this.invalidate('deposit.value', 'Percentage must not exceed 100');
+  if (this.kind === 'deposit' && this.deposit?.value != null && (this.deposit.value <= 0 || this.deposit.value > 100)) {
+    this.invalidate('deposit.value', 'Percentage must be greater than 0 and not exceed 100');
   }
   if (this.kind === 'cancellation' && !this.cancellationTiers?.length) {
     this.invalidate('cancellationTiers', 'Cancellation policy requires at least one tier');
   }
 });
-schema.index({ hotelId: 1, kind: 1, effectiveFrom: -1 });
+schema.index({ kind: 1, effectiveFrom: -1 });
 
 module.exports = mongoose.model('HotelPolicy', schema);

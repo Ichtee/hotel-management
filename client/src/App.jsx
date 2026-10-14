@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import Admin from './Admin.jsx';
 import Customer from './Customer.jsx';
+import { AuthProvider } from './context/Auth.jsx';
 
 export default function App() {
   const [route, setRoute] = useState(location.hash || '#/');
@@ -9,5 +10,5 @@ export default function App() {
     addEventListener('hashchange', on);
     return () => removeEventListener('hashchange', on);
   }, []);
-  return route.startsWith('#/admin') ? <Admin route={route} /> : <Customer route={route} />;
+  return <AuthProvider>{route.startsWith('#/admin') ? <Admin route={route} /> : <Customer route={route} />}</AuthProvider>;
 }

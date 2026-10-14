@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { BOOKINGS, MENU, ROOMS, TABLES } from './data.js';
+import AdminRoomMap from './pages/AdminRoomMap.jsx';
+import AdminRoomTypes from './pages/AdminRoomTypes.jsx';
 import './admin.css';
 
 const ICONS = {
@@ -325,7 +327,14 @@ function Login() {
   );
 }
 
-const PAGES = { '#/admin': Dashboard, '#/admin/bookings': Bookings, '#/admin/frontdesk': FrontDesk, '#/admin/rooms': RoomMap, '#/admin/hotel': Hotel };
+const PAGES = {
+  '#/admin': Dashboard,
+  '#/admin/bookings': Bookings,
+  '#/admin/frontdesk': FrontDesk,
+  '#/admin/rooms': AdminRoomMap,
+  '#/admin/roomtypes': AdminRoomTypes,
+  '#/admin/hotel': Hotel
+};
 
 export default function Admin({ route }) {
   const [drawer, setDrawer] = useState(false);

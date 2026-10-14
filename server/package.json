@@ -3,12 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
     "db:init": "node scripts/initDatabase.js",
-    "db:watch": "node scripts/watchDatabase.js",
-    "test": "node test/models.test.js"
+    "test": "node test/models.test.js",
+    "test:member2": "node test/member2.test.js"
   },
   "dependencies": {
+    "cors": "^2.8.6",
     "dotenv": "^16.6.1",
+    "express": "^5.3.0",
+    "hotel-booking-system": "file:..",
     "mongoose": "^8.14.1"
   }
 }

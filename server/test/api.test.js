@@ -8,6 +8,7 @@ const { seedRoles } = require("../src/services/roles");
 const { hashPassword } = require("../src/utils/password");
 const User = require("../src/models/User");
 const Role = require("../src/models/Role");
+const roleId = async (key) => (await Role.findOne({ key }))._id;
 const Coupon = require("../src/models/Coupon");
 const CouponUsage = require("../src/models/CouponUsage");
 const Booking = require("../src/models/Booking");
@@ -47,7 +48,7 @@ before(async () => {
       username,
       email: `${username}@example.com`,
       passwordHash,
-      role,
+      roleId: await roleId(role),
       phone: "0912345678",
       customerProfile: { fullName: username },
     });
@@ -127,7 +128,7 @@ test("bootstrap refuses to overwrite an existing administrator", async () => {
       }),
     /already exists/,
   );
-  assert.equal(await User.countDocuments({ role: "admin" }), 1);
+  assert.equal(await User.countDocuments({ roleId: await roleId("admin") }), 1);
 });
 test("registration validates fields, hashes credentials, ignores no privileged input, rejects duplicates", async () => {
   await send(request(app), "post", "/api/auth/register", {
@@ -244,7 +245,7 @@ test("admin manages accounts, cannot demote admin; deactivation takes effect on 
     status: "suspended",
   }).expect(200);
   await agent.get("/api/auth/me").expect(401);
-  const self = await User.findOne({ role: "admin" });
+  const self = await User.findOne({ roleId: await roleId("admin") });
   await send(admin, "patch", `/api/users/${self.id}`, {
     role: "customer",
   }).expect(409);
@@ -347,7 +348,7 @@ test("promotions validate bounds, minimum spend, expiry and usage; used coupons 
   );
   const id = res.body.data._id;
   await send(manager, "post", "/api/promotions", payload).expect(409);
-  const uid = (await User.findOne({ role: "customer" })).id;
+  const uid = (await User.findOne({ roleId: await roleId("customer") })).id;
   assert.equal(
     (
       await validateCoupon({
@@ -397,7 +398,7 @@ test("promotions validate bounds, minimum spend, expiry and usage; used coupons 
   }).expect(200);
 });
 test("revenue uses successful receipts minus completed refunds by transaction date and VN timezone; CSV matches", async () => {
-  const uid = (await User.findOne({ role: "customer" }))._id;
+  const uid = (await User.findOne({ roleId: await roleId("customer") }))._id;
   const book = await Booking.create({
     customerId: uid,
     createdBy: uid,

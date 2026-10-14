@@ -27,7 +27,7 @@ async function register(req, res) {
   const user = await User.create({
     ...data,
     passwordHash: await hashPassword(body.password),
-    role: "customer",
+    roleId: role._id,
   });
   res.status(201).json({ data: publicUser(user, role) });
 }
@@ -44,7 +44,7 @@ async function login(req, res) {
     password,
     user?.passwordHash || `scrypt:${"0".repeat(32)}:${"0".repeat(128)}`,
   );
-  const role = user && (await Role.findOne({ key: user.role, isActive: true }));
+  const role = user && (await Role.findOne({ _id: user.roleId, isActive: true }));
   if (!valid || user.status !== "active" || !role)
     throw new v.HttpError(
       401,

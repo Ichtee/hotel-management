@@ -4,6 +4,7 @@ require("dotenv").config({
 const mongoose = require("mongoose");
 const connectDatabase = require("../src/config/database");
 const User = require("../src/models/User");
+const Role = require("../src/models/Role");
 const { seedRoles } = require("../src/services/roles");
 const { hashPassword } = require("../src/utils/password");
 const v = require("../src/utils/validation");
@@ -15,15 +16,16 @@ async function bootstrap(env) {
   const fullName = v.text(env.ADMIN_NAME, "ADMIN_NAME", 2, 50);
   v.password(env.ADMIN_PASSWORD);
   await User.init();
-  if (await User.exists({ role: "admin" }))
+  await seedRoles();
+  const adminRole = await Role.findOne({ key: "admin" });
+  if (await User.exists({ roleId: adminRole._id }))
     throw new Error(
       "An administrator already exists. Use Accounts to manage users.",
     );
-  await seedRoles();
   const admin = await User.create({
     username,
     email,
-    role: "admin",
+    roleId: adminRole._id,
     status: "active",
     passwordHash: await hashPassword(env.ADMIN_PASSWORD),
     customerProfile: { fullName },

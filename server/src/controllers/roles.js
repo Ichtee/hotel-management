@@ -64,7 +64,7 @@ async function update(req, res) {
 async function remove(req, res) {
   const role = await Role.findById(v.id(req.params.id));
   if (!role) throw new v.HttpError(404, "Role not found.");
-  if (role.isSystem || (await User.exists({ role: role.key })))
+  if (role.isSystem || (await User.exists({ roleId: role._id })))
     throw new v.HttpError(
       409,
       "System roles and roles assigned to accounts cannot be deleted.",

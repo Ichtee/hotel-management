@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { useAuth } from './context/Auth.jsx';
+import { AuthShell, AuthTabs, SignIn, Register } from './AuthForms.jsx';
+import { Profile } from './AdminPages.jsx';
 import { EXTRAS, MY_BOOKINGS, OFFERS, REVIEWS, ROOM_TYPES } from './data.js';
 
 const NAV = [
@@ -20,6 +23,9 @@ const day = (offset) => new Date(Date.now() + offset * 864e5).toISOString().slic
 const Stars = ({ n }) => <span className="stars" role="img" aria-label={`${n} out of 5`}>{'★'.repeat(Math.round(n))}{'☆'.repeat(5 - Math.round(n))}</span>;
 
 function SiteHeader({ route }) {
+  const { user, signOut } = useAuth();
+  const staff = user && user.scope !== 'self';
+  const nav = NAV.map((m) => (m.label === 'My trips' ? { ...m, items: m.items.filter(([h]) => (user ? h !== '#/login' : true)).concat(user ? [['#/profile', 'My profile', user.email]] : []) } : m));
   const [open, setOpen] = useState(null);
   const [mobile, setMobile] = useState(false);
   const ref = useRef(null);
@@ -36,7 +42,7 @@ function SiteHeader({ route }) {
         <button className="menu-btn" aria-expanded={mobile} aria-controls="nav" onClick={() => setMobile(!mobile)}>{mobile ? 'Close' : 'Menu'}</button>
         <nav id="nav" className={mobile ? 'open' : ''} aria-label="Main">
           <ul>
-            {NAV.map((m, i) => m.items ? (
+            {nav.map((m, i) => m.items ? (
               <li className="dd" key={m.label}>
                 <button aria-expanded={open === i} aria-haspopup="true" onClick={() => setOpen(open === i ? null : i)}>{m.label} <span className="caret" aria-hidden="true">▾</span></button>
                 {open === i && (
@@ -48,7 +54,10 @@ function SiteHeader({ route }) {
             ) : <li key={m.label}><a className={route.split('?')[0] === m.href ? 'active' : ''} href={m.href} onClick={done}>{m.label}</a></li>)}
           </ul>
           <div className="right">
-            <a className="btn ghost-w" href="#/login" onClick={done}>Sign in</a>
+            {user ? <>
+              {staff && <a className="btn ghost-w" href="#/admin" onClick={done}>Staff portal</a>}
+              <button className="btn ghost-w" onClick={async () => { done(); await signOut(); location.hash = '#/'; }}>Sign out</button>
+            </> : <a className="btn ghost-w" href="#/login" onClick={done}>Sign in</a>}
             <a className="btn gold" href="#/rooms" onClick={done}>Book now</a>
           </div>
         </nav>
@@ -326,19 +335,19 @@ function MyBookings() {
   );
 }
 
-function Auth() {
-  const [reg, setReg] = useState(false);
+function Auth({ note }) {
+  const [mode, setMode] = useState('login');
+  const { user } = useAuth();
+  const done = () => { location.hash = sessionStorage.getItem('next') || '#/my-bookings'; sessionStorage.removeItem('next'); };
+  if (user) { if (user.scope === 'self') done(); else location.hash = '#/admin'; return null; }
   return (
-    <div className="c-wrap c-section auth-wrap">
-      <form className="panel form one" onSubmit={(e) => { e.preventDefault(); location.hash = '#/my-bookings'; }}>
-        <h1 className="title">{reg ? 'Create account' : 'Sign in'}</h1>
-        {reg && <label>Full name<input required autoComplete="name" /></label>}
-        <label>Email<input type="email" required autoComplete="email" /></label>
-        <label>Password<input type="password" required autoComplete={reg ? 'new-password' : 'current-password'} minLength={6} /></label>
-        <button className="btn primary" type="submit">{reg ? 'Register' : 'Sign in'}</button>
-        <p className="muted">{reg ? 'Have an account?' : 'New here?'} <a href="#/login" onClick={(e) => { e.preventDefault(); setReg(!reg); }}>{reg ? 'Sign in' : 'Create account'}</a></p>
-      </form>
-    </div>
+    <AuthShell>
+      <h1>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
+      <p className="muted">{mode === 'login' ? 'Sign in to manage your bookings.' : 'Book faster and keep every stay in one place.'}</p>
+      <AuthTabs mode={mode} onChange={setMode} />
+      {note && <p className="note">{note}</p>}
+      {mode === 'login' ? <SignIn onDone={done} /> : <Register onDone={done} />}
+    </AuthShell>
   );
 }
 
@@ -356,9 +365,16 @@ function SiteFooter() {
   );
 }
 
+const PROTECTED = ['#/checkout', '#/confirmation', '#/my-bookings', '#/profile'];
+
 export default function Customer({ route }) {
+  const { user, loading } = useAuth();
   const [path, q] = parse(route);
   let page;
+  if (loading) page = <p className="muted c-wrap c-section">Loading…</p>;
+  else if (PROTECTED.includes(path) && !user) { sessionStorage.setItem('next', route); page = <Auth note="Please sign in to continue." />; }
+  else if (path === '#/profile') page = <div className="c-wrap c-section"><Profile /></div>;
+  else
   if (path.startsWith('#/room/')) page = <RoomDetail id={path.split('/')[2]} q={q} />;
   else if (path === '#/rooms') page = <Rooms q={q} />;
   else if (path === '#/offers') page = <Offers />;

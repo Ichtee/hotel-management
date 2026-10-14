@@ -3,12 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "test:e2e": "npm run test:e2e --prefix client",
+    "demo": "concurrently --kill-others \"npm run dev --prefix client\" \"npm run demo --prefix server\"",
     "install:all": "npm install --prefix server && npm install --prefix client",
-    "dev": "concurrently \"npm run dev --prefix client\" \"npm run db:watch --prefix server\"",
+    "dev": "concurrently --kill-others \"npm run dev --prefix client\" \"npm run dev --prefix server\"",
     "build": "npm run build --prefix client",
     "test": "npm test --prefix server"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "prettier": "^3.9.9"
   }
 }

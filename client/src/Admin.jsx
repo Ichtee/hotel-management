@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { BOOKINGS, MENU, ROOMS, TABLES } from './data.js';
 import './admin.css';
+import { useAuth } from './context/Auth.jsx';
+import { Badge, DataTable, LineChart, PageHead, useApi } from './ui.jsx';
+import { AuthShell, SignIn } from './AuthForms.jsx';
+import { Coupons, Profile, Revenue, Roles, Users } from './AdminPages.jsx';
+import { money } from './api/client.js';
 
 const ICONS = {
   grid: 'M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z',
@@ -20,10 +25,10 @@ const Icon = ({ n, size = 18 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={ICONS[n]} /></svg>
 );
 
-const Badge = ({ v }) => <span className={`badge b-${v}`}>{String(v).replace('_', ' ')}</span>;
-const STATUS_WORDS = new Set(['confirmed', 'checked_in', 'checked_out', 'cancelled', 'pending', 'active', 'inactive', 'paid', 'done', 'in_progress', 'open', 'resolved', 'high', 'medium', 'low', 'published']);
+const allowed = (item, perms) => !item[3] || item[3].some((p) => perms.includes(p));
 
 function Sidebar({ route, open, onClose }) {
+  const { user } = useAuth();
   const link = (href, label, icon) => (
     <a key={href} href={href} className={route === href ? 'on' : ''} aria-current={route === href ? 'page' : undefined} onClick={onClose}>
       {icon && <Icon n={icon} />}<span>{label}</span>
@@ -36,7 +41,7 @@ function Sidebar({ route, open, onClose }) {
         <a className="brand" href="#/admin">Grand<span>Stay</span><small>Management</small></a>
         <div className="snav" role="navigation" aria-label="Sections">
           {link('#/admin', 'Dashboard', 'grid')}
-          {MENU.filter((m) => m.items).map((m) => (
+          {MENU.filter((m) => m.items).map((m) => ({ ...m, items: m.items.filter((i) => allowed(i, user.permissions)) })).filter((m) => m.items.length).map((m) => (
             <div className="grp" key={m.label}>
               <p>{m.label}</p>
               {m.items.map(([h, l]) => link(h, l, null))}
@@ -50,6 +55,9 @@ function Sidebar({ route, open, onClose }) {
 }
 
 function Topbar({ onMenu }) {
+  const { user, signOut } = useAuth();
+  const name = user.customerProfile?.fullName || user.username;
+  const initials = name.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
   const [menu, setMenu] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -64,39 +72,17 @@ function Topbar({ onMenu }) {
       <button className="ibtn bell" aria-label="Notifications, 3 unread"><Icon n="bell" /><i>3</i></button>
       <div className="aprofile">
         <button aria-expanded={menu} aria-haspopup="true" onClick={() => setMenu(!menu)}>
-          <span className="avatar">KL</span><span className="who"><b>Khoa Le</b><small>Receptionist</small></span>
+          <span className="avatar">{initials}</span><span className="who"><b>{name}</b><small>{user.roleName}</small></span>
         </button>
         {menu && (
           <ul className="pop">
-            <li><a href="#/admin/users" onClick={() => setMenu(false)}>My profile</a></li>
+            <li><a href="#/admin/profile" onClick={() => setMenu(false)}>My profile</a></li>
             <li><a href="#/" onClick={() => setMenu(false)}>View website</a></li>
-            <li><a href="#/admin/login" onClick={() => setMenu(false)}>Sign out</a></li>
+            <li><button onClick={async () => { setMenu(false); await signOut(); location.hash = '#/admin/login'; }}>Sign out</button></li>
           </ul>
         )}
       </div>
     </header>
-  );
-}
-
-const PageHead = ({ title, sub, action, extra }) => (
-  <div className="page-head">
-    <div><h1>{title}</h1><p>{sub}</p></div>
-    <div className="head-actions">{extra}{action && <button className="btn primary">+ {action}</button>}</div>
-  </div>
-);
-
-function DataTable({ cols, rows }) {
-  return (
-    <div className="table-wrap">
-      <table>
-        <thead><tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i}>{r.map((c, j) => <td key={j}>{STATUS_WORDS.has(c) ? <Badge v={c} /> : c}</td>)}</tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
   );
 }
 
@@ -117,57 +103,13 @@ function Sparkline({ data }) {
   return <svg className="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><polyline points={pts} fill="none" stroke="var(--series-1)" strokeWidth="2" vectorEffect="non-scaling-stroke" /></svg>;
 }
 
-function Kpi({ label, value, delta, up, data }) {
+function Kpi({ label, value, delta, up, data, cmp = 'vs last week' }) {
   return (
     <div className="kpi">
       <p>{label}</p>
       <strong>{value}</strong>
-      <small className={up ? 'up' : 'down'}>{up ? '▲' : '▼'} {delta} <span>vs last week</span></small>
+      <small className={up ? 'up' : 'down'}>{up ? '▲' : '▼'} {delta} <span>{cmp}</span></small>
       <Sparkline data={data} />
-    </div>
-  );
-}
-
-function RevenueChart() {
-  const [hover, setHover] = useState(null);
-  const W = 640, H = 240, L = 46, R = 12, T = 12, B = 28, MAX = 6000;
-  const x = (i) => L + (i / (CUR.length - 1)) * (W - L - R);
-  const y = (v) => T + (1 - v / MAX) * (H - T - B);
-  const line = (d) => d.map((v, i) => `${i ? 'L' : 'M'}${x(i)},${y(v)}`).join(' ');
-  const move = (e) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    const px = ((e.clientX - r.left) / r.width) * W;
-    setHover(Math.min(CUR.length - 1, Math.max(0, Math.round(((px - L) / (W - L - R)) * (CUR.length - 1)))));
-  };
-  return (
-    <div className="chart">
-      <div className="legend-row">
-        <span><i className="sw cur" />This period</span><span><i className="sw prev" />Previous period</span>
-      </div>
-      <div className="chart-box">
-        <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Daily revenue for the last 14 days, rising from $3,200 to $4,860 with a peak of $5,900 on 11 October" onMouseMove={move} onMouseLeave={() => setHover(null)}>
-          {[0, 2000, 4000, 6000].map((t) => (
-            <g key={t}><line x1={L} x2={W - R} y1={y(t)} y2={y(t)} className="grid" /><text x={L - 8} y={y(t) + 4} textAnchor="end" className="axis">{t ? `$${t / 1000}k` : '0'}</text></g>
-          ))}
-          {DAYS.map((d, i) => i % 3 === 0 && <text key={d} x={x(i)} y={H - 8} textAnchor="middle" className="axis">{d}</text>)}
-          <path d={`${line(CUR)} L${x(CUR.length - 1)},${y(0)} L${x(0)},${y(0)} Z`} className="area" />
-          <path d={line(PREV)} className="l-prev" />
-          <path d={line(CUR)} className="l-cur" />
-          {hover !== null && (
-            <g>
-              <line x1={x(hover)} x2={x(hover)} y1={T} y2={H - B} className="cross" />
-              <circle cx={x(hover)} cy={y(CUR[hover])} r="5" className="dot" />
-            </g>
-          )}
-        </svg>
-        {hover !== null && (
-          <div className="tip" style={{ left: `${Math.min(88, Math.max(12, (x(hover) / W) * 100))}%` }}>
-            <b>{DAYS[hover]}</b>
-            <span><i className="sw cur" />This period <b>{fmt(CUR[hover])}</b></span>
-            <span><i className="sw prev" />Previous <b>{fmt(PREV[hover])}</b></span>
-          </div>
-        )}
-      </div>
     </div>
   );
 }
@@ -175,26 +117,41 @@ function RevenueChart() {
 const TYPE_OCC = [['Deluxe Double', 86], ['Superior Twin', 72], ['Family Suite', 64], ['Presidential Suite', 40]];
 const ACTIVITY = [
   ['Tran Binh checked in', 'Room 512 · 10 min ago'], ['Payment received $75', 'BK-1042 · 32 min ago'],
-  ['Room 305 marked cleaning', 'by Mai · 1 h ago'], ['Cancellation request', 'BK-1029 · 2 h ago'], ['New review (5★)', 'Nguyen An · 3 h ago']
+  ['Room 305 marked dirty', 'by Mai · 1 h ago'], ['Cancellation request', 'BK-1029 · 2 h ago'], ['New review (5★)', 'Nguyen An · 3 h ago']
 ];
-const STATUSES = [['available', 'Available'], ['occupied', 'Occupied'], ['cleaning', 'Cleaning'], ['maintenance', 'Maintenance']];
+const STATUSES = [['available', 'Available'], ['occupied', 'Occupied'], ['dirty', 'Dirty'], ['maintenance', 'Maintenance']];
+
+const vnDay = (offset) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(Date.now() + offset * 864e5));
+const shortDate = (iso) => new Date(`${iso}T00:00:00+07:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Ho_Chi_Minh' });
 
 function Dashboard() {
+  const { user } = useAuth();
+  const name = user.customerProfile?.fullName?.split(' ').pop() || user.username;
+  const canRev = user.permissions.includes('revenue.read');
+  const rev = useApi(`/reports/revenue?from=${vnDay(-27)}&to=${vnDay(0)}&groupBy=day`, canRev);
+  const series = rev.data?.series || [];
+  const real = canRev && series.length === 28 ? { cur: series.slice(14).map((r) => r.net), prev: series.slice(0, 14).map((r) => r.net), labels: series.slice(14).map((r) => shortDate(r.date)) } : null;
+  const sample = { cur: CUR, prev: PREV, labels: DAYS };
+  const chart = real || sample;
+  const fmtMoney = real ? money : fmt;
+  const total = chart.cur.reduce((a, b) => a + b, 0);
+  const last = chart.cur[chart.cur.length - 1], before = chart.cur[chart.cur.length - 2];
+  const pct = before ? Math.round(((last - before) / before) * 100) : 0;
   const count = (s) => ROOMS.filter((r) => r.status === s).length;
   return (
     <>
-      <PageHead title="Good morning, Khoa" sub="Monday, 12 October 2026 · GrandStay Da Nang" action="New booking" extra={<button className="btn">Export report</button>} />
+      <PageHead title={`Hello, ${name}`} sub={`${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · ${user.roleName}`} action="New booking" extra={<button className="btn">Export report</button>} />
       <div className="kpis">
         <Kpi label="Occupancy" value="78%" delta="4%" up data={[70, 72, 68, 74, 75, 73, 78]} />
-        <Kpi label="Revenue today" value="$4,860" delta="12%" up data={CUR.slice(-7)} />
+        <Kpi label="Revenue today" value={fmtMoney(last)} delta={`${Math.abs(pct)}%`} up={pct >= 0} data={chart.cur.slice(-7)} cmp="vs yesterday" />
         <Kpi label="Arrivals / Departures" value="12 / 9" delta="2" up data={[8, 10, 9, 11, 12, 10, 12]} />
         <Kpi label="Cancellations" value="3" delta="1" up={false} data={[1, 2, 1, 0, 2, 4, 3]} />
       </div>
 
       <div className="dgrid">
         <section className="panel span2">
-          <div className="phead"><h2>Revenue</h2><span className="muted">Last 14 days · <b>{fmt(CUR.reduce((a, b) => a + b))}</b></span></div>
-          <RevenueChart />
+          <div className="phead"><h2>Revenue</h2><span className="muted">{real ? 'Last 14 days' : 'Sample data · last 14 days'} · <b>{fmtMoney(total)}</b></span></div>
+          {canRev && rev.loading ? <p className="muted">Loading…</p> : <LineChart labels={chart.labels} cur={chart.cur} prev={chart.prev} format={fmtMoney} summary={`Daily revenue for the last 14 days, total ${fmtMoney(total)}`} />}
         </section>
         <section className="panel">
           <div className="phead"><h2>Room status</h2><span className="muted">{ROOMS.length} rooms</span></div>
@@ -312,26 +269,33 @@ function Hotel() {
 }
 
 function Login() {
+  const { user, signOut } = useAuth();
+  if (user && user.scope !== 'self') { location.hash = '#/admin'; return null; }
   return (
-    <div className="auth">
-      <form className="panel" onSubmit={(e) => { e.preventDefault(); location.hash = '#/admin'; }}>
-        <a className="brand dark" href="#/admin">Grand<span>Stay</span></a>
-        <h1>Staff sign in</h1>
-        <label>Email<input type="email" autoComplete="email" required /></label>
-        <label>Password<input type="password" autoComplete="current-password" required /></label>
-        <button className="btn primary" type="submit">Sign in</button>
-      </form>
-    </div>
+    <AuthShell staff>
+      <h1>Staff sign in</h1>
+      <p className="muted">Use your hotel account to continue.</p>
+      {user && <p className="note bad-note">You are signed in as a customer ({user.email}). <button className="linklike" onClick={signOut}>Sign out</button> to use a staff account.</p>}
+      <SignIn onDone={() => { location.hash = '#/admin'; }} hint={<a className="more" href="#/">← Back to website</a>} />
+    </AuthShell>
   );
 }
 
-const PAGES = { '#/admin': Dashboard, '#/admin/bookings': Bookings, '#/admin/frontdesk': FrontDesk, '#/admin/rooms': RoomMap, '#/admin/hotel': Hotel };
+const PAGES = { '#/admin': Dashboard, '#/admin/users': Users, '#/admin/staff': Users, '#/admin/roles': Roles, '#/admin/coupons': Coupons, '#/admin/revenue': Revenue, '#/admin/profile': Profile, '#/admin/bookings': Bookings, '#/admin/frontdesk': FrontDesk, '#/admin/rooms': RoomMap, '#/admin/hotel': Hotel };
+
+const Forbidden = () => <><PageHead title="No access" sub="Your role does not include this area." /><a className="btn" href="#/admin">Back to dashboard</a></>;
+
+const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/roles': 'roles.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read' };
 
 export default function Admin({ route }) {
+  const { user, loading } = useAuth();
   const [drawer, setDrawer] = useState(false);
+  if (loading) return <p className="muted center-msg">Loading…</p>;
   if (route === '#/admin/login') return <Login />;
+  if (!user || user.scope === 'self') { if (location.hash !== '#/admin/login') location.hash = '#/admin/login'; return null; }
+  const denied = NEEDS[route] && !user.permissions.includes(NEEDS[route]);
   const id = route.slice(8);
-  const Page = PAGES[route] || (TABLES[id] ? () => <TablePage id={id} /> : Dashboard);
+  const Page = denied ? Forbidden : PAGES[route] || (TABLES[id] ? () => <TablePage id={id} /> : Dashboard);
   return (
     <div className="adm">
       <a className="skip" href="#main">Skip to content</a>

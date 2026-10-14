@@ -1,8 +1,9 @@
 const mongoose = require('mongoose');
 const { Schema } = mongoose;
 const schema = new Schema({
-  hotelId: { type: Schema.Types.ObjectId, ref: 'Hotel', required: true }, roomTypeId: { type: Schema.Types.ObjectId, ref: 'RoomType', required: true },
-  roomNumber: { type: String, required: true, trim: true }, floor: Number, viewType: String, status: { type: String, enum: ['available', 'occupied', 'maintenance', 'cleaning'], default: 'available' }
+  roomTypeId: { type: Schema.Types.ObjectId, ref: 'RoomType', required: true, index: true },
+  roomNumber: { type: String, required: true, trim: true, unique: true }, floor: Number, viewType: String, description: String, images: [String],
+  isActive: { type: Boolean, default: true }, // UC25: rooms are deactivated, not deleted
+  status: { type: String, enum: ['available', 'occupied', 'maintenance', 'dirty'], default: 'available' }
 }, { timestamps: true });
-schema.index({ hotelId: 1, roomNumber: 1 }, { unique: true });
 module.exports = mongoose.model('Room', schema);

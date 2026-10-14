@@ -4,8 +4,8 @@ export const MENU = [
   { label: 'Front desk', items: [['#/admin/bookings', 'Bookings', 'All reservations'], ['#/admin/frontdesk', 'Check-in / Check-out', 'Today’s arrivals & departures']] },
   { label: 'Rooms', items: [['#/admin/rooms', 'Room map', 'Live room status'], ['#/admin/roomtypes', 'Room types', 'Pricing & amenities'], ['#/admin/services', 'Services', 'Extras & add-ons']] },
   { label: 'Housekeeping', items: [['#/admin/cleaning', 'Cleaning tasks', 'Assigned to staff'], ['#/admin/issues', 'Room issues', 'Maintenance reports']] },
-  { label: 'Billing', items: [['#/admin/invoices', 'Invoices', ''], ['#/admin/payments', 'Payments', ''], ['#/admin/refunds', 'Refunds', ''], ['#/admin/coupons', 'Coupons', '']] },
-  { label: 'Guests & staff', items: [['#/admin/users', 'Users', ''], ['#/admin/roles', 'Roles', ''], ['#/admin/reviews', 'Reviews', '']] },
+  { label: 'Billing', items: [['#/admin/invoices', 'Invoices', ''], ['#/admin/payments', 'Payments', ''], ['#/admin/refunds', 'Refunds', ''], ['#/admin/revenue', 'Revenue', '', ['revenue.read']], ['#/admin/coupons', 'Coupons', '', ['promotions.manage']]] },
+  { label: 'Guests & staff', items: [['#/admin/users', 'Users', '', ['users.manage']], ['#/admin/staff', 'Staff', '', ['staff.manage']], ['#/admin/roles', 'Roles', '', ['roles.manage']], ['#/admin/reviews', 'Reviews', '']] },
   { label: 'Settings', items: [['#/admin/hotel', 'Hotel & policies', '']] }
 ];
 
@@ -26,7 +26,7 @@ export const BOOKINGS = [
 
 export const ROOMS = Array.from({ length: 24 }, (_, i) => {
   const floor = 2 + Math.floor(i / 6);
-  const status = ['available', 'occupied', 'occupied', 'cleaning', 'available', 'maintenance'][(i * 5 + 1) % 6];
+  const status = ['available', 'occupied', 'occupied', 'dirty', 'available', 'maintenance'][(i * 5 + 1) % 6];
   return { no: `${floor}${String((i % 6) + 1).padStart(2, '0')}`, status };
 });
 
@@ -65,21 +65,6 @@ export const TABLES = {
     title: 'Refunds', sub: 'Cancellation refunds', action: 'New refund',
     cols: ['Refund', 'Booking', 'Reason', 'Amount', 'Status'],
     rows: [['RF-31', 'BK-1029', 'Guest cancelled', '$70', 'pending'], ['RF-30', 'BK-1012', 'Overbooked', '$120', 'paid']]
-  },
-  coupons: {
-    title: 'Coupons', sub: 'Promotions and discount codes', action: 'Create coupon',
-    cols: ['Code', 'Discount', 'Valid until', 'Used', 'Status'],
-    rows: [['WELCOME10', '10%', '31 Dec 2026', '42 / 200', 'active'], ['SUMMER25', '$25', '31 Aug 2026', '100 / 100', 'inactive']]
-  },
-  users: {
-    title: 'Users', sub: 'Guests and staff accounts', action: 'Add user',
-    cols: ['Name', 'Email', 'Role', 'Status'],
-    rows: [['Nguyen An', 'an@mail.com', 'Guest', 'active'], ['Mai Tran', 'mai@grandstay.com', 'Housekeeping', 'active'], ['Khoa Le', 'khoa@grandstay.com', 'Receptionist', 'active'], ['Admin', 'admin@grandstay.com', 'Admin', 'active']]
-  },
-  roles: {
-    title: 'Roles', sub: 'Access levels', action: 'Add role',
-    cols: ['Role', 'Members', 'Access'],
-    rows: [['Admin', 1, 'Everything'], ['Manager', 2, 'Reports, pricing, staff'], ['Receptionist', 4, 'Bookings, check-in/out, billing'], ['Housekeeping', 6, 'Cleaning tasks, room issues'], ['Guest', 128, 'Own bookings and reviews']]
   },
   reviews: {
     title: 'Reviews', sub: 'Guest feedback', action: '',

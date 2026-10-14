@@ -33,7 +33,6 @@ const bookingEventSchema = new Schema({
 const schema = new Schema({
   bookingReference: { type: String, unique: true, sparse: true, uppercase: true, trim: true },
   customerId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  hotelId: { type: Schema.Types.ObjectId, ref: 'Hotel', required: true },
   createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   checkInDate: { type: Date, required: true },
   checkOutDate: { type: Date, required: true },
@@ -41,11 +40,12 @@ const schema = new Schema({
   actualCheckOutAt: Date,
   checkedInBy: { type: Schema.Types.ObjectId, ref: 'User' },
   checkedOutBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  holdExpiresAt: Date, // BR-29: pending online bookings hold the room for 15 minutes
   cancelledAt: Date,
   cancellationReason: String,
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled'],
+    enum: ['pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 'expired'],
     default: 'pending', index: true
   },
   rooms: {
@@ -66,7 +66,7 @@ const schema = new Schema({
   policySnapshot: {
     depositPolicyId: { type: Schema.Types.ObjectId, ref: 'HotelPolicy' },
     cancellationPolicyId: { type: Schema.Types.ObjectId, ref: 'HotelPolicy' },
-    depositType: { type: String, enum: ['percentage', 'fixed_amount'] },
+    depositType: { type: String, enum: ['percentage'] },
     depositValue: { type: Number, min: 0 },
     cancellationTiers: [{
       minHoursBeforeCheckIn: { type: Number, min: 0 },
@@ -81,7 +81,8 @@ const schema = new Schema({
 schema.path('checkOutDate').validate(function (value) {
   return !this.checkInDate || value > this.checkInDate;
 }, 'checkOutDate must be after checkInDate');
-schema.index({ hotelId: 1, status: 1, checkInDate: 1, checkOutDate: 1 });
+schema.index({ status: 1, checkInDate: 1, checkOutDate: 1 });
+schema.index({ status: 1, holdExpiresAt: 1 });
 schema.index({ 'rooms.roomId': 1, status: 1, checkInDate: 1, checkOutDate: 1 });
 schema.index({ customerId: 1, createdAt: -1 });
 

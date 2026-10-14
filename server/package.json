@@ -3,12 +3,25 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "setup": "node scripts/setup.js",
+    "demo": "node scripts/demo.js",
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
     "db:init": "node scripts/initDatabase.js",
     "db:watch": "node scripts/watchDatabase.js",
-    "test": "node test/models.test.js"
+    "test": "node test/models.test.js && node --test test/api.test.js"
   },
   "dependencies": {
+    "connect-mongo": "^6.0.0",
     "dotenv": "^16.6.1",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.1",
+    "express-session": "^1.19.0",
+    "helmet": "^8.3.0",
     "mongoose": "^8.14.1"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^11.3.0",
+    "supertest": "^7.3.1"
   }
 }

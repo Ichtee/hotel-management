@@ -59,10 +59,10 @@ th, td { text-align: left; padding: .8rem 1rem; border-bottom: 1px solid var(--l
 th { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: #fafbfc; }
 tr:last-child td { border-bottom: 0; } tbody tr:hover { background: #fafbfc; }
 .badge { padding: .15rem .65rem; border-radius: 99px; font-size: .78rem; font-weight: 600; text-transform: capitalize; background: var(--grey-bg); }
-.b-confirmed, .b-active, .b-paid, .b-done, .b-resolved, .b-published, .b-low { background: var(--green-bg); color: var(--green); }
+.b-confirmed, .b-active, .b-paid, .b-success, .b-completed, .b-done, .b-resolved, .b-published, .b-low { background: var(--green-bg); color: var(--green); }
 .b-checked_in, .b-in_progress, .b-medium { background: var(--blue-bg); color: var(--blue); }
-.b-pending, .b-open { background: var(--amber-bg); color: var(--amber); }
-.b-cancelled, .b-inactive, .b-high { background: var(--red-bg); color: var(--red); }
+.b-pending, .b-open, .b-partial { background: var(--amber-bg); color: var(--amber); }
+.b-cancelled, .b-failed, .b-expired, .b-inactive, .b-high { background: var(--red-bg); color: var(--red); }
 .chips { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: 1rem; }
 .chip { min-height: 44px; padding: 0 1rem; border-radius: 99px; border: 1px solid var(--line); background: #fff; text-transform: capitalize; }
 .chip.on { background: var(--navy); color: #fff; border-color: var(--navy); }

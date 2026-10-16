@@ -280,7 +280,7 @@ test("role administration validates privilege scope, protects admin and applies 
     .get("/api/reports/revenue?from=2026-01-01&to=2026-01-31")
     .expect(403);
   await send(admin, "patch", `/api/roles/${managerRole.id}`, {
-    permissions: ["staff.manage", "promotions.manage", "revenue.read"],
+    permissions: ["staff.manage", "promotions.manage", "revenue.read", "policies.manage"],
   }).expect(200);
   await send(admin, "delete", `/api/roles/${managerRole.id}`).expect(409);
   const custom = await Role.findOne({ key: "auditor" });
@@ -469,4 +469,90 @@ test("revenue uses successful receipts minus completed refunds by transaction da
     .get("/api/reports/revenue?from=2026-03-01&to=2026-01-01")
     .expect(400);
   await customer.get("/api/reports/revenue").expect(403);
+});
+
+test("notification service stores in-app notifications, emails on events and survives mail failure", async () => {
+  const { notify, notifyRole, setTransport } = require("../src/services/notifications");
+  const Notification = require("../src/models/Notification");
+  const guest = await User.findOne({ email: "customer@example.com" });
+  const sent = [];
+  setTransport({ sendMail: async (m) => sent.push(m) });
+  await notify("booking_confirmed", guest._id, { reference: "BK-1" });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, "customer@example.com");
+  assert.match(sent[0].text, /BK-1/);
+  setTransport({ sendMail: async () => { throw new Error("smtp down"); } });
+  const kept = await notify("payment_result", guest._id, { reference: "BK-1", amount: 500000, success: false });
+  assert.equal(kept.title, "Payment failed");
+  await assert.rejects(() => notify("nope", guest._id), /Unknown notification event/);
+  setTransport(null);
+  assert.equal((await notifyRole("room_issue", "manager", { roomNumber: "101", description: "Leak" })).length, 1);
+
+  const list = await customer.get("/api/notifications").expect(200);
+  assert.equal(list.body.data.length, 2);
+  assert.equal(list.body.meta.unread, 2);
+  const id = list.body.data[0]._id;
+  await send(manager, "patch", `/api/notifications/${id}/read`).expect(404);
+  await send(customer, "patch", `/api/notifications/${id}/read`).expect(200);
+  assert.equal((await customer.get("/api/notifications?unread=true").expect(200)).body.data.length, 1);
+  const managerList = await manager.get("/api/notifications").expect(200);
+  assert.equal(managerList.body.data[0].type, "room_issue");
+  await request(app).get("/api/notifications").expect(401);
+});
+test("booking history and details expose only the customer's own bookings with payment and refund status", async () => {
+  const RoomType = require("../src/models/RoomType");
+  const guest = await User.findOne({ email: "customer@example.com" });
+  const other = await User.findOne({ email: "manager@example.com" });
+  const type = await RoomType.create({ name: "History Suite", basePrice: 1000, maxOccupancy: 2 });
+  const base = (customerId, extra = {}) => ({
+    customerId, createdBy: customerId, checkInDate: "2027-03-01", checkOutDate: "2027-03-03",
+    rooms: [{ roomTypeId: type._id, priceAtBooking: 1000 }], roomAmount: 2000, totalAmount: 2000,
+    events: [{ actorId: customerId, type: "created" }], ...extra,
+  });
+  const mineBooking = await Booking.create(base(guest._id, { status: "confirmed" }));
+  const cancelled = await Booking.create(base(guest._id, { status: "cancelled" }));
+  const foreign = await Booking.create(base(other._id));
+  const deposit = await Payment.create({ bookingId: mineBooking.id, kind: "deposit", amount: 600, method: "e_wallet", status: "success" });
+  await Payment.create({ bookingId: mineBooking.id, kind: "final", amount: 1400, method: "cash", status: "failed" });
+  await Refund.create({ bookingId: cancelled.id, paymentId: deposit.id, amount: 300, status: "completed" });
+
+  const list = await customer.get("/api/bookings").expect(200);
+  const ids = list.body.data.map((b) => b._id);
+  assert.ok(ids.includes(mineBooking.id) && ids.includes(cancelled.id));
+  assert.ok(!ids.includes(foreign.id));
+  const row = list.body.data.find((b) => b._id === mineBooking.id);
+  assert.equal(row.paymentStatus, "partial");
+  assert.equal(row.paidAmount, 600);
+  assert.equal(row.rooms[0].roomTypeId.name, "History Suite");
+  assert.equal(row.events, undefined);
+  assert.equal((await customer.get("/api/bookings?status=cancelled").expect(200)).body.data.length, 1);
+  await customer.get("/api/bookings?status=bogus").expect(400);
+
+  const detail = await customer.get(`/api/bookings/${mineBooking.id}`).expect(200);
+  assert.equal(detail.body.data.payments.length, 2);
+  assert.equal(detail.body.data.events, undefined);
+  assert.equal(detail.body.data.createdBy, undefined);
+  const withRefund = await customer.get(`/api/bookings/${cancelled.id}`).expect(200);
+  assert.equal(withRefund.body.data.refunds[0].status, "completed");
+  await customer.get(`/api/bookings/${foreign.id}`).expect(404);
+  await customer.get("/api/bookings/not-an-id").expect(400);
+  await request(app).get("/api/bookings").expect(401);
+});
+test("deposit policy: manager versions a percentage rule, old versions are retired, others are refused", async () => {
+  const { currentDepositPolicy } = require("../src/services/policies");
+  await manager.get("/api/policies/deposit").expect(200).then((r) => assert.equal(r.body.meta.current, null));
+  await customer.get("/api/policies/deposit").expect(403);
+  await staff.get("/api/policies/deposit").expect(403);
+  for (const percentage of [0, 101, 12.5, "30"])
+    await send(manager, "post", "/api/policies/deposit", { percentage }).expect(400);
+  await send(manager, "post", "/api/policies/deposit", { percentage: 30, kind: "cancellation" }).expect(400);
+  const first = await send(manager, "post", "/api/policies/deposit", { percentage: 30 }).expect(201);
+  assert.equal(first.body.data.deposit.value, 30);
+  assert.equal(first.body.data.name, "Deposit 30%");
+  const second = await send(manager, "post", "/api/policies/deposit", { percentage: 50, name: "Peak season" }).expect(201);
+  const list = await manager.get("/api/policies/deposit").expect(200);
+  assert.equal(list.body.data.length, 2);
+  assert.equal(list.body.meta.current._id, second.body.data._id);
+  assert.equal((await currentDepositPolicy(new Date(Date.now() - 86400000))), null);
+  assert.equal(list.body.data.filter((p) => p.isActive).length, 1);
 });

@@ -8,6 +8,9 @@ const auth = require("./controllers/auth");
 const accounts = require("./controllers/accounts");
 const roles = require("./controllers/roles");
 const promotions = require("./controllers/promotions");
+const notifications = require("./controllers/notifications");
+const bookings = require("./controllers/bookings");
+const policies = require("./controllers/policies");
 const { revenue } = require("./controllers/revenue");
 const { HttpError } = require("./utils/validation");
 function createApp({
@@ -101,6 +104,13 @@ function createApp({
   app.post("/api/promotions", promotions.create);
   app.patch("/api/promotions/:id", promotions.update);
   app.delete("/api/promotions/:id", promotions.remove);
+  app.get("/api/notifications", notifications.listing);
+  app.patch("/api/notifications/:id/read", notifications.markRead);
+  app.get("/api/bookings", bookings.listing);
+  app.get("/api/bookings/:id", bookings.detail);
+  app.use("/api/policies/deposit", permit("policies.manage"));
+  app.get("/api/policies/deposit", policies.listing);
+  app.post("/api/policies/deposit", policies.create);
   app.get("/api/reports/revenue", permit("revenue.read"), revenue);
   app.use((req, res) =>
     res.status(404).json({ error: { message: "Endpoint not found." } }),

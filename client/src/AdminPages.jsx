@@ -5,6 +5,31 @@ import { DataTable, Field, LineChart, Modal, Notice, PageHead, useApi } from './
 
 const qs = (o) => new URLSearchParams(Object.fromEntries(Object.entries(o).filter(([, v]) => v !== '' && v != null))).toString();
 const day = (offset) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(Date.now() + offset * 864e5));
+export function DepositPolicy() {
+  const s = useApi('/policies/deposit');
+  const [err, setErr] = useState(null);
+  const [ok, setOk] = useState(null);
+  const submit = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    try {
+      await api('/policies/deposit', { method: 'POST', body: { percentage: +f.percentage } });
+      setErr(null); setOk('Saved. The new deposit applies to new online reservations only.'); s.reload();
+    } catch (x) { setErr(x); setOk(null); }
+  };
+  const current = s.meta?.current;
+  return (
+    <>
+      <PageHead title="Deposit policy" sub="Share of the booking total paid online to confirm a reservation" />
+      <form className="panel form" onSubmit={submit}>
+        <Field label="Deposit (%)" error={err?.fields?.percentage}><input key={current?._id} name="percentage" type="number" min="1" max="100" step="1" defaultValue={current?.deposit.value} required /></Field>
+        <button className="btn primary" type="submit">Save policy</button>
+        <div className="full"><Notice error={err && !err.fields ? err : null} ok={ok} /></div>
+      </form>
+      {s.loading || s.error ? <Loading s={s} /> : <DataTable cols={['Policy', 'Deposit', 'From', 'To', 'Status']} rows={s.data.map((p) => [p.name, `${p.deposit.value}%`, dateLabel(p.effectiveFrom), p.effectiveTo ? dateLabel(p.effectiveTo) : '—', p.isActive ? 'active' : 'inactive'])} />}
+    </>
+  );
+}
 const Loading = ({ s }) => s.loading ? <p className="muted">Loading…</p> : s.error ? <Notice error={s.error} /> : null;
 
 function Filters({ onApply, statuses, extra }) {

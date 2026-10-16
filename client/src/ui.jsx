@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api/client.js';
 
-export const Badge = ({ v }) => <span className={`badge b-${v}`}>{String(v).replace('_', ' ')}</span>;
+export const Badge = ({ v, pre }) => <span className={`badge b-${v}`}>{pre}{String(v).replace('_', ' ')}</span>;
 
 export const PageHead = ({ title, sub, action, onAction, extra }) => (
   <div className="page-head">

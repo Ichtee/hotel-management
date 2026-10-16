@@ -8,6 +8,7 @@ const Booking = require("../src/models/Booking");
 const Payment = require("../src/models/Payment");
 const Refund = require("../src/models/Refund");
 const Coupon = require("../src/models/Coupon");
+const HotelPolicy = require("../src/models/HotelPolicy");
 async function seedDemo() {
   if (mongoose.connection.name !== "hotel_member1_demo")
     throw new Error("Demo seed is restricted to hotel_member1_demo.");
@@ -85,6 +86,31 @@ async function seedDemo() {
         reason: "Demo adjustment",
       });
   }
+  // Customer-facing M3 samples: upcoming, awaiting deposit and cancelled-with-refund bookings.
+  const day = 86400000;
+  const sample = (offset, nights, amount, status, extra = {}) =>
+    Booking.create({
+      customerId: users.customer.id,
+      createdBy: users.customer.id,
+      checkInDate: new Date(+now + offset * day),
+      checkOutDate: new Date(+now + (offset + nights) * day),
+      rooms: [{ roomTypeId: roomType.id, priceAtBooking: amount / nights }],
+      roomAmount: amount,
+      totalAmount: amount,
+      depositRequired: Math.round(amount * 0.3),
+      status,
+      ...extra,
+    });
+  const upcoming = await sample(14, 2, 4800000, "confirmed", { bookingReference: "BK2610A1" });
+  const awaiting = await sample(30, 3, 7200000, "pending", { bookingReference: "BK2610B2", holdExpiresAt: new Date(+now + 15 * 60000) });
+  const cancelled = await sample(7, 2, 3000000, "cancelled", { bookingReference: "BK2610C3", cancelledAt: now });
+  await Payment.create([
+    { bookingId: upcoming.id, kind: "deposit", amount: 1440000, method: "e_wallet", status: "success", paidAt: now },
+    { bookingId: awaiting.id, kind: "deposit", amount: 2160000, method: "e_wallet", status: "pending" },
+  ]);
+  const failedDeposit = await Payment.create({ bookingId: cancelled.id, kind: "deposit", amount: 900000, method: "e_wallet", status: "failed" });
+  await Refund.create({ bookingId: cancelled.id, paymentId: failedDeposit.id, amount: 450000, status: "processing", reason: "Cancelled by customer" });
+  await HotelPolicy.create({ kind: "deposit", name: "Deposit 30%", deposit: { type: "percentage", value: 30 }, effectiveFrom: new Date(+now - 30 * day) });
   const startDate = new Date(+monthStart - 86400000);
   const endDate = new Date(+monthStart + 90 * 86400000);
   await Coupon.create([

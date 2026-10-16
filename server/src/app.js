@@ -8,7 +8,6 @@ const auth = require("./controllers/auth");
 const accounts = require("./controllers/accounts");
 const roles = require("./controllers/roles");
 const promotions = require("./controllers/promotions");
-const notifications = require("./controllers/notifications");
 const bookings = require("./controllers/bookings");
 const policies = require("./controllers/policies");
 const { revenue } = require("./controllers/revenue");
@@ -104,8 +103,6 @@ function createApp({
   app.post("/api/promotions", promotions.create);
   app.patch("/api/promotions/:id", promotions.update);
   app.delete("/api/promotions/:id", promotions.remove);
-  app.get("/api/notifications", notifications.listing);
-  app.patch("/api/notifications/:id/read", notifications.markRead);
   app.get("/api/bookings", bookings.listing);
   app.get("/api/bookings/:id", bookings.detail);
   app.use("/api/policies/deposit", permit("policies.manage"));

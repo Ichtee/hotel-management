@@ -488,16 +488,10 @@ test("notification service stores in-app notifications, emails on events and sur
   setTransport(null);
   assert.equal((await notifyRole("room_issue", "manager", { roomNumber: "101", description: "Leak" })).length, 1);
 
-  const list = await customer.get("/api/notifications").expect(200);
-  assert.equal(list.body.data.length, 2);
-  assert.equal(list.body.meta.unread, 2);
-  const id = list.body.data[0]._id;
-  await send(manager, "patch", `/api/notifications/${id}/read`).expect(404);
-  await send(customer, "patch", `/api/notifications/${id}/read`).expect(200);
-  assert.equal((await customer.get("/api/notifications?unread=true").expect(200)).body.data.length, 1);
-  const managerList = await manager.get("/api/notifications").expect(200);
-  assert.equal(managerList.body.data[0].type, "room_issue");
-  await request(app).get("/api/notifications").expect(401);
+  assert.equal(await Notification.countDocuments({ accountId: guest._id }), 2);
+  const alert = await Notification.findOne({ type: "room_issue" });
+  assert.equal(alert.isRead, false);
+  assert.equal(String(alert.accountId), String((await User.findOne({ email: "manager@example.com" }))._id));
 });
 test("booking history and details expose only the customer's own bookings with payment and refund status", async () => {
   const RoomType = require("../src/models/RoomType");

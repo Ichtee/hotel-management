@@ -3,13 +3,13 @@ import { useAuth } from './context/Auth.jsx';
 import { AuthShell, AuthTabs, SignIn, Register } from './AuthForms.jsx';
 import { Profile } from './AdminPages.jsx';
 import { EXTRAS, OFFERS, REVIEWS, ROOM_TYPES } from './data.js';
-import { MyBookings, Notifications } from './Bookings.jsx';
+import { MyBookings } from './Bookings.jsx';
 
 const NAV = [
   { label: 'Home', href: '#/' },
   { label: 'Rooms', items: [['#/rooms', 'All rooms', 'Compare every room type'], ['#/rooms?cat=standard', 'Standard rooms', 'Deluxe & Superior'], ['#/rooms?cat=suite', 'Suites', 'Family & Presidential']] },
   { label: 'Offers', href: '#/offers' },
-  { label: 'My trips', items: [['#/my-bookings', 'My bookings', 'Upcoming & past stays'], ['#/notifications', 'Notifications', 'Booking & payment updates'], ['#/login', 'Sign in / Register', '']] },
+  { label: 'My trips', items: [['#/my-bookings', 'My bookings', 'Upcoming & past stays'], ['#/login', 'Sign in / Register', '']] },
   { label: 'Help', items: [['#/offers', 'Cancellation policy', 'Free cancel up to 48h'], ['#/', 'Contact us', 'hello@grandstay.example']] }
 ];
 
@@ -336,7 +336,7 @@ function SiteFooter() {
   );
 }
 
-const PROTECTED = ['#/checkout', '#/confirmation', '#/my-bookings', '#/notifications', '#/profile'];
+const PROTECTED = ['#/checkout', '#/confirmation', '#/my-bookings', '#/profile'];
 
 export default function Customer({ route }) {
   const { user, loading } = useAuth();
@@ -352,7 +352,6 @@ export default function Customer({ route }) {
   else if (path === '#/checkout') page = <Checkout q={q} />;
   else if (path === '#/confirmation') page = <Confirmation />;
   else if (path === '#/my-bookings') page = <MyBookings />;
-  else if (path === '#/notifications') page = <Notifications />;
   else if (path === '#/login') page = <Auth />;
   else page = <Home />;
   return (

@@ -4,6 +4,28 @@ All endpoints are rooted at `/api/front-desk` and require an authenticated
 staff user. Until the authentication module is connected, pass the staff user
 ID through `x-user-id`; production authentication should set `req.user`.
 
+## Manage customer information
+
+These endpoints support UC24, allowing reception staff to find a customer and
+maintain only their operational contact/profile details. They cannot change a
+customer's login credentials, role, account status, or loyalty points.
+
+| Method and endpoint | Purpose |
+| --- | --- |
+| `GET /customers?search=&status=&page=1&limit=20` | List customers; search name, username, email, or phone. Deleted accounts are excluded unless `status=deleted`. |
+| `GET /customers/:customerId` | View one customer's profile, including their ID document number. |
+| `PATCH /customers/:customerId` | Update one or more of `fullName`, `phone`, `address`, `dateOfBirth`, or `idDocumentNo`. |
+
+Example update body:
+
+```json
+{
+  "fullName": "Nguyen An",
+  "phone": "0900000000",
+  "address": "Hai Chau, Da Nang"
+}
+```
+
 | Screen | Method and endpoint | Required body fields |
 | --- | --- | --- |
 | Create booking | `POST /bookings` | `hotelId`, `customerId`, `checkInDate`, `checkOutDate`, `rooms: [{ roomId, guestCount }]` |

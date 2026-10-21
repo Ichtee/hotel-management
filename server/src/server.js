@@ -2,6 +2,7 @@ require('dotenv').config();
 const mongoose = require('mongoose');
 const app = require('./app');
 const connectDatabase = require('./config/database');
+const seedDefaultsIfNeeded = require('./utils/seedDefaults');
 
 const PORT = process.env.PORT || 5000;
 
@@ -9,6 +10,7 @@ async function bootstrap() {
   try {
     const connection = await connectDatabase();
     console.log(`[Database] Connected to MongoDB: ${connection.name}`);
+    await seedDefaultsIfNeeded();
   } catch (error) {
     console.warn(`[Database Warning] Could not connect to MongoDB: ${error.message}`);
     console.warn('[Database Warning] API server will still start, but database operations may fail until MongoDB is started.');

@@ -16,14 +16,18 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Member 2 Routes
+// Routes
 const roomTypeRoutes = require('./routes/roomTypeRoutes');
 const roomRoutes = require('./routes/roomRoutes');
 const housekeepingRoutes = require('./routes/housekeepingRoutes');
+const bookingRoutes = require('./routes/bookingRoutes');
+const authRoutes = require('./routes/authRoutes');
 
 app.use('/api/room-types', roomTypeRoutes);
 app.use('/api/rooms', roomRoutes);
 app.use('/api/housekeeping', housekeepingRoutes);
+app.use('/api/bookings', bookingRoutes);
+app.use('/api/auth', authRoutes);
 
 // Global 404 handler
 app.use((req, res) => {

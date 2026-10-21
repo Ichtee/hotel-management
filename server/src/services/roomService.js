@@ -139,28 +139,48 @@ class RoomService {
   }
 
   /**
-   * Search available rooms / room types (UC05 - Search Room)
-   * Core availability algorithm:
-   * 1. Finds all rooms not under maintenance.
-   * 2. Finds overlapping bookings (checkIn < requestedCheckOut && checkOut > requestedCheckIn).
+   * Search available rooms / room types (UC05 / UC06 - Search & Check Room Availability)
+   * Core availability algorithm (T06):
+   * 1. Finds all rooms not under maintenance and active.
+   * 2. Finds overlapping bookings (checkIn < requestedCheckOut && checkOut > requestedCheckIn)
+   *    with status in ['pending', 'confirmed', 'checked_in'].
    * 3. Filters out rooms currently booked or in maintenance.
    */
   async searchAvailableRooms({ hotelId, checkInDate, checkOutDate, guests = 1, minPrice, maxPrice }) {
-    const query = { status: { $ne: 'maintenance' } };
-    if (hotelId) query.hotelId = hotelId;
+    let inDate = null;
+    let outDate = null;
 
-    let availableRooms = await Room.find(query).populate('roomTypeId');
+    // Validate dates first if provided
+    if (checkInDate || checkOutDate) {
+      if (!checkInDate || !checkOutDate) {
+        const error = new Error('Both checkInDate and checkOutDate must be provided together');
+        error.status = 400;
+        throw error;
+      }
 
-    // If dates are provided, filter out booked rooms
-    if (checkInDate && checkOutDate) {
-      const inDate = new Date(checkInDate);
-      const outDate = new Date(checkOutDate);
+      inDate = new Date(checkInDate);
+      outDate = new Date(checkOutDate);
+
+      if (isNaN(inDate.getTime()) || isNaN(outDate.getTime())) {
+        const error = new Error('Invalid checkInDate or checkOutDate format');
+        error.status = 400;
+        throw error;
+      }
 
       if (outDate <= inDate) {
         const error = new Error('checkOutDate must be after checkInDate');
         error.status = 400;
         throw error;
       }
+    }
+
+    const query = { status: { $ne: 'maintenance' }, isActive: { $ne: false } };
+    if (hotelId) query.hotelId = hotelId;
+
+    let availableRooms = await Room.find(query).populate('roomTypeId');
+
+    // If dates are provided, filter out booked rooms
+    if (inDate && outDate) {
 
       // Find conflicting bookings
       const conflictingBookings = await Booking.find({
@@ -183,7 +203,7 @@ class RoomService {
     // Filter by guests capacity and price if requested
     const filtered = availableRooms.filter(r => {
       const rt = r.roomTypeId;
-      if (!rt || !rt.isActive) return false;
+      if (!rt || rt.isActive === false) return false;
       if (guests && rt.maxOccupancy && rt.maxOccupancy < Number(guests)) return false;
       if (minPrice && rt.basePrice < Number(minPrice)) return false;
       if (maxPrice && rt.basePrice > Number(maxPrice)) return false;
@@ -191,6 +211,75 @@ class RoomService {
     });
 
     return filtered;
+  }
+
+  /**
+   * Validate if a specific physical room is available for the given date range (T06)
+   */
+  async isRoomAvailable(roomId, checkInDate, checkOutDate, excludeBookingId = null) {
+    const room = await Room.findById(roomId);
+    if (!room || room.isActive === false || room.status === 'maintenance') {
+      return false;
+    }
+
+    const inDate = new Date(checkInDate);
+    const outDate = new Date(checkOutDate);
+
+    const query = {
+      status: { $in: ['pending', 'confirmed', 'checked_in'] },
+      'rooms.roomId': room._id,
+      checkInDate: { $lt: outDate },
+      checkOutDate: { $gt: inDate }
+    };
+
+    if (excludeBookingId) {
+      query._id = { $ne: excludeBookingId };
+    }
+
+    const conflict = await Booking.findOne(query);
+    return !conflict;
+  }
+
+  /**
+   * Find an available physical room for a given roomTypeId during the target date range
+   */
+  async findAvailableRoomForType({ hotelId, roomTypeId, checkInDate, checkOutDate, excludeBookingId = null }) {
+    const inDate = new Date(checkInDate);
+    const outDate = new Date(checkOutDate);
+
+    const roomQuery = {
+      roomTypeId,
+      status: { $ne: 'maintenance' },
+      isActive: { $ne: false }
+    };
+    if (hotelId) roomQuery.hotelId = hotelId;
+
+    const candidateRooms = await Room.find(roomQuery);
+    if (!candidateRooms.length) return null;
+
+    const candidateIds = candidateRooms.map(r => r._id);
+
+    // Find conflicting bookings for these candidate rooms
+    const bookingQuery = {
+      status: { $in: ['pending', 'confirmed', 'checked_in'] },
+      'rooms.roomId': { $in: candidateIds },
+      checkInDate: { $lt: outDate },
+      checkOutDate: { $gt: inDate }
+    };
+    if (excludeBookingId) {
+      bookingQuery._id = { $ne: excludeBookingId };
+    }
+
+    const conflictingBookings = await Booking.find(bookingQuery).select('rooms.roomId');
+    const bookedIds = new Set();
+    for (const b of conflictingBookings) {
+      for (const item of b.rooms) {
+        if (item.roomId) bookedIds.add(String(item.roomId));
+      }
+    }
+
+    // Pick first available room
+    return candidateRooms.find(r => !bookedIds.has(String(r._id))) || null;
   }
 }
 

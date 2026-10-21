@@ -4,6 +4,8 @@ node_modules/
 # Build and test output
 dist/
 coverage/
+test-results/
+playwright-report/
 
 # Local environment files (keep examples)
 .env
@@ -28,3 +30,6 @@ data/
 .playwright-mcp/
 playwright-report/
 test-results/
+
+# Personal Claude Code settings
+.claude/settings.local.json

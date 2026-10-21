@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { EXTRAS, MY_BOOKINGS, OFFERS, REVIEWS, ROOM_TYPES } from './data.js';
+import { useAuth } from './context/Auth.jsx';
+import { AuthShell, AuthTabs, SignIn, Register } from './AuthForms.jsx';
+import { Profile } from './AdminPages.jsx';
+import { EXTRAS, OFFERS, REVIEWS, ROOM_TYPES } from './data.js';
+import { MyBookings } from './Bookings.jsx';
 import { roomApi } from './api/roomApi.js';
 import { bookingApi } from './api/bookingApi.js';
-import { authApi } from './api/authApi.js';
 
 const NAV = [
   { label: 'Home', href: '#/' },
@@ -22,7 +25,9 @@ const nightsBetween = (a, b) => (a && b ? Math.max(0, Math.round((new Date(b) - 
 const day = (offset) => new Date(Date.now() + offset * 864e5).toISOString().slice(0, 10);
 const Stars = ({ n }) => <span className="stars" role="img" aria-label={`${n} out of 5`}>{'★'.repeat(Math.round(n))}{'☆'.repeat(5 - Math.round(n))}</span>;
 
-function SiteHeader({ route, user, onLogout }) {
+function SiteHeader({ route }) {
+  const { user, signOut } = useAuth();
+  const staff = user && user.scope !== 'self';
   const [open, setOpen] = useState(null);
   const [mobile, setMobile] = useState(false);
   const ref = useRef(null);
@@ -35,22 +40,7 @@ function SiteHeader({ route, user, onLogout }) {
 
   const done = () => { setOpen(null); setMobile(false); };
 
-  const navItems = [
-    { label: 'Home', href: '#/' },
-    { label: 'Rooms', items: [['#/rooms', 'All rooms', 'Compare every room type'], ['#/rooms?cat=standard', 'Standard rooms', 'Deluxe & Superior'], ['#/rooms?cat=suite', 'Suites', 'Family & Presidential']] },
-    { label: 'Offers', href: '#/offers' },
-    {
-      label: 'My trips',
-      items: user ? [
-        ['#/my-bookings', 'My bookings', 'Upcoming & past stays'],
-        ['#/profile', 'My profile', 'Personal details & loyalty rewards']
-      ] : [
-        ['#/my-bookings', 'My bookings', 'Upcoming & past stays'],
-        ['#/login', 'Sign in / Register', 'Access your account']
-      ]
-    },
-    { label: 'Help', items: [['#/offers', 'Cancellation policy', 'Free cancel up to 48h'], ['#/', 'Contact us', 'hello@grandstay.example']] }
-  ];
+  const nav = NAV.map((m) => (m.label === 'My trips' ? { ...m, items: m.items.filter(([h]) => (user ? h !== '#/login' : true)).concat(user ? [['#/profile', 'My profile', user.email]] : []) } : m));
 
   return (
     <header className="topbar site" ref={ref}>
@@ -59,7 +49,7 @@ function SiteHeader({ route, user, onLogout }) {
         <button className="menu-btn" aria-expanded={mobile} aria-controls="nav" onClick={() => setMobile(!mobile)}>{mobile ? 'Close' : 'Menu'}</button>
         <nav id="nav" className={mobile ? 'open' : ''} aria-label="Main">
           <ul>
-            {navItems.map((m, i) => m.items ? (
+            {nav.map((m, i) => m.items ? (
               <li className="dd" key={m.label}>
                 <button aria-expanded={open === i} aria-haspopup="true" onClick={() => setOpen(open === i ? null : i)}>{m.label} <span className="caret" aria-hidden="true">▾</span></button>
                 {open === i && (
@@ -81,13 +71,14 @@ function SiteHeader({ route, user, onLogout }) {
                   title="View Profile"
                 >
                   <span className="avatar" style={{ width: 24, height: 24, fontSize: '.75rem', background: 'var(--gold)', color: '#1a1205' }}>
-                    {(user.fullName || user.email)[0].toUpperCase()}
+                    {(user.fullName || user.email || 'U')[0].toUpperCase()}
                   </span>
-                  <span style={{ color: 'var(--gold)', fontWeight: 600 }}>{user.fullName || user.email.split('@')[0]}</span>
+                  <span style={{ color: 'var(--gold)', fontWeight: 600 }}>{user.fullName || user.email?.split('@')[0]}</span>
                 </a>
+                {staff && <a className="btn ghost-w" href="#/admin" onClick={done}>Staff portal</a>}
                 <button
                   className="btn ghost-w"
-                  onClick={onLogout}
+                  onClick={async () => { done(); await signOut(); location.hash = '#/'; }}
                   style={{ border: '1px solid rgba(255,255,255,0.3)', color: '#fff', background: 'transparent' }}
                 >
                   Sign out
@@ -330,17 +321,9 @@ function RoomDetail({ id, q }) {
   const total = sub * (1 - (offer?.pct || 0) / 100);
   const set = (k) => (e) => setD({ ...d, [k]: e.target.value });
 
-  // ENFORCE LOGIN: If user is not logged in, redirect to login page before checkout!
   const go = (e) => {
     e.preventDefault();
-    const checkoutUrl = `#/checkout?${new URLSearchParams({ room: r.id, in: d.in, out: d.out, guests: d.guests, coupon: offer?.code || '', extras: extras.join(',') })}`;
-    const currentUser = authApi.getCurrentUser();
-    if (!currentUser) {
-      sessionStorage.setItem('auth_redirect', checkoutUrl);
-      location.hash = '#/login?required=booking';
-      return;
-    }
-    location.hash = checkoutUrl;
+    location.hash = `#/checkout?${new URLSearchParams({ room: r.id, in: d.in, out: d.out, guests: d.guests, coupon: offer?.code || '', extras: extras.join(',') })}`;
   };
 
   return (
@@ -390,20 +373,8 @@ function RoomDetail({ id, q }) {
 
 // UC07: Make Reservation (Core)
 function Checkout({ q, user }) {
-  const currentUser = user || authApi.getCurrentUser();
-
-  // If accessed directly without login, redirect to login
-  if (!currentUser) {
-    sessionStorage.setItem('auth_redirect', location.hash);
-    location.hash = '#/login?required=booking';
-    return (
-      <div className="c-wrap c-section center" style={{ padding: '3rem 1rem' }}>
-        <h1 className="title">Sign in Required</h1>
-        <p className="muted">Please sign in to proceed with your booking.</p>
-        <p><a className="btn primary" href="#/login?required=booking">Sign in now</a></p>
-      </div>
-    );
-  }
+  const { user: authUser } = useAuth();
+  const currentUser = user || authUser;
 
   const r = ROOM_TYPES.find((x) => String(x.id) === String(q.room)) || ROOM_TYPES[0];
   const nights = nightsBetween(q.in, q.out);
@@ -427,7 +398,7 @@ function Checkout({ q, user }) {
     const specialRequests = form.specialRequests?.value || '';
 
     const bookingPayload = {
-      customerId: currentUser.id,
+      customerId: currentUser?._id || currentUser?.id,
       checkInDate: q.in || day(7),
       checkOutDate: q.out || day(10),
       guestName,
@@ -448,12 +419,12 @@ function Checkout({ q, user }) {
       const res = await bookingApi.createBooking(bookingPayload);
       const bData = res.data;
       const savedInfo = {
-        code: bData.bookingReference,
+        code: bData?.bookingReference || `BK-${Math.floor(1000 + Math.random() * 9000)}`,
         room: r.name,
         dates: `${bookingPayload.checkInDate} → ${bookingPayload.checkOutDate}`,
-        total: bData.totalAmount || total,
-        depositRequired: bData.depositRequired,
-        status: bData.status || 'confirmed',
+        total: bData?.totalAmount || total,
+        depositRequired: bData?.depositRequired,
+        status: bData?.status || 'confirmed',
         guestName,
         paymentType: pay
       };
@@ -485,13 +456,15 @@ function Checkout({ q, user }) {
       {errorMsg && <p className="alert bad">{errorMsg}</p>}
       <div className="c-layout detail">
         <form className="panel form" onSubmit={confirm} id="co">
-          <div style={{ background: 'var(--green-bg)', color: 'var(--green)', padding: '.65rem 1rem', borderRadius: 8, fontSize: '.9rem', marginBottom: '1rem', gridColumn: '1 / -1' }}>
-            ✓ Signed in as <strong>{currentUser.fullName || currentUser.email}</strong>
-          </div>
+          {currentUser && (
+            <div style={{ background: 'var(--green-bg)', color: 'var(--green)', padding: '.65rem 1rem', borderRadius: 8, fontSize: '.9rem', marginBottom: '1rem', gridColumn: '1 / -1' }}>
+              ✓ Signed in as <strong>{currentUser.fullName || currentUser.email}</strong>
+            </div>
+          )}
           <h2 className="full">Guest details</h2>
-          <label>Full name<input name="fullName" required autoComplete="name" defaultValue={currentUser.fullName || ''} /></label>
-          <label>Email<input name="email" type="email" required autoComplete="email" defaultValue={currentUser.email || ''} /></label>
-          <label>Phone<input name="phone" type="tel" required autoComplete="tel" defaultValue={currentUser.phone || ''} /></label>
+          <label>Full name<input name="fullName" required autoComplete="name" defaultValue={currentUser?.customerProfile?.fullName || currentUser?.fullName || ''} /></label>
+          <label>Email<input name="email" type="email" required autoComplete="email" defaultValue={currentUser?.email || ''} /></label>
+          <label>Phone<input name="phone" type="tel" required autoComplete="tel" defaultValue={currentUser?.phone || ''} /></label>
           <label>Special requests<input name="specialRequests" placeholder="Late arrival, high floor, quiet room…" /></label>
           <fieldset className="full">
             <legend>Payment</legend>
@@ -553,497 +526,19 @@ function Confirmation() {
   );
 }
 
-// T10: Customer Home & Dashboard
-function MyBookings({ user }) {
-  const currentUser = user || authApi.getCurrentUser();
-  const [tab, setTab] = useState('upcoming');
-  const [apiBookings, setApiBookings] = useState([]);
-  const [loading, setLoading] = useState(false);
-
-  const fetchBookings = () => {
-    if (!currentUser) return;
-    setLoading(true);
-    bookingApi.getMyBookings({ customerId: currentUser.id, email: currentUser.email })
-      .then(res => {
-        if (res.data && res.data.length > 0) {
-          const mapped = res.data.map(b => ({
-            id: b._id,
-            code: b.bookingReference,
-            room: b.rooms?.[0]?.roomTypeId?.name || 'Deluxe Room',
-            dates: `${new Date(b.checkInDate).toISOString().slice(0, 10)} → ${new Date(b.checkOutDate).toISOString().slice(0, 10)}`,
-            total: b.totalAmount,
-            status: b.status,
-            img: b.rooms?.[0]?.roomTypeId?.images?.[0] || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=80'
-          }));
-          setApiBookings(mapped);
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    fetchBookings();
-  }, [currentUser]);
-
-  if (!currentUser) {
-    return (
-      <div className="c-wrap c-section center" style={{ padding: '4rem 1rem' }}>
-        <h1 className="title">My Bookings & Trips</h1>
-        <p className="muted" style={{ maxWidth: 460, margin: '1rem auto' }}>
-          Please sign in to view your upcoming stays, booking history, and manage your trips.
-        </p>
-        <p><a className="btn primary" href="#/login">Sign in to your account</a></p>
-      </div>
-    );
-  }
-
-  // Merge newly made booking from sessionStorage
-  let combinedBookings = [...apiBookings];
-  try {
-    const raw = sessionStorage.getItem('last_booking');
-    if (raw) {
-      const recent = JSON.parse(raw);
-      if (!combinedBookings.some(x => x.code === recent.code)) {
-        combinedBookings.unshift({
-          code: recent.code,
-          room: recent.room,
-          dates: recent.dates,
-          total: recent.total,
-          status: recent.status,
-          img: 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=80'
-        });
-      }
-    }
-  } catch {}
-
-  if (combinedBookings.length === 0) {
-    combinedBookings = MY_BOOKINGS;
-  }
-
-  const handleCancel = async (b) => {
-    if (!window.confirm(`Are you sure you want to cancel booking ${b.code}?`)) return;
-    try {
-      if (b.id) {
-        await bookingApi.cancelBooking(b.id, 'Cancelled by customer');
-      }
-    } catch (e) {
-      console.warn('Backend cancel call failed:', e);
-    }
-
-    setApiBookings(prev => prev.map(item => item.code === b.code ? { ...item, status: 'cancelled' } : item));
-    try {
-      const raw = sessionStorage.getItem('last_booking');
-      if (raw) {
-        const item = JSON.parse(raw);
-        if (item.code === b.code) {
-          item.status = 'cancelled';
-          sessionStorage.setItem('last_booking', JSON.stringify(item));
-        }
-      }
-    } catch {}
-  };
-
-  const list = combinedBookings.filter((b) => (tab === 'upcoming' ? ['confirmed', 'pending'].includes(b.status) : !['confirmed', 'pending'].includes(b.status)));
-
+function Auth({ note }) {
+  const [mode, setMode] = useState('login');
+  const { user } = useAuth();
+  const done = () => { location.hash = sessionStorage.getItem('next') || '#/my-bookings'; sessionStorage.removeItem('next'); };
+  if (user) { if (user.scope === 'self') done(); else location.hash = '#/admin'; return null; }
   return (
-    <div className="c-wrap c-section">
-      <div className="between">
-        <h1 className="title">My bookings</h1>
-        {loading && <small className="muted">Syncing with server...</small>}
-      </div>
-      <div className="chips" role="group" aria-label="Filter">
-        {['upcoming', 'past'].map((t) => (
-          <button key={t} className={tab === t ? 'chip on' : 'chip'} aria-pressed={tab === t} onClick={() => setTab(t)}>
-            {t}
-          </button>
-        ))}
-      </div>
-      <div className="stack">
-        {list.map((b) => (
-          <article className="trip" key={b.code}>
-            <img src={b.img} alt="" />
-            <div>
-              <h3>{b.room}</h3>
-              <p className="muted">{b.code} · {b.dates}</p>
-              <span className={`badge b-${b.status}`}>{b.status.replace('_', ' ')}</span>
-            </div>
-            <div className="end">
-              <strong>{money(b.total)}</strong>
-              {['confirmed', 'pending'].includes(b.status) && (
-                <button className="btn" onClick={() => handleCancel(b)}>Cancel</button>
-              )}
-              {b.status === 'checked_out' && <button className="btn">Write review</button>}
-            </div>
-          </article>
-        ))}
-        {!list.length && <p className="muted">Nothing here yet.</p>}
-      </div>
-    </div>
-  );
-}
-
-// UC01 / UC02: Customer Authentication Flow
-function Auth({ q = {}, user, onAuthSuccess, onLogout }) {
-  const [reg, setReg] = useState(false);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const isRequiredForBooking = q.required === 'booking';
-
-  if (user) {
-    return (
-      <div className="c-wrap c-section center" style={{ maxWidth: 480, margin: '2rem auto' }}>
-        <p className="done" aria-hidden="true">✓</p>
-        <h1 className="title">Already Signed In</h1>
-        <p className="muted" style={{ margin: '1rem 0' }}>
-          You are currently signed in as <strong>{user.fullName || user.email}</strong>.
-        </p>
-        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap', marginTop: '1.5rem' }}>
-          <a className="btn primary" href="#/profile">View Profile</a>
-          <a className="btn" href="#/my-bookings">My Bookings</a>
-          <button className="btn" onClick={onLogout} style={{ color: 'var(--red)', borderColor: 'var(--red)' }}>Sign out</button>
-        </div>
-      </div>
-    );
-  }
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-
-    const f = e.target;
-    const email = f.email.value;
-    const password = f.password.value;
-    const fullName = f.fullName ? f.fullName.value : '';
-    const phone = f.phone ? f.phone.value : '';
-
-    try {
-      let res;
-      if (reg) {
-        res = await authApi.register({ fullName, email, password, phone });
-      } else {
-        res = await authApi.login({ email, password });
-      }
-
-      if (onAuthSuccess) onAuthSuccess(res.data);
-
-      const redirect = sessionStorage.getItem('auth_redirect');
-      if (redirect) {
-        sessionStorage.removeItem('auth_redirect');
-        location.hash = redirect;
-      } else {
-        location.hash = '#/my-bookings';
-      }
-    } catch (err) {
-      setError(err.message || 'Authentication failed. Please verify your credentials.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="c-wrap c-section auth-wrap">
-      <form className="panel form one" onSubmit={handleSubmit}>
-        <h1 className="title">{reg ? 'Create account' : 'Sign in'}</h1>
-
-        {isRequiredForBooking && (
-          <div style={{ background: 'var(--amber-bg)', color: 'var(--amber)', padding: '.75rem 1rem', borderRadius: 8, fontSize: '.9rem', marginBottom: '1rem', border: '1px solid #ffd488' }}>
-            🔒 <strong>Sign in required:</strong> Please sign in or register to complete your room reservation.
-          </div>
-        )}
-
-        {error && (
-          <div style={{ background: 'var(--red-bg)', color: 'var(--red)', padding: '.75rem 1rem', borderRadius: 8, fontSize: '.9rem', marginBottom: '1rem' }}>
-            {error}
-          </div>
-        )}
-
-        {reg && <label>Full name<input name="fullName" required autoComplete="name" placeholder="Nguyen Van A" /></label>}
-        {reg && <label>Phone number<input name="phone" type="tel" autoComplete="tel" placeholder="0987654321" /></label>}
-        <label>Email<input name="email" type="email" required autoComplete="email" placeholder="you@example.com" /></label>
-        <label>Password<input name="password" type="password" required autoComplete={reg ? 'new-password' : 'current-password'} minLength={6} placeholder="••••••••" /></label>
-        
-        <button className="btn primary" type="submit" disabled={loading}>
-          {loading ? 'Please wait...' : (reg ? 'Create Account & Continue' : 'Sign in & Continue')}
-        </button>
-
-        <p className="muted">
-          {reg ? 'Already have an account?' : 'New here?'}
-          {' '}
-          <a href="#/login" onClick={(e) => { e.preventDefault(); setReg(!reg); setError(''); }}>
-            {reg ? 'Sign in' : 'Create an account'}
-          </a>
-        </p>
-      </form>
-    </div>
-  );
-}
-
-// UC03: Member Profile Management
-function Profile({ user, onUpdateUser, onLogout }) {
-  const currentUser = user || authApi.getCurrentUser();
-  const [editing, setEditing] = useState(false);
-  const [fullName, setFullName] = useState(currentUser?.fullName || '');
-  const [phone, setPhone] = useState(currentUser?.phone || '');
-  const [savedSuccess, setSavedSuccess] = useState(false);
-
-  // Password change state
-  const [changingPassword, setChangingPassword] = useState(false);
-  const [pwCurrent, setPwCurrent] = useState('');
-  const [pwNew, setPwNew] = useState('');
-  const [pwConfirm, setPwConfirm] = useState('');
-  const [pwError, setPwError] = useState('');
-  const [pwSuccess, setPwSuccess] = useState(false);
-  const [pwLoading, setPwLoading] = useState(false);
-
-  useEffect(() => {
-    if (currentUser) {
-      setFullName(currentUser.fullName || '');
-      setPhone(currentUser.phone || '');
-    }
-  }, [currentUser]);
-
-  if (!currentUser) {
-    return (
-      <div className="c-wrap c-section center" style={{ padding: '4rem 1rem' }}>
-        <h1 className="title">Sign in Required</h1>
-        <p className="muted">Please sign in to view and manage your profile.</p>
-        <p><a className="btn primary" href="#/login">Sign in to your account</a></p>
-      </div>
-    );
-  }
-
-  const handleSave = async (e) => {
-    e.preventDefault();
-    const updated = {
-      ...currentUser,
-      fullName,
-      phone
-    };
-    try {
-      const res = await authApi.updateProfile({ id: currentUser.id, email: currentUser.email, fullName, phone });
-      if (res.data) {
-        if (onUpdateUser) onUpdateUser({ ...currentUser, ...res.data });
-      } else {
-        authApi.setCurrentUser(updated);
-        if (onUpdateUser) onUpdateUser(updated);
-      }
-    } catch {
-      authApi.setCurrentUser(updated);
-      if (onUpdateUser) onUpdateUser(updated);
-    }
-    setSavedSuccess(true);
-    setEditing(false);
-    setTimeout(() => setSavedSuccess(false), 3000);
-  };
-
-  const handleChangePassword = async (e) => {
-    e.preventDefault();
-    setPwError('');
-    if (pwNew !== pwConfirm) {
-      setPwError('New passwords do not match.');
-      return;
-    }
-    if (pwNew.length < 6) {
-      setPwError('New password must be at least 6 characters.');
-      return;
-    }
-    setPwLoading(true);
-    try {
-      await authApi.updatePassword({
-        id: currentUser.id,
-        email: currentUser.email,
-        currentPassword: pwCurrent,
-        newPassword: pwNew
-      });
-      setPwSuccess(true);
-      setPwCurrent(''); setPwNew(''); setPwConfirm('');
-      setChangingPassword(false);
-      setTimeout(() => setPwSuccess(false), 4000);
-    } catch (err) {
-      setPwError(err.message || 'Failed to change password. Check your current password.');
-    } finally {
-      setPwLoading(false);
-    }
-  };
-
-  return (
-    <div className="c-wrap c-section" style={{ maxWidth: 880, margin: 'auto' }}>
-      <div className="between" style={{ alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.5rem' }}>
-        <div>
-          <h1 className="title">Member Profile</h1>
-          <p className="muted">Manage your personal account details, contact preferences, and loyalty rewards.</p>
-        </div>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <a className="btn" href="#/my-bookings">View Bookings</a>
-          <button className="btn ghost-w" onClick={onLogout} style={{ border: '1px solid var(--line)', color: 'var(--red)' }}>Sign out</button>
-        </div>
-      </div>
-
-      {savedSuccess && (
-        <div style={{ background: 'var(--green-bg)', color: 'var(--green)', padding: '.75rem 1rem', borderRadius: 10, marginBottom: '1.5rem', border: '1px solid #b3e6c8' }}>
-          ✓ Profile details updated successfully!
-        </div>
-      )}
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
-        {/* Account status badge card */}
-        <div className="panel" style={{ padding: '1.5rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1.25rem' }}>
-            <div style={{ width: 60, height: 60, borderRadius: '50%', background: 'var(--gold)', color: '#1a1205', display: 'grid', placeItems: 'center', fontSize: '1.6rem', fontWeight: 700 }}>
-              {(currentUser.fullName || currentUser.email)[0].toUpperCase()}
-            </div>
-            <div>
-              <h2 style={{ margin: 0, fontSize: '1.2rem' }}>{currentUser.fullName || 'Valued Guest'}</h2>
-              <p className="muted" style={{ margin: '2px 0 0', fontSize: '.88rem' }}>{currentUser.email}</p>
-            </div>
-          </div>
-
-          <div style={{ borderTop: '1px solid var(--line)', paddingTop: '1rem' }}>
-            <p style={{ margin: '0 0 .5rem', fontSize: '.8rem', color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.05em' }}>Membership Tier</p>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <span className="badge" style={{ background: 'var(--amber-bg)', color: 'var(--amber)', fontWeight: 700, padding: '4px 10px', fontSize: '.85rem' }}>
-                  ★ Gold Member
-                </span>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <strong style={{ fontSize: '1.3rem', color: 'var(--navy)' }}>{currentUser.loyaltyPoints || 100}</strong>
-                <span className="muted" style={{ fontSize: '.85rem', marginLeft: 4 }}>points</span>
-              </div>
-            </div>
-            <p className="muted" style={{ fontSize: '.82rem', marginTop: '.75rem' }}>
-              Earn 10 points for every night booked. Points can be redeemed for room upgrades and exclusive discounts.
-            </p>
-          </div>
-        </div>
-
-        {/* Editable profile form card */}
-        <div className="panel" style={{ padding: '1.5rem' }}>
-          <div className="between" style={{ marginBottom: '1.2rem', alignItems: 'center' }}>
-            <h2 style={{ margin: 0, fontSize: '1.15rem' }}>Personal Information</h2>
-            {!editing && (
-              <button className="btn" onClick={() => setEditing(true)} style={{ padding: '0 .85rem', minHeight: 36, fontSize: '.85rem' }}>
-                Edit Details
-              </button>
-            )}
-          </div>
-
-          {editing ? (
-            <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <label>
-                Full Name
-                <input value={fullName} onChange={(e) => setFullName(e.target.value)} required />
-              </label>
-              <label>
-                Email Address
-                <input value={currentUser.email} disabled style={{ background: '#f5f7fa', cursor: 'not-allowed', color: 'var(--muted)' }} />
-                <small className="muted">Email is linked to your account and cannot be modified.</small>
-              </label>
-              <label>
-                Phone Number
-                <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="0987654321" />
-              </label>
-              <div style={{ display: 'flex', gap: '.5rem', marginTop: '.5rem' }}>
-                <button className="btn primary" type="submit">Save Changes</button>
-                <button className="btn" type="button" onClick={() => setEditing(false)}>Cancel</button>
-              </div>
-            </form>
-          ) : (
-              <dl className="sum" style={{ border: 0, padding: 0 }}>
-              <div><dt>Full Name</dt><dd><strong>{currentUser.fullName || 'Not provided'}</strong></dd></div>
-              <div><dt>Email</dt><dd>{currentUser.email}</dd></div>
-              <div><dt>Phone</dt><dd>{currentUser.phone || 'Not provided'}</dd></div>
-              <div><dt>Account Role</dt><dd style={{ textTransform: 'capitalize' }}>Customer</dd></div>
-            </dl>
-          )}
-        </div>
-
-        {/* Change Password Card */}
-        <div className="panel" style={{ padding: '1.5rem', gridColumn: '1 / -1' }}>
-          <div className="between" style={{ marginBottom: '1.2rem', alignItems: 'center' }}>
-            <div>
-              <h2 style={{ margin: 0, fontSize: '1.15rem' }}>Password & Security</h2>
-              <p className="muted" style={{ margin: '4px 0 0', fontSize: '.85rem' }}>Change your account password to keep your account secure.</p>
-            </div>
-            {!changingPassword && (
-              <button
-                className="btn"
-                onClick={() => { setChangingPassword(true); setPwError(''); setPwSuccess(false); }}
-                style={{ padding: '0 .85rem', minHeight: 36, fontSize: '.85rem' }}
-              >
-                Change Password
-              </button>
-            )}
-          </div>
-
-          {pwSuccess && (
-            <div style={{ background: 'var(--green-bg)', color: 'var(--green)', padding: '.75rem 1rem', borderRadius: 10, marginBottom: '1rem', border: '1px solid #b3e6c8' }}>
-              ✓ Password changed successfully!
-            </div>
-          )}
-
-          {changingPassword ? (
-            <form onSubmit={handleChangePassword} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
-              <label style={{ gridColumn: '1 / -1' }}>
-                Current Password
-                <input
-                  type="password"
-                  value={pwCurrent}
-                  onChange={(e) => setPwCurrent(e.target.value)}
-                  required
-                  autoComplete="current-password"
-                  placeholder="Your current password"
-                />
-              </label>
-              <label>
-                New Password
-                <input
-                  type="password"
-                  value={pwNew}
-                  onChange={(e) => setPwNew(e.target.value)}
-                  required
-                  autoComplete="new-password"
-                  minLength={6}
-                  placeholder="At least 6 characters"
-                />
-              </label>
-              <label>
-                Confirm New Password
-                <input
-                  type="password"
-                  value={pwConfirm}
-                  onChange={(e) => setPwConfirm(e.target.value)}
-                  required
-                  autoComplete="new-password"
-                  placeholder="Repeat new password"
-                />
-              </label>
-
-              {pwError && (
-                <div style={{ gridColumn: '1 / -1', background: 'var(--red-bg)', color: 'var(--red)', padding: '.6rem 1rem', borderRadius: 8, fontSize: '.9rem' }}>
-                  {pwError}
-                </div>
-              )}
-
-              <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '.5rem', marginTop: '.25rem' }}>
-                <button className="btn primary" type="submit" disabled={pwLoading}>
-                  {pwLoading ? 'Updating...' : 'Update Password'}
-                </button>
-                <button className="btn" type="button" onClick={() => { setChangingPassword(false); setPwError(''); setPwCurrent(''); setPwNew(''); setPwConfirm(''); }}>
-                  Cancel
-                </button>
-              </div>
-            </form>
-          ) : (
-            <p className="muted" style={{ fontSize: '.9rem', margin: 0 }}>
-              🔒 Password last changed: not tracked. Use the button above to update your password.
-            </p>
-          )}
-        </div>
-      </div>
-    </div>
+    <AuthShell>
+      <h1>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
+      <p className="muted">{mode === 'login' ? 'Sign in to manage your bookings.' : 'Book faster and keep every stay in one place.'}</p>
+      <AuthTabs mode={mode} onChange={setMode} />
+      {note && <p className="note">{note}</p>}
+      {mode === 'login' ? <SignIn onDone={done} /> : <Register onDone={done} />}
+    </AuthShell>
   );
 }
 
@@ -1053,7 +548,7 @@ function SiteFooter() {
       <div className="c-wrap c-grid g4">
         <div><a className="brand" href="#/">Grand<span>Stay</span></a><p>Simple, transparent hotel booking.</p></div>
         <div><h4>Explore</h4><a href="#/rooms">Rooms</a><a href="#/offers">Offers</a><a href="#/my-bookings">My bookings</a></div>
-        <div><h4>Support</h4><a href="#/offers">Cancellation policy</a><a href="#/profile">My Profile</a></div>
+        <div><h4>Support</h4><a href="#/offers">Cancellation policy</a><a href="#/login">Account</a></div>
         <div><h4>Contact</h4><p>hello@grandstay.example</p><p>+84 000 000 000</p><a href="#/admin">Staff portal</a></div>
       </div>
       <p className="copy">© 2026 GrandStay · WDP301</p>
@@ -1061,35 +556,29 @@ function SiteFooter() {
   );
 }
 
+const PROTECTED = ['#/checkout', '#/confirmation', '#/my-bookings', '#/profile'];
+
 export default function Customer({ route }) {
+  const { user, loading } = useAuth();
   const [path, q] = parse(route);
-  const [currentUser, setCurrentUser] = useState(authApi.getCurrentUser());
-
-  const handleAuthSuccess = (userData) => {
-    setCurrentUser(userData);
-  };
-
-  const handleLogout = () => {
-    authApi.logout();
-    setCurrentUser(null);
-    location.hash = '#/';
-  };
 
   let page;
-  if (path.startsWith('#/room/')) page = <RoomDetail id={path.split('/')[2]} q={q} />;
+  if (loading) page = <p className="muted c-wrap c-section">Loading…</p>;
+  else if (PROTECTED.includes(path) && !user) { sessionStorage.setItem('next', route); page = <Auth note="Please sign in to continue." />; }
+  else if (path === '#/profile') page = <div className="c-wrap c-section"><Profile /></div>;
+  else if (path.startsWith('#/room/')) page = <RoomDetail id={path.split('/')[2]} q={q} />;
   else if (path === '#/rooms') page = <Rooms q={q} />;
   else if (path === '#/offers') page = <Offers />;
-  else if (path === '#/checkout') page = <Checkout q={q} user={currentUser} />;
+  else if (path === '#/checkout') page = <Checkout q={q} user={user} />;
   else if (path === '#/confirmation') page = <Confirmation />;
-  else if (path === '#/my-bookings') page = <MyBookings user={currentUser} />;
-  else if (path === '#/profile') page = <Profile user={currentUser} onUpdateUser={setCurrentUser} onLogout={handleLogout} />;
-  else if (path === '#/login') page = <Auth q={q} user={currentUser} onAuthSuccess={handleAuthSuccess} onLogout={handleLogout} />;
+  else if (path === '#/my-bookings') page = <MyBookings />;
+  else if (path === '#/login') page = <Auth />;
   else page = <Home />;
 
   return (
     <>
       <a className="skip" href="#main">Skip to content</a>
-      <SiteHeader route={route} user={currentUser} onLogout={handleLogout} />
+      <SiteHeader route={route} />
       <main id="main">{page}</main>
       <SiteFooter />
     </>

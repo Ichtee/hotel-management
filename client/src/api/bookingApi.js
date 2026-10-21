@@ -3,7 +3,7 @@
  * Connects to http://localhost:5000/api with fallback to local mock data
  */
 
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = '/api';
 
 async function request(endpoint, options = {}) {
   try {

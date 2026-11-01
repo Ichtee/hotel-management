@@ -207,6 +207,7 @@ function Bookings() {
   const [checkingIn, setCheckingIn] = useState(null);
   const [changingRoom, setChangingRoom] = useState(null);
   const [addingService, setAddingService] = useState(null);
+  const [checkingOut, setCheckingOut] = useState(null);
   const live = useApi('/bookings?limit=100', user.role === 'receptionist');
   const rows = (live.data || BOOKINGS).filter((b) => f === 'all' || b.status === f);
   return (
@@ -218,15 +219,30 @@ function Bookings() {
         ))}
       </div>
       <Notice error={live.error} />
-      <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status', '']} rows={rows.map((b) => b._id ? [b.bookingReference, b.guestName || '—', b.rooms[0]?.roomId?.roomNumber || 'Assigned at check-in', b.rooms[0]?.roomTypeId?.name || 'Room', b.checkInDate?.slice(0, 10), b.checkOutDate?.slice(0, 10), money(b.totalAmount), b.status, <span className="row-actions"><button className="btn sm" onClick={() => setEditing(b)}>Edit</button>{b.status === 'confirmed' && <button className="btn sm" onClick={() => setCheckingIn(b)}>Check in</button>}{b.status === 'checked_in' && <><button className="btn sm" onClick={() => setChangingRoom(b)}>Change room</button><button className="btn sm" onClick={() => setAddingService(b)}>Add service</button></>}{['pending', 'confirmed'].includes(b.status) && <button className="btn sm" onClick={() => setCancelling(b)}>Cancel</button>}</span>] : [b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status, ''])} />
+      <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status', '']} rows={rows.map((b) => b._id ? [b.bookingReference, b.guestName || '—', b.rooms[0]?.roomId?.roomNumber || 'Assigned at check-in', b.rooms[0]?.roomTypeId?.name || 'Room', b.checkInDate?.slice(0, 10), b.checkOutDate?.slice(0, 10), money(b.totalAmount), b.status, <span className="row-actions"><button className="btn sm" onClick={() => setEditing(b)}>Edit</button>{b.status === 'confirmed' && <button className="btn sm" onClick={() => setCheckingIn(b)}>Check in</button>}{b.status === 'checked_in' && <><button className="btn sm" onClick={() => setChangingRoom(b)}>Change room</button><button className="btn sm" onClick={() => setAddingService(b)}>Add service</button><button className="btn sm" onClick={() => setCheckingOut(b)}>Check out</button></>}{['pending', 'confirmed'].includes(b.status) && <button className="btn sm" onClick={() => setCancelling(b)}>Cancel</button>}</span>] : [b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status, ''])} />
       {creating && <WalkInBooking onClose={() => setCreating(false)} />}
       {editing && <EditBooking booking={editing} onClose={() => setEditing(null)} />}
       {cancelling && <CancelBooking booking={cancelling} onClose={() => setCancelling(null)} />}
       {checkingIn && <CheckInBooking booking={checkingIn} onClose={() => setCheckingIn(null)} />}
       {changingRoom && <ChangeRoom booking={changingRoom} onClose={() => setChangingRoom(null)} />}
       {addingService && <AddService booking={addingService} onClose={() => setAddingService(null)} />}
+      {checkingOut && <CheckOutBooking booking={checkingOut} onClose={() => setCheckingOut(null)} />}
     </>
   );
+}
+
+function CheckOutBooking({ booking, onClose }) {
+  const detail = useApi(`/bookings/${booking._id}`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  if (detail.loading) return <Modal title="Check out customer" onClose={onClose}><p className="muted">Loading final bill…</p></Modal>;
+  const b = detail.data || booking; const paid = b.paidAmount || 0; const balance = Math.max(0, b.totalAmount - paid);
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${b._id}/check-out`, { method: 'POST', body: { inspectionConfirmed: true, paymentMethod: f.paymentMethod, transactionRef: f.transactionRef || undefined } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  return <Modal title={`Check out · ${b.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
+    <p className="full muted">Room {money(b.roomAmount)} · Services {money(b.serviceAmount)} · Total {money(b.totalAmount)} · Paid {money(paid)}</p>
+    <p className="full"><strong>Balance due: {money(balance)}</strong></p>
+    {balance > 0 && <><Field label="Payment method"><select name="paymentMethod" defaultValue="cash"><option value="cash">Cash</option><option value="credit_card">Credit card / POS</option><option value="bank_transfer">Bank transfer</option></select></Field><Field label="Transaction reference"><input name="transactionRef" /></Field></>}
+    <label className="check full"><input type="checkbox" required /> Room inspection completed or explicitly skipped</label>
+    <div className="full"><Notice error={detail.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving}>{saving ? 'Checking out…' : 'Collect payment & check out'}</button></div>
+  </form></Modal>;
 }
 
 function AddService({ booking, onClose }) {

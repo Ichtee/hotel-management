@@ -116,6 +116,7 @@ function createApp({
   app.post("/api/front-desk/bookings/:id/change-room", bookingCreation.changeRoom);
   app.get("/api/front-desk/services", bookingCreation.services);
   app.post("/api/front-desk/bookings/:id/services", bookingCreation.addService);
+  app.post("/api/front-desk/bookings/:id/check-out", bookingCreation.checkOut);
   app.get("/api/bookings/:id", bookings.detail);
   app.use("/api/policies/deposit", permit("policies.manage"));
   app.get("/api/policies/deposit", policies.listing);

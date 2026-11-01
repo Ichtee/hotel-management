@@ -6,6 +6,7 @@ const Payment = require("../models/Payment");
 const CouponUsage = require("../models/CouponUsage");
 const Coupon = require("../models/Coupon");
 const Service = require("../models/Service");
+const Invoice = require("../models/Invoice");
 const { validateCoupon } = require("../services/promotions");
 const { currentDepositPolicy } = require("../services/policies");
 const v = require("../utils/validation");
@@ -204,4 +205,25 @@ async function addService(req, res) {
   booking.events.push({ actorId: req.user._id, type: "service_added", note: `Added ${quantity} × ${service.name}`, newValue: { serviceId: service._id, quantity, amount } });
   await booking.save(); res.status(201).json({ data: booking });
 }
-module.exports = { create, roomTypes, createWalkIn, modifyWalkIn, cancelWalkIn, availableRooms, checkIn, changeRoomOptions, changeRoom, services, addService };
+async function checkOut(req, res) {
+  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can check out a guest.");
+  v.keys(req.body, ["inspectionConfirmed", "paymentMethod", "transactionRef"]);
+  if (req.body.inspectionConfirmed !== true) v.fail("Room inspection must be completed or explicitly skipped.", "inspectionConfirmed");
+  const booking = await Booking.findById(v.id(req.params.id));
+  if (!booking) throw new v.HttpError(404, "Booking not found.");
+  if (booking.status !== "checked_in") throw new v.HttpError(409, "Only a checked-in booking can be checked out.");
+  const payments = await Payment.find({ bookingId: booking._id, status: "success" }).lean();
+  const paidAmount = payments.reduce((sum, payment) => sum + payment.amount, 0);
+  const balance = Math.max(0, booking.totalAmount - paidAmount);
+  if (balance) {
+    const method = v.choice(req.body.paymentMethod, "paymentMethod", ["cash", "credit_card", "bank_transfer"]);
+    await Payment.create({ bookingId: booking._id, kind: "final", amount: balance, method, status: "success", transactionRef: req.body.transactionRef ? v.text(req.body.transactionRef, "transactionRef", 2, 100) : undefined, paidAt: new Date(), recordedBy: req.user._id });
+  }
+  await Room.updateMany({ _id: { $in: booking.rooms.map((room) => room.roomId) } }, { $set: { status: "cleaning" } });
+  booking.status = "checked_out"; booking.actualCheckOutAt = new Date(); booking.checkedOutBy = req.user._id;
+  booking.events.push({ actorId: req.user._id, type: "checked_out", note: `Checked out; final payment ${balance}` });
+  await booking.save();
+  const invoice = await Invoice.findOneAndUpdate({ bookingId: booking._id }, { $setOnInsert: { bookingId: booking._id, invoiceNumber: `INV-${Date.now()}`, issuedBy: req.user._id, issuedAt: new Date() }, $set: { subtotal: booking.roomAmount + booking.serviceAmount, totalAmount: booking.totalAmount, status: "paid" } }, { new: true, upsert: true });
+  res.json({ data: { booking, invoice, paidAmount: paidAmount + balance, balance } });
+}
+module.exports = { create, roomTypes, createWalkIn, modifyWalkIn, cancelWalkIn, availableRooms, checkIn, changeRoomOptions, changeRoom, services, addService, checkOut };

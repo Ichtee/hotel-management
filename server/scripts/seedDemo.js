@@ -4,6 +4,7 @@ const { hashPassword } = require("../src/utils/password");
 const User = require("../src/models/User");
 const Role = require("../src/models/Role");
 const RoomType = require("../src/models/RoomType");
+const Room = require("../src/models/Room");
 const Booking = require("../src/models/Booking");
 const Payment = require("../src/models/Payment");
 const Refund = require("../src/models/Refund");
@@ -50,6 +51,15 @@ async function seedDemo() {
     basePrice: 2400000,
     maxOccupancy: 2,
   });
+  // Customer-facing room cards use these room types; their presence also makes
+  // the online Create Booking flow usable immediately in the demo database.
+  const customerRoomTypes = await RoomType.create([
+    { name: "Deluxe Double", basePrice: 2100000, maxOccupancy: 2 },
+    { name: "Superior Twin", basePrice: 1750000, maxOccupancy: 2 },
+    { name: "Family Suite", basePrice: 3600000, maxOccupancy: 4 },
+    { name: "Presidential Suite", basePrice: 7600000, maxOccupancy: 3 },
+  ]);
+  await Room.create(customerRoomTypes.map((type, index) => ({ roomTypeId: type._id, roomNumber: `D${index + 101}`, floor: 1, status: "available" })));
   const now = new Date();
   const monthStart = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),

@@ -11,9 +11,11 @@ const roomTypes = require("./controllers/roomTypes");
 const assignments = require("./controllers/housekeepingAssignments");
 const auth = require("./controllers/auth");
 const accounts = require("./controllers/accounts");
+const customers = require("./controllers/customers");
 const roles = require("./controllers/roles");
 const promotions = require("./controllers/promotions");
 const bookings = require("./controllers/bookings");
+const bookingCreation = require("./controllers/bookingCreation");
 const policies = require("./controllers/policies");
 const payments = require("./controllers/payments");
 const cancellations = require("./controllers/cancellations");
@@ -104,10 +106,8 @@ function createApp({
   app.use("/api/rooms", roomRoutes);
   app.use("/api/housekeeping", housekeepingRoutes);
 
-  // --- Member 2 Booking Endpoints (UC07 Make Reservation & Cancellation) ---
-  app.post("/api/bookings", (req, res, next) => {
-    bookingController.create(req, res, next);
-  });
+  // --- Member 2 Booking Endpoints ---
+  // Creation (UC07) is session-authenticated: see bookingCreation.create below.
   // Cancellation (UC08) is M3's and needs a session: see /api/bookings/:id/cancel below.
   app.get("/api/bookings/ref/:reference", (req, res, next) => {
     bookingController.getByReference(req, res, next);
@@ -148,6 +148,8 @@ function createApp({
   app.use("/api", requirePasswordChanged);
   app.patch("/api/profile", auth.updateProfile);
   app.get("/api/options", accounts.options);
+  app.get("/api/customers", customers.list);
+  app.patch("/api/customers/:id/blacklist", customers.blacklist);
   app.get("/api/users", permit("users.manage"), accounts.listing(false));
   app.post("/api/users", permit("users.manage"), accounts.create(false));
   app.patch("/api/users/:id", permit("users.manage"), accounts.update(false));
@@ -194,6 +196,17 @@ function createApp({
 
   // UC10 View Booking History (Session-authenticated)
   app.get("/api/bookings", bookings.listing);
+  app.post("/api/bookings", bookingCreation.create);
+  app.post("/api/front-desk/bookings", bookingCreation.createWalkIn);
+  app.patch("/api/front-desk/bookings/:id", bookingCreation.modifyWalkIn);
+  app.post("/api/front-desk/bookings/:id/cancel", bookingCreation.cancelWalkIn);
+  app.get("/api/front-desk/bookings/:id/available-rooms", bookingCreation.availableRooms);
+  app.post("/api/front-desk/bookings/:id/check-in", bookingCreation.checkIn);
+  app.get("/api/front-desk/bookings/:id/change-room-options", bookingCreation.changeRoomOptions);
+  app.post("/api/front-desk/bookings/:id/change-room", bookingCreation.changeRoom);
+  app.get("/api/front-desk/services", bookingCreation.services);
+  app.post("/api/front-desk/bookings/:id/services", bookingCreation.addService);
+  app.post("/api/front-desk/bookings/:id/check-out", bookingCreation.checkOut);
   // UC11 View Booking Details
   app.get("/api/bookings/:id", bookings.detail);
 

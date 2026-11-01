@@ -5,8 +5,8 @@ import { Profile } from './AdminPages.jsx';
 import { EXTRAS, OFFERS, REVIEWS, ROOM_TYPES } from './data.js';
 import { MyBookings } from './Bookings.jsx';
 import { roomApi } from './api/roomApi.js';
-import { bookingApi } from './api/bookingApi.js';
 import { PaymentPage, PaymentResult, SandboxGateway } from './Payments.jsx';
+import { api } from './api/client.js';
 
 const NAV = [
   { label: 'Home', href: '#/' },
@@ -384,73 +384,23 @@ function Checkout({ q, user }) {
   const sub = nights * r.price + ex.reduce((s, [, p]) => s + p, 0);
   const total = sub * (1 - (offer?.pct || 0) / 100);
   const [pay, setPay] = useState('deposit');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
-
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
   const confirm = async (e) => {
     e.preventDefault();
-    setIsSubmitting(true);
-    setErrorMsg('');
-
-    const form = e.target;
-    const guestName = form.fullName.value;
-    const guestEmail = form.email.value;
-    const guestPhone = form.phone.value;
-    const specialRequests = form.specialRequests?.value || '';
-
-    const bookingPayload = {
-      customerId: currentUser?._id || currentUser?.id,
-      checkInDate: q.in || day(7),
-      checkOutDate: q.out || day(10),
-      guestName,
-      guestEmail,
-      guestPhone,
-      specialRequests,
-      paymentType: pay,
-      couponCode: q.coupon || undefined,
-      rooms: [
-        {
-          roomTypeId: r._id || undefined,
-          guestCount: +q.guests || 2
-        }
-      ]
-    };
-
+    setSaving(true); setError('');
     try {
-      const res = await bookingApi.createBooking(bookingPayload);
-      const bData = res.data;
-      const savedInfo = {
-        code: bData?.bookingReference || `BK-${Math.floor(1000 + Math.random() * 9000)}`,
-        room: r.name,
-        dates: `${bookingPayload.checkInDate} → ${bookingPayload.checkOutDate}`,
-        total: bData?.totalAmount || total,
-        depositRequired: bData?.depositRequired,
-        status: bData?.status || 'confirmed',
-        guestName,
-        paymentType: pay
-      };
-      sessionStorage.setItem('last_booking', JSON.stringify(savedInfo));
-      location.hash = '#/confirmation';
-    } catch (err) {
-      console.warn('Backend createBooking error, proceeding with local fallback session:', err.message);
-      const fallbackCode = `BK-${Math.floor(1000 + Math.random() * 9000)}`;
-      const savedInfo = {
-        code: fallbackCode,
-        room: r.name,
-        dates: `${bookingPayload.checkInDate} → ${bookingPayload.checkOutDate}`,
-        total,
-        depositRequired: pay === 'deposit' ? Math.round(total * 0.2) : 0,
-        status: 'confirmed',
-        guestName,
-        paymentType: pay
-      };
-      sessionStorage.setItem('last_booking', JSON.stringify(savedInfo));
-      location.hash = '#/confirmation';
-    } finally {
-      setIsSubmitting(false);
-    }
+      const types = await api('/room-types');
+      const type = types.data.find((item) => item.name === r.name);
+      if (!type) throw new Error('This room is no longer available. Please choose another room.');
+      const created = await api('/bookings', { method: 'POST', body: {
+        roomTypeId: type._id, checkInDate: q.in, checkOutDate: q.out,
+        guestCount: Number(q.guests), couponCode: q.coupon || undefined, paymentOption: pay
+      } });
+      location.hash = `#/confirmation?${new URLSearchParams({ ref: created.data.bookingReference })}`;
+    } catch (err) { setError(err.message || 'Unable to create your booking.'); }
+    finally { setSaving(false); }
   };
-
   return (
     <div className="c-wrap c-section">
       <h1 className="title">Checkout</h1>
@@ -473,9 +423,8 @@ function Checkout({ q, user }) {
               <label className="check" key={v}><input type="radio" name="pay" checked={pay === v} onChange={() => setPay(v)} />{l}</label>
             ))}
           </fieldset>
-          <button className="btn primary" type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Processing reservation...' : 'Confirm booking'}
-          </button>
+          {error && <p className="note bad-note full" role="alert">{error}</p>}
+          <button className="btn primary" type="submit" disabled={saving}>{saving ? 'Creating booking…' : 'Confirm booking'}</button>
         </form>
         <aside className="panel book">
           <img className="thumb" src={r.img} alt="" />
@@ -493,39 +442,14 @@ function Checkout({ q, user }) {
   );
 }
 
-function Confirmation() {
-  const [booking, setBooking] = useState(null);
-
-  useEffect(() => {
-    try {
-      const data = sessionStorage.getItem('last_booking');
-      if (data) setBooking(JSON.parse(data));
-    } catch {}
-  }, []);
-
-  const code = booking?.code || 'BK-1050';
-
-  return (
-    <div className="c-wrap c-section center">
-      <p className="done" aria-hidden="true">✓</p>
-      <h1 className="title">Booking confirmed</h1>
-      <p className="muted">
-        Thank you{booking?.guestName ? `, ${booking.guestName}` : ''}! Your booking reference is <strong>{code}</strong>.
-      </p>
-      {booking && (
-        <div className="panel" style={{ maxWidth: 440, margin: '1.5rem auto', textAlign: 'left' }}>
-          <dl className="sum" style={{ border: 0, padding: 0 }}>
-            <div><dt>Room type</dt><dd><strong>{booking.room}</strong></dd></div>
-            <div><dt>Dates</dt><dd>{booking.dates}</dd></div>
-            <div><dt>Payment</dt><dd style={{ textTransform: 'capitalize' }}>{booking.paymentType}</dd></div>
-            <div className="tot"><dt>Total</dt><dd>{money(booking.total)}</dd></div>
-          </dl>
-        </div>
-      )}
-      <p><a className="btn primary" href="#/my-bookings">View in dashboard</a></p>
-    </div>
-  );
-}
+const Confirmation = ({ q }) => (
+  <div className="c-wrap c-section center">
+    <p className="done" aria-hidden="true">✓</p>
+    <h1 className="title">Booking confirmed</h1>
+    <p className="muted">Your booking code is <strong>{q.ref || 'confirmed'}</strong>. A confirmation email is on its way.</p>
+    <p><a className="btn primary" href="#/my-bookings">View my bookings</a></p>
+  </div>
+);
 
 function Auth({ note }) {
   const [mode, setMode] = useState('login');
@@ -589,7 +513,7 @@ export default function Customer({ route }) {
   else if (path === '#/rooms') page = <Rooms q={q} />;
   else if (path === '#/offers') page = <Offers />;
   else if (path === '#/checkout') page = <Checkout q={q} user={user} />;
-  else if (path === '#/confirmation') page = <Confirmation />;
+  else if (path === '#/confirmation') page = <Confirmation q={q} />;
   else if (path === '#/my-bookings') page = <MyBookings />;
   else if (path === '#/login') page = <Auth />;
   else page = <Home />;

@@ -7,6 +7,8 @@ const userSchema = new Schema({
   roleId: { type: Schema.Types.ObjectId, ref: 'Role', required: true, index: true },
   phone: String,
   status: { type: String, enum: ['active', 'suspended', 'deleted'], default: 'active' },
+  blacklistReason: String,
+  blacklistedAt: Date,
   lastLogin: Date,
   passwordReset: { tokenHash: { type: String, select: false }, expiresAt: Date },
   authVersion: { type: Number, default: 0, select: false },

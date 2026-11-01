@@ -32,7 +32,7 @@ const bookingEventSchema = new Schema({
 
 const schema = new Schema({
   bookingReference: { type: String, unique: true, sparse: true, uppercase: true, trim: true },
-  customerId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  customerId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
   createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   checkInDate: { type: Date, required: true },
   checkOutDate: { type: Date, required: true },
@@ -58,6 +58,11 @@ const schema = new Schema({
   },
   // BR-42: one-time code of a cancellation requested by phone.
   cancellationOtp: { type: new Schema({ hash: String, expiresAt: Date, attempts: Number }, { _id: false }), select: false },
+  // Front-desk walk-in cancellation fields (theanh).
+  cancellationRequestedAt: Date,
+  cancellationVerification: { type: String, enum: ['front_desk_id', 'phone_otp'] },
+  refundableAmount: { type: Number, default: 0, min: 0 },
+  refundAccount: { bank: String, accountNumber: String, accountHolderName: String },
   status: {
     type: String,
     enum: ['pending', 'confirmed', 'cancellation_requested', 'checked_in', 'checked_out', 'cancelled', 'expired'],
@@ -83,6 +88,8 @@ const schema = new Schema({
   events: [bookingEventSchema],
   guestName: { type: String, trim: true },
   guestPhone: String,
+  guestEmail: String,
+  guestIdDocumentNo: { type: String, select: false },
   couponCode: { type: String, uppercase: true, trim: true },
   discountAmount: { type: Number, default: 0, min: 0 },
   roomAmount: { type: Number, required: true, min: 0 },

@@ -63,7 +63,7 @@ Client: http://localhost:5173; API: http://localhost:3001. Vite proxies `/api` t
 
 ## Payment gateway (SePay)
 
-Deposits (UC12) and final payments (UC13) go through a gateway adapter. By default a built-in sandbox gateway is used (tests, offline demo). To use SePay set `PAYMENT_PROVIDER=sepay` plus `SEPAY_ENV`, `SEPAY_MERCHANT_ID`, `SEPAY_SECRET_KEY` and `PUBLIC_URL` (see `server/.env.example`).
+Only the deposit (UC10) is paid online, through a gateway adapter; the balance is paid at the front desk at check-out (UC11, BR-14). By default a built-in sandbox gateway is used (tests, offline demo). To use SePay set `PAYMENT_PROVIDER=sepay` plus `SEPAY_ENV`, `SEPAY_MERCHANT_ID`, `SEPAY_SECRET_KEY` and `PUBLIC_URL` (see `server/.env.example`).
 
 1. Create a SePay Payment Gateway account at my.sepay.vn, start with **Sandbox** and copy its Merchant ID and Secret Key.
 2. In SePay open Payment Gateway, then IPN, and set the URL to `https://<api-host>/api/payments/sepay/ipn` (public HTTPS; use a tunnel such as ngrok for a local server).

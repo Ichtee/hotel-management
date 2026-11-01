@@ -70,7 +70,8 @@ function Details({ id, startCancel, onChanged }) {
   const b = s.data;
   const due = Math.max(0, b.totalAmount - b.paidAmount);
   const canDeposit = depositDue(b);
-  const canBalance = ['confirmed', 'checked_in'].includes(b.status) && due > 0;
+  // BR-14: only the deposit is paid online; the balance is settled at the front desk at check-out.
+  const payAtDesk = ['confirmed', 'checked_in'].includes(b.status) && due > 0;
   return (
     <div className="panel details" id={`details-${id}`}>
       <section>
@@ -102,6 +103,7 @@ function Details({ id, startCancel, onChanged }) {
           <Row k="Paid">{money(b.paidAmount)}</Row>
           <Row k="Balance due">{money(due)}</Row>
         </dl>
+        {payAtDesk && <p className="muted">The balance is paid at the front desk when you check out (cash, card or bank transfer).</p>}
         {b.payments.length > 0 && (
           <ul className="lines" aria-label="Payments">
             {b.payments.map((p, i) => (
@@ -110,10 +112,9 @@ function Details({ id, startCancel, onChanged }) {
           </ul>
         )}
       </section>
-      {(canDeposit || canBalance) && (
+      {canDeposit && (
         <div className="cta-row">
-          {canDeposit && <><a className="btn primary" href={`#/pay/${id}?kind=deposit`}>Pay deposit {money(b.depositRequired)}</a><p className="muted">Room held until {part(b.holdExpiresAt, { hour: '2-digit', minute: '2-digit' })}</p></>}
-          {canBalance && <a className="btn primary" href={`#/pay/${id}?kind=final`}>Pay balance {money(due)}</a>}
+          <a className="btn primary" href={`#/pay/${id}?kind=deposit`}>Pay deposit {money(b.depositRequired)}</a><p className="muted">Room held until {part(b.holdExpiresAt, { hour: '2-digit', minute: '2-digit' })}</p>
         </div>
       )}
       {b.status === 'confirmed' && !cancelling && <div className="cta-row"><button className="btn" onClick={() => setCancelling(true)}>Cancel booking</button></div>}

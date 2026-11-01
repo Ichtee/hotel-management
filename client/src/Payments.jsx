@@ -30,20 +30,19 @@ function postForm({ action, fields }) {
   form.submit();
 }
 
-// Payment screen. UC12: kind "deposit" confirms a pending reservation; UC13: kind "final" pays the balance.
+// Payment screen (UC10). BR-14: the deposit is the only online payment; the balance is paid at the front desk (UC11).
 export function PaymentPage({ id, kind }) {
-  const s = useApi(`/bookings/${id}`, kind === 'deposit' || kind === 'final');
+  const s = useApi(`/bookings/${id}`, kind === 'deposit');
   const offered = useApi('/payments/methods'); // which methods this deployment's gateway offers
   const [picked, setMethod] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const b = s.data;
-  const deposit = kind === 'deposit';
-  const left = useCountdown(deposit && b?.status === 'pending' ? b.holdExpiresAt : null);
-  if (!deposit && kind !== 'final') return <div className="c-wrap c-section pay"><Back /><Notice error="Unknown payment type." /></div>;
-  const due = b ? (deposit ? b.depositRequired : b.totalAmount - b.paidAmount) : 0;
-  const lapsed = deposit && b && (b.status !== 'pending' || (left !== null && left <= 0));
-  const payable = b && offered.data && !lapsed && due >= 1 && (deposit || ['confirmed', 'checked_in'].includes(b.status));
+  const left = useCountdown(b?.status === 'pending' ? b.holdExpiresAt : null);
+  if (kind !== 'deposit') return <div className="c-wrap c-section pay"><Back /><Notice error="Only the deposit is paid online. The balance is paid at the front desk at check-out." /></div>;
+  const due = b ? b.depositRequired : 0;
+  const lapsed = b && (b.status !== 'pending' || (left !== null && left <= 0));
+  const payable = b && offered.data && !lapsed && due >= 1;
   const options = METHODS.filter(([v]) => offered.data?.methods.includes(v));
   const method = options.some(([v]) => v === picked) ? picked : options[0]?.[0];
   const pay = async () => {
@@ -57,7 +56,7 @@ export function PaymentPage({ id, kind }) {
   return (
     <div className="c-wrap c-section pay">
       <Back />
-      <h1 className="title">{deposit ? 'Pay your deposit' : 'Pay the remaining balance'}</h1>
+      <h1 className="title">Pay your deposit</h1>
       <div aria-busy={s.loading}>
         {s.loading && <div className="skel-card" aria-hidden="true" />}
         {s.error && <div className="empty"><Notice error={s.error} /><button className="btn" onClick={s.reload}>Try again</button></div>}
@@ -66,8 +65,8 @@ export function PaymentPage({ id, kind }) {
             <section className="panel pay-sum" aria-label="Booking summary">
               <p className="muted">{refOf(b)} · {b.rooms.map((r) => r.roomTypeId?.name).filter(Boolean).join(', ') || 'Room'} · {dateLabel(b.checkInDate)} – {dateLabel(b.checkOutDate)}</p>
               <p className="amount">{money(Math.max(0, due))}</p>
-              <p className="muted">{deposit ? `Deposit to confirm your reservation (booking total ${money(b.totalAmount)})` : `Remaining of ${money(b.totalAmount)} · already paid ${money(b.paidAmount)}`}</p>
-              {deposit && !lapsed && left !== null && <p className="hold" role="timer">Your room is held for <strong>{mmss(left)}</strong></p>}
+              <p className="muted">Deposit to confirm your reservation (booking total {money(b.totalAmount)}). The rest is paid at the front desk at check-out.</p>
+              {!lapsed && left !== null && <p className="hold" role="timer">Your room is held for <strong>{mmss(left)}</strong></p>}
             </section>
             {lapsed && (
               <div className="empty">

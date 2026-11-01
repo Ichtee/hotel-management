@@ -678,27 +678,25 @@ test("deposit payment: a declined payment can be retried; a deposit confirmed af
   assert.equal(refund.status, "requested");
   assert.equal(refund.amount, 600);
 });
-test("final payment: customer pays the balance online, receptionist records cash, nothing is left afterwards", async () => {
+test("BR-14: the balance is paid only at the front desk, never online; the receptionist records it", async () => {
   const booking = await payBooking({ status: "confirmed", holdExpiresAt: undefined });
   await Payment.create({ bookingId: booking._id, kind: "deposit", amount: 600, method: "e_wallet", status: "success", paidAt: new Date() });
-  const url = `/api/bookings/${booking.id}/payments/final`;
-  await send(customer, "post", url, { method: "cash" }).expect(400);
-  const o = (await send(customer, "post", url, { method: "e_wallet" }).expect(201)).body.data;
-  assert.equal(o.amount, 1400);
-  await send(manager, "post", `/api/sandbox-gateway/orders/${o.orderId}`, { result: "success" }).expect(404);
-  await send(customer, "post", `/api/sandbox-gateway/orders/${o.orderId}`, { result: "success" }).expect(200);
+  // there is no online final payment for the customer, and the desk route rejects them and online methods
+  await send(customer, "post", `/api/bookings/${booking.id}/payments/final`, { method: "e_wallet" }).expect(404);
+  const desk = `/api/frontdesk/bookings/${booking.id}/payments`;
+  await send(customer, "post", desk, { method: "cash" }).expect(403);
+  await send(staff, "post", desk, { method: "e_wallet" }).expect(400);
+  assert.equal(await Payment.countDocuments({ bookingId: booking._id, kind: "final" }), 0);
+
+  const cash = (await send(staff, "post", desk, { method: "cash" }).expect(201)).body.data;
+  assert.equal(cash.status, "success");
+  assert.equal(cash.amount, 1400);
+  assert.equal(cash.remaining, 0);
+  assert.equal(String((await Payment.findById(cash.paymentId)).recordedBy), String((await User.findOne({ email: "staff@example.com" }))._id));
   const detail = (await customer.get(`/api/bookings/${booking.id}`).expect(200)).body.data;
   assert.equal(detail.paymentStatus, "paid");
   assert.equal(detail.paidAmount, 2000);
-  await send(customer, "post", url, { method: "e_wallet" }).expect(409);
-
-  const walkIn = await payBooking({ status: "confirmed", holdExpiresAt: undefined, depositRequired: 0 });
-  const cash = (await send(staff, "post", `/api/bookings/${walkIn.id}/payments/final`, { method: "cash" }).expect(201)).body.data;
-  assert.equal(cash.status, "success");
-  assert.equal(cash.amount, 2000);
-  assert.equal(String((await Payment.findById(cash.paymentId)).recordedBy), String((await User.findOne({ email: "staff@example.com" }))._id));
-  await send(staff, "post", `/api/bookings/${walkIn.id}/payments/final`, { method: "cash" }).expect(409);
-  await send(customer, "post", `/api/bookings/${(await payBooking()).id}/payments/final`, { method: "e_wallet" }).expect(409);
+  await send(staff, "post", desk, { method: "cash" }).expect(409); // nothing is left to pay
 });
 
 // ---- SePay gateway adapter (PAYMENT_PROVIDER=sepay); SePay itself is mocked ----
@@ -1055,7 +1053,7 @@ test("UC11: the receptionist splits the balance over cash, POS and transfer unti
   const booking = await paidBooking({ status: "checked_in" });
   const url = `/api/frontdesk/bookings/${booking.id}/payments`;
   await send(customer, "post", url, { method: "cash" }).expect(403);
-  await send(customer, "post", `/api/bookings/${booking.id}/payments/final`, { method: "e_wallet", amount: 100 }).expect(400);
+  await send(customer, "post", `/api/bookings/${booking.id}/payments/final`, { method: "e_wallet", amount: 100 }).expect(404);
   await send(staff, "post", url, { method: "cash", amount: 1401 }).expect(400);
   await send(staff, "post", url, { method: "pos", amount: 400 }).expect(400); // slip reference required
   assert.equal((await send(staff, "post", url, { method: "cash", amount: 400 }).expect(201)).body.data.remaining, 1000);

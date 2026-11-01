@@ -63,25 +63,21 @@ async function deposit(req, res) {
 
 // Collected by the Receptionist and recorded at once (UC11).
 const DESK = ["cash", "pos", "bank_transfer"];
-// UC11: pay the remaining amount online (customer) or at check-out (receptionist). At the desk the balance
-// may be split over several payments until it is 0 (BR-21).
+// UC11: the Receptionist collects the remaining amount at check-out. BR-14: it is never paid online or through
+// the gateway (the deposit is the only online payment); it may be split over several payments until it is 0 (BR-21).
 async function finalPayment(req, res) {
-  const staff = isStaff(req);
-  v.keys(req.body, staff ? ["method", "amount", "transactionRef"] : ["method"]);
-  const method = v.choice(req.body.method, "method", staff ? [...new Set([...onlineMethods(), ...DESK])] : onlineMethods());
+  v.keys(req.body, ["method", "amount", "transactionRef"]);
+  const method = v.choice(req.body.method, "method", DESK);
   const booking = await findBooking(req, true);
   if (!["confirmed", "checked_in", "checked_out"].includes(booking.status)) throw new v.HttpError(409, "This booking cannot be paid yet.");
   const due = booking.totalAmount - (await paidAmount(booking._id));
   if (due < 1) throw new v.HttpError(409, "Nothing is left to pay.");
-  if (staff && DESK.includes(method)) {
-    const amount = req.body.amount === undefined ? due : v.number(req.body.amount, "amount", 1, due);
-    const transactionRef = method === "cash" ? undefined : v.text(req.body.transactionRef, "transactionRef", 1, 100);
-    const payment = await Payment.create({ bookingId: booking._id, kind: "final", amount, method, transactionRef, status: "success", paidAt: new Date(), recordedBy: req.user._id });
-    await announce(payment, true);
-    await audit(req.user._id, "payment.recorded", "payment", payment._id, { bookingId: booking._id, amount, method });
-    return res.status(201).json({ data: { paymentId: payment.id, status: "success", amount, remaining: due - amount } });
-  }
-  res.status(201).json({ data: order(await openOrder(booking, "final", due, method), booking) });
+  const amount = req.body.amount === undefined ? due : v.number(req.body.amount, "amount", 1, due);
+  const transactionRef = method === "cash" ? undefined : v.text(req.body.transactionRef, "transactionRef", 1, 100);
+  const payment = await Payment.create({ bookingId: booking._id, kind: "final", amount, method, transactionRef, status: "success", paidAt: new Date(), recordedBy: req.user._id });
+  await announce(payment, true);
+  await audit(req.user._id, "payment.recorded", "payment", payment._id, { bookingId: booking._id, amount, method });
+  res.status(201).json({ data: { paymentId: payment.id, status: "success", amount, remaining: due - amount } });
 }
 
 // UC38 (built-in sandbox gateway): a signed result. Nothing changes unless the signature, order and amount all match (BR-14, BR-15).

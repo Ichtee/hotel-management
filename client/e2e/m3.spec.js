@@ -57,7 +57,7 @@ test("manager validates and saves the deposit policy", async ({ page }) => {
   await expect(page.getByText("Saved. New bookings use these tiers")).toBeVisible();
 });
 
-// UC12 / UC13 change the demo data (they pay the seeded bookings), so run them against a fresh `npm run demo`.
+// The deposit test changes the demo data (it pays a seeded booking), so run these against a fresh `npm run demo`.
 test("customer pays the deposit: declined once, retried and approved, then the booking is confirmed", async ({ page }) => {
   await signIn(page, "customer@demo.hotel", "/#/login", "My bookings");
   const pending = page.locator("article", { hasText: "BK2610B2" });
@@ -82,18 +82,16 @@ test("customer pays the deposit: declined once, retried and approved, then the b
   await expect(paid.getByRole("link", { name: "Pay deposit" })).toHaveCount(0);
 });
 
-test("customer pays the remaining balance and the booking shows as paid", async ({ page }) => {
+// BR-14: only the deposit is paid online; the balance is settled at the front desk at check-out (UC11).
+test("customer cannot pay the balance online and is told to pay it at the front desk", async ({ page }) => {
   await signIn(page, "customer@demo.hotel", "/#/login", "My bookings");
   const booking = page.locator("article", { hasText: "BK2610A1" });
   await booking.getByRole("button", { name: "View details" }).click();
-  await page.getByRole("link", { name: /^Pay balance/ }).click();
-  await expect(page.getByRole("heading", { name: "Pay the remaining balance" })).toBeVisible();
-  await page.getByRole("button", { name: /^Pay ₫/ }).click();
-  await page.getByRole("button", { name: "Approve payment" }).click();
-  await expect(page.getByRole("heading", { name: "Payment received" })).toBeVisible();
+  await expect(page.getByText("The balance is paid at the front desk when you check out")).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Pay balance/ })).toHaveCount(0);
 
-  await page.getByRole("link", { name: "View my bookings" }).click();
-  await expect(page.locator("article", { hasText: "BK2610A1" }).getByText("Payment: Paid")).toBeVisible();
+  await page.goto("/#/pay/any?kind=final");
+  await expect(page.getByText("Only the deposit is paid online.")).toBeVisible();
 });
 
 // UC08 -> UC35 -> UC21 on BK2610A1 (check-in in 14 days: full deposit refund under the 48 h tier).

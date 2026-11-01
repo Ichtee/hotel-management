@@ -214,7 +214,6 @@ function createApp({
   app.get("/api/bookings/:id", bookings.detail);
 
   app.post("/api/bookings/:id/payments/deposit", payments.deposit);
-  app.post("/api/bookings/:id/payments/final", payments.finalPayment);
   app.get("/api/payments/methods", payments.methods);
   app.get("/api/payments/:id", payments.show);
   if (!production) app.post("/api/sandbox-gateway/orders/:orderId", payments.sandbox);

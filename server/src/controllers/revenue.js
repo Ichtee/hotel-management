@@ -31,18 +31,6 @@ async function revenue(req, res) {
       count: { $sum: 1 },
     },
   });
-  const bookingJoin = (local) => [
-    {
-      $lookup: {
-        from: "bookings",
-        localField: local,
-        foreignField: "_id",
-        as: "booking",
-      },
-    },
-    { $unwind: "$booking" },
-    { $match: { "booking.hotelId": req.hotelId } },
-  ];
   const [payments, refunds] = await Promise.all([
     Payment.aggregate([
       {
@@ -52,7 +40,6 @@ async function revenue(req, res) {
           paidAt: { $gte: start, $lt: end },
         },
       },
-      ...bookingJoin("bookingId"),
       group("paidAt"),
     ]),
     Refund.aggregate([
@@ -79,7 +66,6 @@ async function revenue(req, res) {
           $expr: { $eq: ["$bookingId", "$payment.bookingId"] },
         },
       },
-      ...bookingJoin("payment.bookingId"),
       group("processedAt"),
     ]),
   ]);

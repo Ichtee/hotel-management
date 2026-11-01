@@ -3,17 +3,14 @@ const CouponUsage = require("../models/CouponUsage");
 const v = require("../utils/validation");
 async function validateCoupon({
   code,
-  hotelId,
   customerId,
   subtotal,
   now = new Date(),
 }) {
-  v.id(String(hotelId), "hotelId");
   v.id(String(customerId), "customerId");
   v.number(subtotal, "subtotal", 1);
   const coupon = await Coupon.findOne({
     code: v.text(code, "code", 2, 30).toUpperCase(),
-    hotelId,
   });
   if (!coupon || !coupon.isActive) v.fail("Coupon is unavailable.");
   if (coupon.startDate && now < coupon.startDate)
@@ -27,9 +24,7 @@ async function validateCoupon({
     v.fail("You have already used this coupon.");
   const discountAmount = Math.min(
     subtotal,
-    coupon.discountType === "percentage"
-      ? Math.floor((subtotal * coupon.discountValue) / 100)
-      : coupon.discountValue,
+    Math.floor((subtotal * coupon.discountValue) / 100),
   );
   return { couponId: coupon.id, code: coupon.code, discountAmount };
 }

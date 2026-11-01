@@ -12,6 +12,7 @@ const schema = new Schema({
     enum: ['requested', 'approved', 'processing', 'completed', 'rejected', 'failed'],
     default: 'requested'
   },
+  requestedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   processedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   gateway: String,
   gatewayRefundId: String,

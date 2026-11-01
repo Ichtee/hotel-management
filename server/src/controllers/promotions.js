@@ -22,10 +22,9 @@ function validate(body, coupon) {
   if (creating || body.discountType !== undefined)
     data.discountType = v.choice(body.discountType, "discountType", [
       "percentage",
-      "fixed_amount",
     ]);
   if (creating || body.discountValue !== undefined)
-    data.discountValue = v.number(body.discountValue, "discountValue", 1);
+    data.discountValue = v.number(body.discountValue, "discountValue", 0.01);
   if (creating || body.usageLimit !== undefined)
     data.usageLimit = v.number(body.usageLimit, "usageLimit", 1);
   if (creating || body.minimumSpend !== undefined)
@@ -45,7 +44,7 @@ function validate(body, coupon) {
   return data;
 }
 async function listing(req, res) {
-  const filter = { hotelId: req.hotelId, code: v.search(req.query) };
+  const filter = { code: v.search(req.query) };
   if (req.query.status)
     filter.isActive =
       v.choice(req.query.status, "status", ["active", "inactive"]) === "active";
@@ -53,14 +52,11 @@ async function listing(req, res) {
 }
 async function create(req, res) {
   const data = validate(req.body);
-  const coupon = await Coupon.create({ ...data, hotelId: req.hotelId });
+  const coupon = await Coupon.create(data);
   res.status(201).json({ data: coupon });
 }
 async function find(req) {
-  const coupon = await Coupon.findOne({
-    _id: v.id(req.params.id),
-    hotelId: req.hotelId,
-  });
+  const coupon = await Coupon.findById(v.id(req.params.id));
   if (!coupon) throw new v.HttpError(404, "Promotion not found.");
   return coupon;
 }

@@ -9,6 +9,7 @@ const catalog = [
   { key: "staff.manage", name: "Manage hotel staff", scope: "hotel" },
   { key: "promotions.manage", name: "Manage promotions", scope: "hotel" },
   { key: "revenue.read", name: "View revenue reports", scope: "hotel" },
+  { key: "policies.manage", name: "Manage deposit policy", scope: "hotel" },
 ];
 const defaults = [
   {
@@ -21,7 +22,12 @@ const defaults = [
     key: "manager",
     name: "Hotel manager",
     scope: "hotel",
-    permissions: ["staff.manage", "promotions.manage", "revenue.read"],
+    permissions: [
+      "staff.manage",
+      "promotions.manage",
+      "revenue.read",
+      "policies.manage",
+    ],
   },
   {
     key: "receptionist",

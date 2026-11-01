@@ -1,6 +1,5 @@
 const User = require("../models/User");
 const Role = require("../models/Role");
-const Hotel = require("../models/Hotel");
 const { HttpError } = require("../utils/validation");
 function publicUser(user, role) {
   const data = user.toObject ? user.toObject() : { ...user };
@@ -9,6 +8,7 @@ function publicUser(user, role) {
   if (data.customerProfile) delete data.customerProfile.idDocumentNo;
   return {
     ...data,
+    role: role.key,
     permissions: role.permissions,
     roleName: role.name,
     scope: role.scope,
@@ -24,7 +24,7 @@ async function authenticate(req, res, next) {
     (user.authVersion || 0) !== req.session.authVersion
   )
     throw new HttpError(401, "Your session has ended. Please sign in.");
-  const role = await Role.findOne({ key: user.role, isActive: true });
+  const role = await Role.findOne({ _id: user.roleId, isActive: true });
   if (!role)
     throw new HttpError(
       401,
@@ -39,15 +39,4 @@ const permit = (permission) => (req, res, next) => {
     throw new HttpError(403, "You do not have permission to use this feature.");
   next();
 };
-async function hotelScope(req, res, next) {
-  const hotelId = req.user.employeeProfile?.hotelId;
-  if (
-    req.role.scope !== "hotel" ||
-    !hotelId ||
-    !(await Hotel.exists({ _id: hotelId }))
-  )
-    throw new HttpError(403, "An active hotel assignment is required.");
-  req.hotelId = hotelId;
-  next();
-}
-module.exports = { authenticate, permit, hotelScope, publicUser };
+module.exports = { authenticate, permit, publicUser };

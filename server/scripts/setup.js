@@ -4,7 +4,7 @@ require("dotenv").config({
 const mongoose = require("mongoose");
 const connectDatabase = require("../src/config/database");
 const User = require("../src/models/User");
-const Hotel = require("../src/models/Hotel");
+const Role = require("../src/models/Role");
 const { seedRoles } = require("../src/services/roles");
 const { hashPassword } = require("../src/utils/password");
 const v = require("../src/utils/validation");
@@ -15,32 +15,21 @@ async function bootstrap(env) {
   const email = v.email(env.ADMIN_EMAIL);
   const fullName = v.text(env.ADMIN_NAME, "ADMIN_NAME", 2, 50);
   v.password(env.ADMIN_PASSWORD);
-  const hotelName = env.HOTEL_NAME
-    ? v.text(env.HOTEL_NAME, "HOTEL_NAME", 2, 100)
-    : null;
-  const city = env.HOTEL_CITY
-    ? v.text(env.HOTEL_CITY, "HOTEL_CITY", 0, 100)
-    : "";
   await User.init();
-  if (await User.exists({ role: "admin" }))
+  await seedRoles();
+  const adminRole = await Role.findOne({ key: "admin" });
+  if (await User.exists({ roleId: adminRole._id }))
     throw new Error(
       "An administrator already exists. Use Accounts to manage users.",
     );
-  await seedRoles();
   const admin = await User.create({
     username,
     email,
-    role: "admin",
+    roleId: adminRole._id,
     status: "active",
     passwordHash: await hashPassword(env.ADMIN_PASSWORD),
     customerProfile: { fullName },
   });
-  if (hotelName)
-    await Hotel.updateOne(
-      { name: hotelName },
-      { $setOnInsert: { name: hotelName, city } },
-      { upsert: true },
-    );
   return admin;
 }
 async function main() {

@@ -3,11 +3,13 @@ const session = require("express-session");
 const { MongoStore } = require("connect-mongo");
 const { rateLimit } = require("express-rate-limit");
 const helmet = require("helmet");
-const { authenticate, permit, hotelScope } = require("./middleware/auth");
+const { authenticate, permit } = require("./middleware/auth");
 const auth = require("./controllers/auth");
 const accounts = require("./controllers/accounts");
 const roles = require("./controllers/roles");
 const promotions = require("./controllers/promotions");
+const bookings = require("./controllers/bookings");
+const policies = require("./controllers/policies");
 const { revenue } = require("./controllers/revenue");
 const { HttpError } = require("./utils/validation");
 function createApp({
@@ -91,17 +93,22 @@ function createApp({
   app.post("/api/roles", permit("roles.manage"), roles.create);
   app.patch("/api/roles/:id", permit("roles.manage"), roles.update);
   app.delete("/api/roles/:id", permit("roles.manage"), roles.remove);
-  app.use("/api/staff", permit("staff.manage"), hotelScope);
+  app.use("/api/staff", permit("staff.manage"));
   app.get("/api/staff", accounts.listing(true));
   app.post("/api/staff", accounts.create(true));
   app.patch("/api/staff/:id", accounts.update(true));
   app.delete("/api/staff/:id", accounts.deactivateStaff);
-  app.use("/api/promotions", permit("promotions.manage"), hotelScope);
+  app.use("/api/promotions", permit("promotions.manage"));
   app.get("/api/promotions", promotions.listing);
   app.post("/api/promotions", promotions.create);
   app.patch("/api/promotions/:id", promotions.update);
   app.delete("/api/promotions/:id", promotions.remove);
-  app.get("/api/reports/revenue", permit("revenue.read"), hotelScope, revenue);
+  app.get("/api/bookings", bookings.listing);
+  app.get("/api/bookings/:id", bookings.detail);
+  app.use("/api/policies/deposit", permit("policies.manage"));
+  app.get("/api/policies/deposit", policies.listing);
+  app.post("/api/policies/deposit", policies.create);
+  app.get("/api/reports/revenue", permit("revenue.read"), revenue);
   app.use((req, res) =>
     res.status(404).json({ error: { message: "Endpoint not found." } }),
   );

@@ -43,7 +43,7 @@ All **demo-only** passwords: `HotelDemo123!`. Revenue, staff and promotion fixtu
 
 1. Start MongoDB and copy `server/.env.example` to `server/.env`.
 2. Set `MONGO_URI`, `CLIENT_ORIGIN` and a random `SESSION_SECRET` of at least 32 characters. Generate one with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`.
-3. For first setup, fill `ADMIN_USERNAME`, `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`. Passwords require 10–128 characters, including a letter and a number. Optional `HOTEL_NAME`/`HOTEL_CITY` creates an initial property for staff assignments; otherwise use hotels supplied by the group's hotel module.
+3. For first setup, fill `ADMIN_USERNAME`, `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`. Passwords require 10–128 characters, including a letter and a number.
 4. Run:
 
 ```powershell
@@ -92,7 +92,7 @@ API prefix `/api`. Responses use `{ data, meta? }`; errors use `{ error: { messa
 
 Users/staff/promotions lists accept `page`, `limit`, `q` (search), `status`; accounts/staff also accept `role`. Revenue accepts `from=YYYY-MM-DD`, `to=YYYY-MM-DD`, `groupBy=day|month`, optional `format=csv`. Dates use Vietnam time (UTC+7); report end dates are inclusive. Successful VND `Payment` records are counted by `paidAt`, completed VND `Refund` records by `processedAt`, joined through payment → booking → hotel. Net revenue = receipts minus refunds, including refunds for older payments. Other members must populate these fields when implementing transactions.
 
-Coupons accept `code`, `discountType` (`percentage` or `fixed_amount`), `discountValue`, `usageLimit`, `minimumSpend`, `startDate`, `endDate`, `isActive`. Coupon end dates are **exclusive** at midnight UTC+7, as the editor explains. Used coupons cannot be renamed/deleted; deactivate them instead. Clients cannot set usage counters.
+Coupons accept `code`, `discountType` (`percentage`), `discountValue`, `usageLimit`, `minimumSpend`, `startDate`, `endDate`, `isActive`. Coupon end dates are **exclusive** at midnight UTC+7, as the editor explains. Used coupons cannot be renamed/deleted; deactivate them instead. Clients cannot set usage counters.
 
 `server/src/services/promotions.js` exports `validateCoupon({ code, hotelId, customerId, subtotal })`, returning the validated discount. This is validation only: the booking/payment owner must atomically recheck/increment the usage limit and create `CouponUsage` during redemption, recording the discount snapshot on the booking. Calling validation does not reserve or redeem a coupon.
 

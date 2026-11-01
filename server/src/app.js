@@ -80,6 +80,8 @@ function createApp({
   app.post("/api/auth/register", authLimit, auth.register);
   app.post("/api/auth/login", authLimit, auth.login);
   app.post("/api/auth/logout", auth.logout);
+  app.post("/api/auth/forgot-password", authLimit, auth.forgotPassword);
+  app.post("/api/auth/reset-password", authLimit, auth.resetPassword);
   app.use("/api", authenticate);
   app.get("/api/auth/me", auth.profile);
   app.get("/api/profile", auth.profile);

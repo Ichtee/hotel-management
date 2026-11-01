@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from './context/Auth.jsx';
-import { AuthShell, AuthTabs, SignIn, Register } from './AuthForms.jsx';
+import { AuthShell, AuthTabs, SignIn, Register, ForgotPassword } from './AuthForms.jsx';
 import { Profile } from './AdminPages.jsx';
 import { EXTRAS, OFFERS, REVIEWS, ROOM_TYPES } from './data.js';
 import { MyBookings } from './Bookings.jsx';
@@ -308,16 +308,30 @@ const Confirmation = () => (
 
 function Auth({ note }) {
   const [mode, setMode] = useState('login');
+  const [resetSuccess, setResetSuccess] = useState(null);
   const { user } = useAuth();
   const done = () => { location.hash = sessionStorage.getItem('next') || '#/my-bookings'; sessionStorage.removeItem('next'); };
   if (user) { if (user.scope === 'self') done(); else location.hash = '#/admin'; return null; }
   return (
     <AuthShell>
-      <h1>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
-      <p className="muted">{mode === 'login' ? 'Sign in to manage your bookings.' : 'Book faster and keep every stay in one place.'}</p>
-      <AuthTabs mode={mode} onChange={setMode} />
+      <h1>{mode === 'login' ? 'Welcome back' : mode === 'register' ? 'Create your account' : 'Reset password'}</h1>
+      <p className="muted">
+        {mode === 'login' ? 'Sign in to manage your bookings.' : mode === 'register' ? 'Book faster and keep every stay in one place.' : 'Enter your details to reset your password.'}
+      </p>
+      {mode !== 'forgot' && <AuthTabs mode={mode} onChange={(m) => { setMode(m); setResetSuccess(null); }} />}
+      {resetSuccess && <p role="status" className="note ok-note">{resetSuccess}</p>}
       {note && <p className="note">{note}</p>}
-      {mode === 'login' ? <SignIn onDone={done} /> : <Register onDone={done} />}
+      {mode === 'login' && <SignIn onDone={done} onForgot={() => { setMode('forgot'); setResetSuccess(null); }} />}
+      {mode === 'register' && <Register onDone={done} />}
+      {mode === 'forgot' && (
+        <ForgotPassword
+          onDone={() => {
+            setMode('login');
+            setResetSuccess('Password has been reset successfully. Please sign in with your new password.');
+          }}
+          onCancel={() => setMode('login')}
+        />
+      )}
     </AuthShell>
   );
 }

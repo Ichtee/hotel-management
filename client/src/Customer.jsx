@@ -377,7 +377,6 @@ function Checkout({ q, user }) {
   const offer = OFFERS.find((o) => o.code === q.coupon);
   const sub = nights * r.price + ex.reduce((s, [, p]) => s + p, 0);
   const total = sub * (1 - (offer?.pct || 0) / 100);
-  const [pay, setPay] = useState('deposit');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const confirm = async (e) => {
@@ -389,16 +388,16 @@ function Checkout({ q, user }) {
       if (!type) throw new Error('This room is no longer available. Please choose another room.');
       const created = await api('/bookings', { method: 'POST', body: {
         roomTypeId: type._id, checkInDate: q.in, checkOutDate: q.out,
-        guestCount: Number(q.guests), couponCode: q.coupon || undefined, paymentOption: pay
+        guestCount: Number(q.guests), couponCode: q.coupon || undefined
       } });
-      location.hash = `#/confirmation?${new URLSearchParams({ ref: created.data.bookingReference })}`;
+      // A pending booking goes straight to the deposit payment (UC10); one with nothing to pay is already confirmed.
+      location.hash = created.data.status === 'pending' ? `#/pay/${created.data._id}?kind=deposit` : `#/confirmation?${new URLSearchParams({ ref: created.data.bookingReference })}`;
     } catch (err) { setError(err.message || 'Unable to create your booking.'); }
     finally { setSaving(false); }
   };
   return (
     <div className="c-wrap c-section">
       <h1 className="title">Checkout</h1>
-      {errorMsg && <p className="alert bad">{errorMsg}</p>}
       <div className="c-layout detail">
         <form className="panel form" onSubmit={confirm} id="co">
           {currentUser && (
@@ -413,12 +412,10 @@ function Checkout({ q, user }) {
           <label>Special requests<input name="specialRequests" placeholder="Late arrival, high floor, quiet room…" /></label>
           <fieldset className="full">
             <legend>Payment</legend>
-            {[['deposit', `Pay 20% deposit now (${money(total * 0.2)})`], ['full', `Pay in full (${money(total)})`], ['hotel', 'Pay at the hotel']].map(([v, l]) => (
-              <label className="check" key={v}><input type="radio" name="pay" checked={pay === v} onChange={() => setPay(v)} />{l}</label>
-            ))}
+            <p className="muted">Pay the deposit online now to confirm your booking. The room is held for 15 minutes while you pay. The rest is paid at the front desk when you check out.</p>
           </fieldset>
           {error && <p className="note bad-note full" role="alert">{error}</p>}
-          <button className="btn primary" type="submit" disabled={saving}>{saving ? 'Creating booking…' : 'Confirm booking'}</button>
+          <button className="btn primary" type="submit" disabled={saving}>{saving ? 'Creating booking…' : 'Continue to deposit payment'}</button>
         </form>
         <aside className="panel book">
           <img className="thumb" src={r.img} alt="" />

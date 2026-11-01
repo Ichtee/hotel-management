@@ -611,6 +611,23 @@ test("deposit policy: manager versions a percentage rule, old versions are retir
   assert.equal((await currentDepositPolicy(new Date(Date.now() - 86400000))), null);
   assert.equal(list.body.data.filter((p) => p.isActive).length, 1);
 });
+test("online booking: held 15 minutes for the deposit (BR-29), no pay-at-hotel option, deposit can then be paid", async () => {
+  const RoomType = require("../src/models/RoomType");
+  const Room = require("../src/models/Room");
+  const type = await RoomType.create({ name: "Checkout Suite", basePrice: 1000, maxOccupancy: 2 });
+  await Room.create({ roomNumber: "CO-1", roomTypeId: type._id, floor: 1 });
+  const body = { roomTypeId: type.id, checkInDate: "2027-08-10", checkOutDate: "2027-08-12", guestCount: 2 };
+  for (const paymentOption of ["hotel", "full"])
+    await send(customer, "post", "/api/bookings", { ...body, paymentOption }).expect(400);
+  const booking = (await send(customer, "post", "/api/bookings", body).expect(201)).body.data;
+  assert.equal(booking.status, "pending");
+  assert.equal(booking.depositRequired, 1000); // 50% policy from the previous test
+  const holdMinutes = (Date.parse(booking.holdExpiresAt) - Date.now()) / 60000;
+  assert.ok(holdMinutes > 14 && holdMinutes <= 15);
+  assert.equal(await Payment.countDocuments({ bookingId: booking._id }), 0); // no placeholder payment
+  const order = (await send(customer, "post", `/api/bookings/${booking._id}/payments/deposit`, { method: "e_wallet" }).expect(201)).body.data;
+  assert.equal(order.amount, 1000);
+});
 
 // ---- M3 payments: UC12 deposit, UC13 final payment, UC38 gateway callback ----
 const gw = require("../src/services/gateway");

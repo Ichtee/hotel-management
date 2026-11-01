@@ -259,7 +259,6 @@ class BookingService {
     await booking.save();
 
     return Booking.findById(booking._id)
-      .populate('hotelId', 'name city address phone email starRating')
       .populate('rooms.roomTypeId', 'name basePrice maxOccupancy bedType amenities images')
       .populate('rooms.roomId', 'roomNumber floor status');
   }
@@ -292,7 +291,6 @@ class BookingService {
     }
 
     return Booking.find(query)
-      .populate('hotelId', 'name city address starRating')
       .populate('rooms.roomTypeId', 'name basePrice bedType images')
       .populate('rooms.roomId', 'roomNumber floor')
       .sort({ createdAt: -1 });
@@ -303,7 +301,6 @@ class BookingService {
    */
   async getBookingByReference(reference) {
     const booking = await Booking.findOne({ bookingReference: reference.trim().toUpperCase() })
-      .populate('hotelId', 'name city address phone email starRating')
       .populate('rooms.roomTypeId', 'name basePrice bedType amenities images')
       .populate('rooms.roomId', 'roomNumber floor');
 

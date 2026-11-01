@@ -33,7 +33,8 @@ async function create(req, res) {
   const { roomTypeId, checkInDate, checkOutDate } = req.body;
   v.id(roomTypeId, "roomTypeId"); v.date(checkInDate, "checkInDate"); v.date(checkOutDate, "checkOutDate");
   const guestCount = v.number(req.body.guestCount, "guestCount", 1, 20);
-  const paymentOption = v.choice(req.body.paymentOption || "hotel", "paymentOption", ["deposit", "full", "hotel"]);
+  // BR-13/BR-14: an online booking is confirmed by paying the deposit online; there is no pay-at-hotel or pay-in-full option.
+  v.choice(req.body.paymentOption || "deposit", "paymentOption", ["deposit"]);
   const type = await RoomType.findOne({ _id: roomTypeId, isActive: true });
   if (!type) throw new v.HttpError(404, "This room type is no longer available.");
   if (guestCount > type.maxOccupancy) v.fail(`This room accommodates up to ${type.maxOccupancy} guests.`, "guestCount");
@@ -45,10 +46,13 @@ async function create(req, res) {
   const discountAmount = coupon?.discountAmount || 0;
   const totalAmount = roomAmount - discountAmount;
   const policy = await currentDepositPolicy();
-  const depositRequired = policy ? Math.floor((totalAmount * policy.deposit.value) / 100) : 0;
-  const booking = await Booking.create({ bookingReference: reference(), customerId: req.user._id, createdBy: req.user._id, checkInDate, checkOutDate, status: paymentOption === "hotel" ? "confirmed" : "pending", rooms: [{ roomId: assignment.roomId, roomTypeId: type._id, priceAtBooking: priceAt(type, checkInDate), guestCount }], couponCode: coupon?.code, discountAmount, roomAmount, totalAmount, depositRequired, policySnapshot: policy ? { depositPolicyId: policy._id, depositType: policy.deposit.type, depositValue: policy.deposit.value, depositDescription: policy.description } : undefined, bookingSource: "online", events: [{ actorId: req.user._id, type: "created", note: "Booking created online" }] });
+  if (!policy) throw new v.HttpError(409, "Online booking is not available yet: the hotel has not set a deposit policy.");
+  const depositRequired = Math.floor((totalAmount * policy.deposit.value) / 100);
+  // BR-29: the room is held for 15 minutes while the deposit is paid; BR-31: a booking with nothing to pay is confirmed at once.
+  const held = depositRequired >= 1;
+  const booking = await Booking.create({ bookingReference: reference(), customerId: req.user._id, createdBy: req.user._id, checkInDate, checkOutDate, status: held ? "pending" : "confirmed", holdExpiresAt: held ? new Date(Date.now() + 15 * 60000) : undefined, rooms: [{ roomId: assignment.roomId, roomTypeId: type._id, priceAtBooking: priceAt(type, checkInDate), guestCount }], couponCode: coupon?.code, discountAmount, roomAmount, totalAmount, depositRequired, policySnapshot: policy ? { depositPolicyId: policy._id, depositType: policy.deposit.type, depositValue: policy.deposit.value, depositDescription: policy.description } : undefined, bookingSource: "online", events: [{ actorId: req.user._id, type: "created", note: "Booking created online" }] });
   if (coupon) { await CouponUsage.create({ couponId: coupon.couponId, bookingId: booking._id, customerId: req.user._id }); await Coupon.updateOne({ _id: coupon.couponId }, { $inc: { usageCount: 1 } }); }
-  if (paymentOption !== "hotel") await Payment.create({ bookingId: booking._id, kind: paymentOption === "full" ? "final" : "deposit", amount: paymentOption === "full" ? totalAmount : depositRequired, method: "e_wallet", status: "pending" });
+  // The deposit order is opened by the payment page (UC10), so no placeholder payment is created here.
   res.status(201).json({ data: booking });
 }
 async function roomTypes(_req, res) { res.json({ data: await RoomType.find({ isActive: true }).select("name description basePrice maxOccupancy amenities images bedType roomSizeSqm seasonalPricing").sort({ basePrice: 1 }).lean() }); }

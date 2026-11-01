@@ -5,6 +5,7 @@ const RoomType = require("../models/RoomType");
 const Payment = require("../models/Payment");
 const CouponUsage = require("../models/CouponUsage");
 const Coupon = require("../models/Coupon");
+const Service = require("../models/Service");
 const { validateCoupon } = require("../services/promotions");
 const { currentDepositPolicy } = require("../services/policies");
 const v = require("../utils/validation");
@@ -185,4 +186,22 @@ async function changeRoom(req, res) {
   oldRoom.status = "cleaning"; newRoom.status = "occupied"; await Promise.all([oldRoom.save(), newRoom.save(), booking.save()]);
   res.json({ data: booking, meta: { extraCharge: extra } });
 }
-module.exports = { create, roomTypes, createWalkIn, modifyWalkIn, cancelWalkIn, availableRooms, checkIn, changeRoomOptions, changeRoom };
+async function services(_req, res) {
+  if (_req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can record services.");
+  res.json({ data: await Service.find({ isActive: true }).select("name category unitPrice").sort({ name: 1 }).lean() });
+}
+async function addService(req, res) {
+  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can record services.");
+  v.keys(req.body, ["serviceId", "quantity"]);
+  const booking = await Booking.findById(v.id(req.params.id));
+  if (!booking) throw new v.HttpError(404, "Booking not found.");
+  if (booking.status !== "checked_in") throw new v.HttpError(409, "Services can only be recorded for a checked-in booking.");
+  const service = await Service.findOne({ _id: v.id(req.body.serviceId, "serviceId"), isActive: true });
+  if (!service) throw new v.HttpError(404, "This service is no longer available.");
+  const quantity = v.number(req.body.quantity, "quantity", 1, 100); const amount = service.unitPrice * quantity;
+  booking.services.push({ serviceId: service._id, name: service.name, quantity, unitPrice: service.unitPrice, amount, recordedBy: req.user._id });
+  booking.serviceAmount += amount; booking.totalAmount += amount;
+  booking.events.push({ actorId: req.user._id, type: "service_added", note: `Added ${quantity} × ${service.name}`, newValue: { serviceId: service._id, quantity, amount } });
+  await booking.save(); res.status(201).json({ data: booking });
+}
+module.exports = { create, roomTypes, createWalkIn, modifyWalkIn, cancelWalkIn, availableRooms, checkIn, changeRoomOptions, changeRoom, services, addService };

@@ -206,6 +206,7 @@ function Bookings() {
   const [cancelling, setCancelling] = useState(null);
   const [checkingIn, setCheckingIn] = useState(null);
   const [changingRoom, setChangingRoom] = useState(null);
+  const [addingService, setAddingService] = useState(null);
   const live = useApi('/bookings?limit=100', user.role === 'receptionist');
   const rows = (live.data || BOOKINGS).filter((b) => f === 'all' || b.status === f);
   return (
@@ -217,14 +218,25 @@ function Bookings() {
         ))}
       </div>
       <Notice error={live.error} />
-      <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status', '']} rows={rows.map((b) => b._id ? [b.bookingReference, b.guestName || '—', b.rooms[0]?.roomId?.roomNumber || 'Assigned at check-in', b.rooms[0]?.roomTypeId?.name || 'Room', b.checkInDate?.slice(0, 10), b.checkOutDate?.slice(0, 10), money(b.totalAmount), b.status, <span className="row-actions"><button className="btn sm" onClick={() => setEditing(b)}>Edit</button>{b.status === 'confirmed' && <button className="btn sm" onClick={() => setCheckingIn(b)}>Check in</button>}{b.status === 'checked_in' && <button className="btn sm" onClick={() => setChangingRoom(b)}>Change room</button>}{['pending', 'confirmed'].includes(b.status) && <button className="btn sm" onClick={() => setCancelling(b)}>Cancel</button>}</span>] : [b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status, ''])} />
+      <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status', '']} rows={rows.map((b) => b._id ? [b.bookingReference, b.guestName || '—', b.rooms[0]?.roomId?.roomNumber || 'Assigned at check-in', b.rooms[0]?.roomTypeId?.name || 'Room', b.checkInDate?.slice(0, 10), b.checkOutDate?.slice(0, 10), money(b.totalAmount), b.status, <span className="row-actions"><button className="btn sm" onClick={() => setEditing(b)}>Edit</button>{b.status === 'confirmed' && <button className="btn sm" onClick={() => setCheckingIn(b)}>Check in</button>}{b.status === 'checked_in' && <><button className="btn sm" onClick={() => setChangingRoom(b)}>Change room</button><button className="btn sm" onClick={() => setAddingService(b)}>Add service</button></>}{['pending', 'confirmed'].includes(b.status) && <button className="btn sm" onClick={() => setCancelling(b)}>Cancel</button>}</span>] : [b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status, ''])} />
       {creating && <WalkInBooking onClose={() => setCreating(false)} />}
       {editing && <EditBooking booking={editing} onClose={() => setEditing(null)} />}
       {cancelling && <CancelBooking booking={cancelling} onClose={() => setCancelling(null)} />}
       {checkingIn && <CheckInBooking booking={checkingIn} onClose={() => setCheckingIn(null)} />}
       {changingRoom && <ChangeRoom booking={changingRoom} onClose={() => setChangingRoom(null)} />}
+      {addingService && <AddService booking={addingService} onClose={() => setAddingService(null)} />}
     </>
   );
+}
+
+function AddService({ booking, onClose }) {
+  const services = useApi('/front-desk/services'); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${booking._id}/services`, { method: 'POST', body: { ...f, quantity: Number(f.quantity) } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  return <Modal title={`Add service · ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
+    <Field label="Service"><select name="serviceId" required disabled={services.loading}><option value="">Select a service</option>{services.data?.map((s) => <option key={s._id} value={s._id}>{s.name} · {money(s.unitPrice)}</option>)}</select></Field>
+    <Field label="Quantity"><input name="quantity" type="number" min="1" max="100" defaultValue="1" required /></Field>
+    <div className="full"><Notice error={services.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || services.loading}>{saving ? 'Adding…' : 'Add service'}</button></div>
+  </form></Modal>;
 }
 
 function ChangeRoom({ booking, onClose }) {

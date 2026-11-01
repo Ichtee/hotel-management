@@ -129,4 +129,32 @@ async function cancelWalkIn(req, res) {
   booking.events.push({ actorId: req.user._id, type: "cancelled", note: `Cancellation requested at front desk: ${reason}` });
   await booking.save(); res.json({ data: booking, meta: { reviewRequired: true, refundableAmount } });
 }
-module.exports = { create, roomTypes, createWalkIn, modifyWalkIn, cancelWalkIn };
+const vnDate = (date = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh" }).format(date);
+async function availableRooms(req, res) {
+  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can check in a guest.");
+  const booking = await Booking.findById(v.id(req.params.id));
+  if (!booking) throw new v.HttpError(404, "Booking not found.");
+  const roomTypeId = booking.rooms[0].roomTypeId;
+  const candidates = await Room.find({ roomTypeId, isActive: true, status: "available" }).select("roomNumber floor roomTypeId").lean();
+  const busy = await Booking.distinct("rooms.roomId", { _id: { $ne: booking._id }, status: { $in: ACTIVE }, checkInDate: { $lt: booking.checkOutDate }, checkOutDate: { $gt: booking.checkInDate }, "rooms.roomId": { $in: candidates.map((r) => r._id) } });
+  res.json({ data: candidates.filter((r) => !busy.some((id) => String(id) === String(r._id))) });
+}
+async function checkIn(req, res) {
+  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can check in a guest.");
+  v.keys(req.body, ["roomId", "guestCount", "idDocumentNo"]);
+  const booking = await Booking.findById(v.id(req.params.id)).select("+guestIdDocumentNo");
+  if (!booking) throw new v.HttpError(404, "Booking not found.");
+  if (booking.status !== "confirmed") throw new v.HttpError(409, "Only a confirmed booking can be checked in.");
+  if (vnDate(booking.checkInDate) !== vnDate()) throw new v.HttpError(409, "This booking is outside its check-in period.");
+  const room = await Room.findOne({ _id: v.id(req.body.roomId, "roomId"), roomTypeId: booking.rooms[0].roomTypeId, isActive: true, status: "available" });
+  if (!room) throw new v.HttpError(409, "The selected room is no longer available.");
+  const guestCount = v.number(req.body.guestCount, "guestCount", 1, 20);
+  const type = await RoomType.findById(booking.rooms[0].roomTypeId);
+  if (!type || guestCount > type.maxOccupancy) v.fail("Invalid guest count.", "guestCount");
+  booking.rooms[0].roomId = room._id; booking.rooms[0].guestCount = guestCount; booking.guestIdDocumentNo = v.text(req.body.idDocumentNo, "idDocumentNo", 3, 40);
+  booking.status = "checked_in"; booking.actualCheckInAt = new Date(); booking.checkedInBy = req.user._id;
+  booking.events.push({ actorId: req.user._id, type: "checked_in", note: `Checked in to room ${room.roomNumber}` });
+  room.status = "occupied"; await room.save(); await booking.save();
+  res.json({ data: booking });
+}
+module.exports = { create, roomTypes, createWalkIn, modifyWalkIn, cancelWalkIn, availableRooms, checkIn };

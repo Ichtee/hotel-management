@@ -204,6 +204,7 @@ function Bookings() {
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
   const [cancelling, setCancelling] = useState(null);
+  const [checkingIn, setCheckingIn] = useState(null);
   const live = useApi('/bookings?limit=100', user.role === 'receptionist');
   const rows = (live.data || BOOKINGS).filter((b) => f === 'all' || b.status === f);
   return (
@@ -215,12 +216,23 @@ function Bookings() {
         ))}
       </div>
       <Notice error={live.error} />
-      <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status', '']} rows={rows.map((b) => b._id ? [b.bookingReference, b.guestName || '—', b.rooms[0]?.roomId?.roomNumber || 'Assigned at check-in', b.rooms[0]?.roomTypeId?.name || 'Room', b.checkInDate?.slice(0, 10), b.checkOutDate?.slice(0, 10), money(b.totalAmount), b.status, <span className="row-actions"><button className="btn sm" onClick={() => setEditing(b)}>Edit</button>{['pending', 'confirmed'].includes(b.status) && <button className="btn sm" onClick={() => setCancelling(b)}>Cancel</button>}</span>] : [b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status, ''])} />
+      <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status', '']} rows={rows.map((b) => b._id ? [b.bookingReference, b.guestName || '—', b.rooms[0]?.roomId?.roomNumber || 'Assigned at check-in', b.rooms[0]?.roomTypeId?.name || 'Room', b.checkInDate?.slice(0, 10), b.checkOutDate?.slice(0, 10), money(b.totalAmount), b.status, <span className="row-actions"><button className="btn sm" onClick={() => setEditing(b)}>Edit</button>{b.status === 'confirmed' && <button className="btn sm" onClick={() => setCheckingIn(b)}>Check in</button>}{['pending', 'confirmed'].includes(b.status) && <button className="btn sm" onClick={() => setCancelling(b)}>Cancel</button>}</span>] : [b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status, ''])} />
       {creating && <WalkInBooking onClose={() => setCreating(false)} />}
       {editing && <EditBooking booking={editing} onClose={() => setEditing(null)} />}
       {cancelling && <CancelBooking booking={cancelling} onClose={() => setCancelling(null)} />}
+      {checkingIn && <CheckInBooking booking={checkingIn} onClose={() => setCheckingIn(null)} />}
     </>
   );
+}
+
+function CheckInBooking({ booking, onClose }) {
+  const rooms = useApi(`/front-desk/bookings/${booking._id}/available-rooms`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${booking._id}/check-in`, { method: 'POST', body: { ...f, guestCount: Number(f.guestCount) } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  return <Modal title={`Check in ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
+    <Field label="Available room"><select name="roomId" required disabled={rooms.loading}><option value="">Select a room</option>{rooms.data?.map((r) => <option key={r._id} value={r._id}>Room {r.roomNumber} · Floor {r.floor}</option>)}</select></Field>
+    <Field label="Number of guests"><input name="guestCount" type="number" min="1" defaultValue={booking.rooms?.[0]?.guestCount || 1} required /></Field><Field label="ID / passport number"><input name="idDocumentNo" required /></Field>
+    <div className="full"><Notice error={rooms.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || rooms.loading || !rooms.data?.length}>{saving ? 'Checking in…' : 'Confirm check-in'}</button></div>
+  </form></Modal>;
 }
 
 function CancelBooking({ booking, onClose }) {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BOOKINGS, MENU, ROOMS, TABLES } from './data.js';
 import AdminRoomMap from './pages/AdminRoomMap.jsx';
 import AdminRoomTypes from './pages/AdminRoomTypes.jsx';
+import HousekeepingTasks from './HousekeepingTasks.jsx';
 import './admin.css';
 import { useAuth } from './context/Auth.jsx';
 import { Badge, DataTable, Field, LineChart, Modal, Notice, PageHead, useApi } from './ui.jsx';
@@ -439,6 +440,7 @@ const PAGES = {
   '#/admin/bookings': Bookings,
   '#/admin/frontdesk': FrontDesk,
   '#/admin/rooms': AdminRoomMap,
+  '#/admin/cleaning': HousekeepingTasks,
   '#/admin/roomtypes': AdminRoomTypes,
   '#/admin/hotel': Hotel,
   '#/admin/policy': DepositPolicy,
@@ -448,7 +450,7 @@ const PAGES = {
 
 const Forbidden = () => <><PageHead title="No access" sub="Your role does not include this area." /><a className="btn" href="#/admin">Back to dashboard</a></>;
 
-const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/roles': 'roles.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read', '#/admin/policy': 'policies.manage', '#/admin/cancellations': 'cancellations.review', '#/admin/refunds': 'refunds.handle' };
+const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/roles': 'roles.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read', '#/admin/policy': 'policies.manage', '#/admin/cancellations': 'cancellations.review', '#/admin/refunds': 'refunds.handle', '#/admin/cleaning': 'cleaning_tasks.own.read' };
 
 export default function Admin({ route }) {
   const { user, loading } = useAuth();

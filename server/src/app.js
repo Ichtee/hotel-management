@@ -22,12 +22,12 @@ const cancellations = require("./controllers/cancellations");
 const refunds = require("./controllers/refunds");
 const jobs = require("./controllers/jobs");
 const { revenue } = require("./controllers/revenue");
+const housekeepingTasks = require("./controllers/housekeepingTasks");
 const { HttpError } = require("./utils/validation");
 
 // Member 2 Routes & Controllers
 const roomTypeRoutes = require("./routes/roomTypeRoutes");
 const roomRoutes = require("./routes/roomRoutes");
-const housekeepingRoutes = require("./routes/housekeepingRoutes");
 const bookingController = require("./controllers/bookingController");
 
 // Front-desk routes (theanh)
@@ -103,10 +103,9 @@ function createApp({
 
   app.get("/api/health", (req, res) => res.json({ data: { status: "ok" } }));
 
-  // --- Public Member 2 Routes (Room Search, Types, Housekeeping) ---
+  // --- Public Member 2 Routes (Room Search and Types) ---
   app.use("/api/room-types", roomTypeRoutes);
   app.use("/api/rooms", roomRoutes);
-  app.use("/api/housekeeping", housekeepingRoutes);
 
   // --- Member 2 Booking Endpoints ---
   // Creation (UC07) is session-authenticated: see bookingCreation.create below.
@@ -149,6 +148,10 @@ function createApp({
   app.put("/api/profile/password", authLimit, auth.changePassword);
   app.use("/api", requirePasswordChanged);
   app.patch("/api/profile", auth.updateProfile);
+  // M5 housekeeping workflows are authenticated: a Housekeeping user can only see/update own tasks.
+  app.get("/api/housekeeping/tasks/mine", permit("cleaning_tasks.own.read"), housekeepingTasks.mine);
+  app.patch("/api/housekeeping/tasks/:id/status", permit("cleaning_tasks.status.update"), housekeepingTasks.updateMine);
+  app.post("/api/housekeeping/tasks/ad-hoc", permit("cleaning_tasks.ad_hoc.create"), housekeepingTasks.createAdHoc);
   app.get("/api/options", accounts.options);
   app.get("/api/customers", customers.list);
   app.patch("/api/customers/:id/blacklist", customers.blacklist);

@@ -84,6 +84,33 @@ async function createCleaningTask(input, { now = new Date() } = {}) {
   return { data: result.task, notificationStored: await deliver(result.events) };
 }
 
+// UC30: only the Housekeeping employee assigned to a task can progress it.
+// A room becomes Available only after its Turnover task is actually completed.
+async function updateOwnTaskStatus(taskId, actorId, input, { now = new Date() } = {}) {
+  v.keys(input, ["status"]);
+  const status = v.choice(input.status, "status", ["in_progress", "completed", "skipped"]);
+  const result = await hotelTransaction(async (session) => {
+    const task = await Task.findById(taskId).session(session);
+    if (!task) throw new v.HttpError(404, "Cleaning task not found.");
+    if (!task.assignedTo || String(task.assignedTo) !== String(actorId))
+      throw new v.HttpError(403, "You can only update cleaning tasks assigned to you.");
+    if (["completed", "skipped"].includes(task.status))
+      throw new v.HttpError(409, "This cleaning task is already closed.");
+    if (status === "completed" && task.status !== "in_progress")
+      throw new v.HttpError(409, "Start the cleaning task before completing it.");
+
+    task.status = status;
+    if (status === "completed") task.completedAt = now;
+    await task.save({ session });
+
+    if (task.type === "turnover" && status === "completed")
+      await Room.updateOne({ _id: task.roomId, status: "cleaning" }, { $set: { status: "available" } }, { session });
+
+    return task.populate([{ path: "roomId", select: "roomNumber floor status" }, { path: "assignedTo", select: "username customerProfile.fullName" }]);
+  });
+  return { data: result };
+}
+
 // Mỗi ngày tạo tối đa một Routine cho phòng Occupied, trừ phòng trả trong ngày.
 async function createRoutineTasks(session, events, now) {
   const date = hotelDay(now);
@@ -115,4 +142,4 @@ async function runHousekeepingTick(now = new Date()) {
   });
   return { created: result.created, notificationStored: await deliver(result.events) };
 }
-module.exports = { reconcileTasks, createCleaningTask, runHousekeepingTick };
+module.exports = { reconcileTasks, createCleaningTask, updateOwnTaskStatus, runHousekeepingTick };

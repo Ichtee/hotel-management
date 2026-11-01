@@ -44,7 +44,7 @@ export function useApi(path, enabled = true) {
 }
 
 export function DataTable({ cols, rows }) {
-  const words = /^(confirmed|cancellation_requested|checked_in|checked_out|cancelled|pending|active|inactive|paid|done|in_progress|open|resolved|high|medium|low|published|suspended|deleted)$/;
+  const words = /^(confirmed|cancellation_requested|checked_in|checked_out|cancelled|pending|assigned|active|inactive|paid|completed|skipped|done|in_progress|open|resolved|high|medium|low|normal|urgent|published|suspended|deleted)$/;
   const figures = /^[\d\s.,:/₫$%+\-–→]+$/; // dates, times and amounts must not wrap
   return (
     <div className="table-wrap">

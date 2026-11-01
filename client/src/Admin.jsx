@@ -202,7 +202,9 @@ function Bookings() {
   const { user } = useAuth();
   const [f, setF] = useState('all');
   const [creating, setCreating] = useState(false);
-  const rows = BOOKINGS.filter((b) => f === 'all' || b.status === f);
+  const [editing, setEditing] = useState(null);
+  const live = useApi('/bookings?limit=100', user.role === 'receptionist');
+  const rows = (live.data || BOOKINGS).filter((b) => f === 'all' || b.status === f);
   return (
     <>
       <PageHead title="Bookings" sub="All reservations" action={user.role === 'receptionist' ? 'New booking' : null} onAction={() => setCreating(true)} />
@@ -211,10 +213,24 @@ function Bookings() {
           <button key={s} className={f === s ? 'chip on' : 'chip'} aria-pressed={f === s} onClick={() => setF(s)}>{s.replace('_', ' ')}</button>
         ))}
       </div>
-      <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status']} rows={rows.map((b) => [b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status])} />
+      <Notice error={live.error} />
+      <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status', '']} rows={rows.map((b) => b._id ? [b.bookingReference, b.guestName || '—', b.rooms[0]?.roomId?.roomNumber || 'Assigned at check-in', b.rooms[0]?.roomTypeId?.name || 'Room', b.checkInDate?.slice(0, 10), b.checkOutDate?.slice(0, 10), money(b.totalAmount), b.status, <button className="btn sm" onClick={() => setEditing(b)}>Edit</button>] : [b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status, ''])} />
       {creating && <WalkInBooking onClose={() => setCreating(false)} />}
+      {editing && <EditBooking booking={editing} onClose={() => setEditing(null)} />}
     </>
   );
+}
+
+function EditBooking({ booking, onClose }) {
+  const detail = useApi(`/bookings/${booking._id}`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  if (detail.loading) return <Modal title="Modify booking" onClose={onClose}><p className="muted">Loading booking…</p></Modal>;
+  const b = detail.data || booking; const checkedOut = b.status === 'checked_out';
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${b._id}`, { method: 'PATCH', body: { fullName: f.fullName, phone: f.phone, idDocumentNo: f.idDocumentNo, ...(checkedOut ? {} : { checkInDate: f.checkInDate, checkOutDate: f.checkOutDate, guestCount: Number(f.guestCount) }) } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  return <Modal title="Modify booking" onClose={onClose}><form className="form" onSubmit={submit}>
+    <Field label="Guest full name"><input name="fullName" defaultValue={b.guestName} required /></Field><Field label="Phone"><input name="phone" defaultValue={b.guestPhone} required /></Field><Field label="ID / passport number"><input name="idDocumentNo" defaultValue={b.guestIdDocumentNo} required /></Field>
+    {!checkedOut && <><Field label="Check-in"><input name="checkInDate" type="date" defaultValue={b.checkInDate?.slice(0, 10)} required disabled={b.status === 'checked_in'} /></Field><Field label="Check-out"><input name="checkOutDate" type="date" defaultValue={b.checkOutDate?.slice(0, 10)} required /></Field><Field label="Guests"><input name="guestCount" type="number" min="1" defaultValue={b.rooms?.[0]?.guestCount || 1} required /></Field></>}
+    <div className="full"><Notice error={detail.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
+  </form></Modal>;
 }
 
 function WalkInBooking({ onClose }) {

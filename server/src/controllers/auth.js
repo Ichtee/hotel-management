@@ -4,14 +4,17 @@ const Role = require("../models/Role");
 const v = require("../utils/validation");
 const { hashPassword, verifyPassword } = require("../utils/password");
 const { publicUser } = require("../middleware/auth");
+// Tạo mã phiên mới để tránh tái sử dụng phiên cũ.
 const regenerate = (req) =>
   new Promise((resolve, reject) =>
     req.session.regenerate((e) => (e ? reject(e) : resolve())),
   );
+// Lưu phiên trước khi trả phản hồi đăng nhập.
 const save = (req) =>
   new Promise((resolve, reject) =>
     req.session.save((e) => (e ? reject(e) : resolve())),
   );
+// Đăng ký tài khoản khách hàng với dữ liệu đã kiểm tra.
 async function register(req, res) {
   v.keys(req.body, [
     "username",
@@ -45,6 +48,7 @@ async function register(req, res) {
   });
   res.status(201).json({ data: publicUser(user, role) });
 }
+// Xác minh mật khẩu và ghi nhận phiên bản tài khoản, quyền hiện tại.
 async function login(req, res) {
   v.keys(req.body, ["email", "password"]);
   const email = v.email(req.body.email);
@@ -53,7 +57,6 @@ async function login(req, res) {
   const user = await User.findOne({ email }).select(
     "+passwordHash +authVersion",
   );
-  // Perform a real derivation even when the account is absent.
   const valid = await verifyPassword(
     password,
     user?.passwordHash || `scrypt:${"0".repeat(32)}:${"0".repeat(128)}`,
@@ -67,11 +70,13 @@ async function login(req, res) {
   await regenerate(req);
   req.session.userId = user.id;
   req.session.authVersion = user.authVersion || 0;
+  req.session.roleAuthVersion = role.authVersion || 0;
   user.lastLogin = new Date();
   await user.save();
   await save(req);
   res.json({ data: publicUser(user, role) });
 }
+// Hủy phiên và cookie đăng nhập.
 async function logout(req, res) {
   await new Promise((resolve, reject) =>
     req.session.destroy((e) => (e ? reject(e) : resolve())),
@@ -79,9 +84,11 @@ async function logout(req, res) {
   res.clearCookie("hotel.sid", { path: "/" });
   res.json({ data: { message: "Signed out." } });
 }
+// Trả hồ sơ của tài khoản đang đăng nhập.
 async function profile(req, res) {
   res.json({ data: publicUser(req.user, req.role) });
 }
+// Chỉ cập nhật các trường hồ sơ cá nhân được phép.
 async function updateProfile(req, res) {
   v.keys(req.body, ["fullName", "phone", "address", "dateOfBirth"]);
   const b = req.body;
@@ -104,6 +111,7 @@ async function updateProfile(req, res) {
   await u.save();
   res.json({ data: publicUser(u, req.role) });
 }
+// Đổi mật khẩu bằng cập nhật có điều kiện, tránh ghi đè lần thu hồi phiên khác.
 async function changePassword(req, res) {
   v.keys(req.body, ["currentPassword", "newPassword"]);
   v.text(req.body.currentPassword, "currentPassword", 1, 128);
@@ -112,16 +120,25 @@ async function changePassword(req, res) {
   const u = await User.findById(req.user.id).select(
     "+passwordHash +authVersion",
   );
+  if (!u || u.status !== "active" || (u.authVersion || 0) !== req.session.authVersion)
+    throw new v.HttpError(401, "Your session has ended. Please sign in.");
   if (!(await verifyPassword(current, u.passwordHash)))
     v.fail("Current password is incorrect.", "currentPassword");
   if (current === next)
     v.fail("Choose a different new password.", "newPassword");
-  u.passwordHash = await hashPassword(next);
-  u.authVersion = (u.authVersion || 0) + 1;
-  await u.save();
+  const passwordHash = await hashPassword(next);
+  const updated = await User.findOneAndUpdate(
+    { _id: u._id, status: "active", passwordHash: u.passwordHash,
+      $or: [{ authVersion: u.authVersion || 0 }, ...((u.authVersion || 0) === 0 ? [{ authVersion: { $exists: false } }] : [])] },
+    { $set: { passwordHash, mustChangePassword: false }, $inc: { authVersion: 1 } },
+    { new: true, runValidators: true },
+  ).select("+authVersion");
+  if (!updated) throw new v.HttpError(409, "The account changed. Please sign in again.");
+  const roleAuthVersion = req.session.roleAuthVersion || 0;
   await regenerate(req);
-  req.session.userId = u.id;
-  req.session.authVersion = u.authVersion;
+  req.session.userId = updated.id;
+  req.session.authVersion = updated.authVersion;
+  req.session.roleAuthVersion = roleAuthVersion;
   await save(req);
   res.json({
     data: { message: "Password changed. Other sessions have been signed out." },

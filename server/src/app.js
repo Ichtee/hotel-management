@@ -3,7 +3,12 @@ const session = require("express-session");
 const { MongoStore } = require("connect-mongo");
 const { rateLimit } = require("express-rate-limit");
 const helmet = require("helmet");
-const { authenticate, permit } = require("./middleware/auth");
+const { authenticate, permit, requireManager, requirePasswordChanged } = require("./middleware/auth");
+const staff = require("./controllers/staff");
+const staffRoles = require("./controllers/staffRoles");
+const rooms = require("./controllers/rooms");
+const roomTypes = require("./controllers/roomTypes");
+const assignments = require("./controllers/housekeepingAssignments");
 const auth = require("./controllers/auth");
 const accounts = require("./controllers/accounts");
 const roles = require("./controllers/roles");
@@ -23,6 +28,7 @@ const bookingController = require("./controllers/bookingController");
 const frontDeskRoutes = require("./routes/frontDeskBooking.routes");
 const customerRoutes = require("./routes/customer.routes");
 
+// Khởi tạo API với xác thực và kiểm soát quyền tại backend.
 function createApp({
   mongoUri,
   sessionSecret,
@@ -119,6 +125,7 @@ function createApp({
   app.post("/api/auth/register", authLimit, auth.register);
   app.post("/api/auth/login", authLimit, auth.login);
   app.post("/api/auth/logout", auth.logout);
+  app.get("/api/public/room-types/:id/reviews", roomTypes.reviews);
   app.post("/api/auth/forgot-password", authLimit, auth.forgotPassword);
   app.post("/api/auth/reset-password", authLimit, auth.resetPassword);
 
@@ -127,9 +134,9 @@ function createApp({
 
   app.get("/api/auth/me", auth.profile);
   app.get("/api/profile", auth.profile);
-  app.patch("/api/profile", auth.updateProfile);
   app.put("/api/profile/password", authLimit, auth.changePassword);
-
+  app.use("/api", requirePasswordChanged);
+  app.patch("/api/profile", auth.updateProfile);
   app.get("/api/options", accounts.options);
   app.get("/api/users", permit("users.manage"), accounts.listing(false));
   app.post("/api/users", permit("users.manage"), accounts.create(false));
@@ -139,13 +146,36 @@ function createApp({
   app.post("/api/roles", permit("roles.manage"), roles.create);
   app.patch("/api/roles/:id", permit("roles.manage"), roles.update);
   app.delete("/api/roles/:id", permit("roles.manage"), roles.remove);
-
-  app.use("/api/staff", permit("staff.manage"));
-  app.get("/api/staff", accounts.listing(true));
-  app.post("/api/staff", accounts.create(true));
-  app.patch("/api/staff/:id", accounts.update(true));
-  app.delete("/api/staff/:id", accounts.deactivateStaff);
-
+  app.use("/api/staff", requireManager);
+  app.get("/api/staff/roles", staffRoles.listing);
+  app.patch("/api/staff/roles/:id/permissions", staffRoles.updatePermissions);
+  app.get("/api/staff", staff.listing);
+  app.post("/api/staff", staff.create);
+  app.get("/api/staff/:id", staff.detail);
+  app.patch("/api/staff/:id", staff.update);
+  app.delete("/api/staff/:id", staff.deactivate);
+  app.use("/api/rooms", requireManager);
+  app.get("/api/rooms", rooms.listing);
+  app.post("/api/rooms", rooms.create);
+  app.get("/api/rooms/:id", rooms.detail);
+  app.patch("/api/rooms/:id", rooms.update);
+  app.patch("/api/rooms/:id/maintenance", rooms.maintenance);
+  app.get("/api/rooms/:id/issues", rooms.issues);
+  app.patch("/api/room-issues/:id/resolve", requireManager, rooms.resolveIssue);
+  app.use("/api/room-types", requireManager);
+  app.get("/api/room-types", roomTypes.listing);
+  app.post("/api/room-types", roomTypes.create);
+  app.get("/api/room-types/:id", roomTypes.detail);
+  app.patch("/api/room-types/:id", roomTypes.update);
+  app.delete("/api/room-types/:id", roomTypes.remove);
+  app.get("/api/room-types/:id/reviews", roomTypes.reviews);
+  app.patch("/api/reviews/:id/visibility", requireManager, roomTypes.visibility);
+  app.use("/api/housekeeping-assignments", requireManager);
+  app.get("/api/housekeeping-assignments/options", assignments.options);
+  app.get("/api/housekeeping-assignments", assignments.listing);
+  app.post("/api/housekeeping-assignments", assignments.create);
+  app.patch("/api/housekeeping-assignments/:id", assignments.update);
+  app.delete("/api/housekeeping-assignments/:id", assignments.remove);
   app.use("/api/promotions", permit("promotions.manage"));
   app.get("/api/promotions", promotions.listing);
   app.post("/api/promotions", promotions.create);
@@ -177,7 +207,8 @@ function createApp({
         .status(409)
         .json({
           error: {
-            message: "This email, username or code is already in use.",
+            message: error.keyPattern?.roomNumber ? "Room number already exists." : "This value is already in use.",
+            ...(error.keyPattern?.roomNumber ? { code: "MSG-20" } : {}),
             fields: Object.fromEntries(
               Object.keys(error.keyPattern || {}).map((k) => [
                 k,
@@ -199,6 +230,8 @@ function createApp({
               ? "Something went wrong. Please try again."
               : error.message,
           fields: error.fields,
+          ...(typeof error.code === "string" ? { code: error.code } : {}),
+          ...(error.details && status < 500 ? { details: error.details } : {}),
         },
       });
   });

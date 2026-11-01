@@ -45,7 +45,7 @@ const schema = new Schema({
   cancellationReason: String,
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 'expired'],
+    enum: ['pending', 'confirmed', 'cancellation_requested', 'checked_in', 'checked_out', 'cancelled', 'expired'],
     default: 'pending', index: true
   },
   rooms: {
@@ -96,6 +96,7 @@ schema.path('checkOutDate').validate(function (value) {
 schema.index({ status: 1, checkInDate: 1, checkOutDate: 1 });
 schema.index({ status: 1, holdExpiresAt: 1 });
 schema.index({ 'rooms.roomId': 1, status: 1, checkInDate: 1, checkOutDate: 1 });
+schema.index({ 'rooms.roomTypeId': 1, status: 1, checkOutDate: 1 });
 schema.index({ customerId: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Booking', schema);

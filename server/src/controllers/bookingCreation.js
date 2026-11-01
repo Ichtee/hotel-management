@@ -157,4 +157,32 @@ async function checkIn(req, res) {
   room.status = "occupied"; await room.save(); await booking.save();
   res.json({ data: booking });
 }
-module.exports = { create, roomTypes, createWalkIn, modifyWalkIn, cancelWalkIn, availableRooms, checkIn };
+async function changeRoomOptions(req, res) {
+  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can change a room.");
+  const booking = await Booking.findById(v.id(req.params.id));
+  if (!booking || booking.status !== "checked_in") throw new v.HttpError(409, "Only a checked-in booking can change rooms.");
+  const current = booking.rooms[0]; const currentType = await RoomType.findById(current.roomTypeId);
+  const types = await RoomType.find({ isActive: true, basePrice: { $gte: currentType.basePrice } }).select("name basePrice").lean();
+  const rooms = await Room.find({ roomTypeId: { $in: types.map((t) => t._id) }, isActive: true, status: "available" }).select("roomNumber floor roomTypeId").lean();
+  const typeById = new Map(types.map((t) => [String(t._id), t]));
+  res.json({ data: rooms.map((room) => ({ ...room, roomType: typeById.get(String(room.roomTypeId)) })) });
+}
+async function changeRoom(req, res) {
+  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can change a room.");
+  v.keys(req.body, ["newRoomId", "cause"]);
+  const booking = await Booking.findById(v.id(req.params.id));
+  if (!booking || booking.status !== "checked_in") throw new v.HttpError(409, "Only a checked-in booking can change rooms.");
+  const oldRoom = await Room.findById(booking.rooms[0].roomId); const newRoom = await Room.findOne({ _id: v.id(req.body.newRoomId, "newRoomId"), isActive: true, status: "available" });
+  if (!oldRoom || !newRoom) throw new v.HttpError(409, "The selected room is no longer available.");
+  const [oldType, newType] = await Promise.all([RoomType.findById(oldRoom.roomTypeId), RoomType.findById(newRoom.roomTypeId)]);
+  if (!oldType || !newType || newType.basePrice < oldType.basePrice) throw new v.HttpError(409, "Only the booked room type or an upgrade is available.");
+  const cause = v.choice(req.body.cause, "cause", ["hotel", "guest"]);
+  const today = new Date(`${vnDate()}T00:00:00Z`); const remainingNights = Math.max(0, Math.ceil((booking.checkOutDate - today) / 86400000));
+  const extra = cause === "guest" ? Math.max(0, newType.basePrice - oldType.basePrice) * remainingNights : 0;
+  booking.rooms[0].roomId = newRoom._id; booking.rooms[0].roomTypeId = newType._id;
+  if (cause === "guest") { booking.roomAmount += extra; booking.totalAmount += extra; }
+  booking.events.push({ actorId: req.user._id, type: "room_changed", note: `${cause === "hotel" ? "Hotel" : "Guest"} room change to ${newRoom.roomNumber}`, oldValue: { roomId: oldRoom._id }, newValue: { roomId: newRoom._id, extra } });
+  oldRoom.status = "cleaning"; newRoom.status = "occupied"; await Promise.all([oldRoom.save(), newRoom.save(), booking.save()]);
+  res.json({ data: booking, meta: { extraCharge: extra } });
+}
+module.exports = { create, roomTypes, createWalkIn, modifyWalkIn, cancelWalkIn, availableRooms, checkIn, changeRoomOptions, changeRoom };

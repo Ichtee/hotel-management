@@ -112,6 +112,8 @@ function createApp({
   app.post("/api/front-desk/bookings/:id/cancel", bookingCreation.cancelWalkIn);
   app.get("/api/front-desk/bookings/:id/available-rooms", bookingCreation.availableRooms);
   app.post("/api/front-desk/bookings/:id/check-in", bookingCreation.checkIn);
+  app.get("/api/front-desk/bookings/:id/change-room-options", bookingCreation.changeRoomOptions);
+  app.post("/api/front-desk/bookings/:id/change-room", bookingCreation.changeRoom);
   app.get("/api/bookings/:id", bookings.detail);
   app.use("/api/policies/deposit", permit("policies.manage"));
   app.get("/api/policies/deposit", policies.listing);

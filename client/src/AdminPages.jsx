@@ -1,10 +1,63 @@
 import { useState } from 'react';
 import { api, dateLabel, inputDate, money } from './api/client.js';
 import { useAuth } from './context/Auth.jsx';
-import { DataTable, Field, LineChart, Modal, Notice, PageHead, useApi } from './ui.jsx';
+import { Badge, DataTable, Field, LineChart, Modal, Notice, PageHead, useApi } from './ui.jsx';
 
 const qs = (o) => new URLSearchParams(Object.fromEntries(Object.entries(o).filter(([, v]) => v !== '' && v != null))).toString();
 const day = (offset) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(Date.now() + offset * 864e5));
+export function DepositPolicy() {
+  const s = useApi('/policies/deposit');
+  const [err, setErr] = useState(null);
+  const [ok, setOk] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [pct, setPct] = useState('');
+  const current = s.meta?.current;
+  const value = Number(pct);
+  const valid = pct !== '' && Number.isInteger(value) && value >= 1 && value <= 100;
+  const sample = 3000000;
+  const submit = async (e) => {
+    e.preventDefault();
+    setSaving(true); setOk(null);
+    try {
+      await api('/policies/deposit', { method: 'POST', body: { percentage: value } });
+      setErr(null); setPct(''); setOk(`Saved. New online reservations now require a ${value}% deposit.`); s.reload();
+    } catch (x) { setErr(x); } finally { setSaving(false); }
+  };
+  const fieldError = err?.fields?.percentage;
+  return (
+    <>
+      <PageHead title="Deposit policy" sub="Share of the booking total paid online to confirm a reservation" />
+      <div className="policy-grid">
+        <section className="panel policy-now" aria-labelledby="pol-now">
+          <h2 id="pol-now">In force now</h2>
+          {current ? (
+            <>
+              <p className="pct">{current.deposit.value}<span>%</span></p>
+              <p className="muted">of the booking total · since {dateLabel(current.effectiveFrom)}</p>
+            </>
+          ) : <p className="muted">No deposit policy yet. Set one so online reservations can be confirmed.</p>}
+        </section>
+        <form className="panel policy-form" onSubmit={submit} noValidate>
+          <h2>Set a new deposit</h2>
+          <label htmlFor="pol-pct">Deposit percentage</label>
+          <div className="pct-input">
+            <input id="pol-pct" type="number" inputMode="numeric" min="1" max="100" step="1" value={pct} onChange={(e) => { setPct(e.target.value); setOk(null); }}
+              aria-describedby={`pol-help${fieldError ? ' pol-err' : ''}`} aria-invalid={Boolean(fieldError) || (pct !== '' && !valid)} required />
+            <span aria-hidden="true">%</span>
+          </div>
+          <p id="pol-help" className="muted">Whole number from 1 to 100. Applies to new online reservations only; existing bookings keep their deposit.</p>
+          {fieldError && <p id="pol-err" className="err" role="alert">{fieldError}</p>}
+          {pct !== '' && !valid && !fieldError && <p className="err" role="alert">Enter a whole number between 1 and 100.</p>}
+          {valid && <p className="preview" aria-live="polite">On a {money(sample)} booking the deposit would be <strong>{money(Math.round(sample * value / 100))}</strong>.</p>}
+          <button className="btn primary" type="submit" disabled={!valid || saving}>{saving ? 'Saving…' : 'Save policy'}</button>
+          <Notice error={err && !err.fields ? err : null} ok={ok} />
+        </form>
+      </div>
+      <h2 className="mt">History</h2>
+      {s.loading || s.error ? <Loading s={s} /> : <DataTable cols={['Policy', 'Deposit', 'From', 'To', 'Status']} rows={s.data.map((p) => [p.name, `${p.deposit.value}%`, dateLabel(p.effectiveFrom), p.effectiveTo ? dateLabel(p.effectiveTo) : '—', p.isActive ? 'active' : <Badge v="retired" />])} />}
+    </>
+  );
+}
 const Loading = ({ s }) => s.loading ? <p className="muted">Loading…</p> : s.error ? <Notice error={s.error} /> : null;
 
 function Filters({ onApply, statuses, extra }) {

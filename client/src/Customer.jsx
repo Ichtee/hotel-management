@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from './context/Auth.jsx';
 import { AuthShell, AuthTabs, SignIn, Register } from './AuthForms.jsx';
 import { Profile } from './AdminPages.jsx';
-import { EXTRAS, MY_BOOKINGS, OFFERS, REVIEWS, ROOM_TYPES } from './data.js';
+import { EXTRAS, OFFERS, REVIEWS, ROOM_TYPES } from './data.js';
+import { MyBookings } from './Bookings.jsx';
 
 const NAV = [
   { label: 'Home', href: '#/' },
@@ -304,36 +305,6 @@ const Confirmation = () => (
     <p><a className="btn primary" href="#/my-bookings">View my bookings</a></p>
   </div>
 );
-
-function MyBookings() {
-  const [tab, setTab] = useState('upcoming');
-  const list = MY_BOOKINGS.filter((b) => (tab === 'upcoming' ? b.status === 'confirmed' : b.status !== 'confirmed'));
-  return (
-    <div className="c-wrap c-section">
-      <h1 className="title">My bookings</h1>
-      <div className="chips" role="group" aria-label="Filter">
-        {['upcoming', 'past'].map((t) => <button key={t} className={tab === t ? 'chip on' : 'chip'} aria-pressed={tab === t} onClick={() => setTab(t)}>{t}</button>)}
-      </div>
-      <div className="stack">
-        {list.map((b) => (
-          <article className="trip" key={b.code}>
-            <img src={b.img} alt="" />
-            <div>
-              <h3>{b.room}</h3>
-              <p className="muted">{b.code} · {b.dates}</p>
-              <span className={`badge b-${b.status}`}>{b.status.replace('_', ' ')}</span>
-            </div>
-            <div className="end"><strong>{money(b.total)}</strong>
-              {b.status === 'confirmed' && <button className="btn">Cancel</button>}
-              {b.status === 'checked_out' && <button className="btn">Write review</button>}
-            </div>
-          </article>
-        ))}
-        {!list.length && <p className="muted">Nothing here yet.</p>}
-      </div>
-    </div>
-  );
-}
 
 function Auth({ note }) {
   const [mode, setMode] = useState('login');

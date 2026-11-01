@@ -30,3 +30,6 @@ data/
 .playwright-mcp/
 playwright-report/
 test-results/
+
+# Personal Claude Code settings
+.claude/settings.local.json

@@ -4,7 +4,7 @@ import './admin.css';
 import { useAuth } from './context/Auth.jsx';
 import { Badge, DataTable, LineChart, PageHead, useApi } from './ui.jsx';
 import { AuthShell, SignIn } from './AuthForms.jsx';
-import { Coupons, Profile, Revenue, Roles, Users } from './AdminPages.jsx';
+import { Coupons, DepositPolicy, Profile, Revenue, Roles, Users } from './AdminPages.jsx';
 import { money } from './api/client.js';
 
 const ICONS = {
@@ -261,7 +261,6 @@ function Hotel() {
         <label>Check-in time<input type="time" defaultValue="14:00" /></label>
         <label>Check-out time<input type="time" defaultValue="12:00" /></label>
         <label>Free cancellation (hours before)<input type="number" defaultValue="48" min="0" /></label>
-        <label>Deposit (%)<input type="number" defaultValue="20" min="0" max="100" /></label>
         <button className="btn primary" type="submit">Save changes</button>
       </form>
     </>
@@ -281,11 +280,11 @@ function Login() {
   );
 }
 
-const PAGES = { '#/admin': Dashboard, '#/admin/users': Users, '#/admin/staff': Users, '#/admin/roles': Roles, '#/admin/coupons': Coupons, '#/admin/revenue': Revenue, '#/admin/profile': Profile, '#/admin/bookings': Bookings, '#/admin/frontdesk': FrontDesk, '#/admin/rooms': RoomMap, '#/admin/hotel': Hotel };
+const PAGES = { '#/admin': Dashboard, '#/admin/users': Users, '#/admin/staff': Users, '#/admin/roles': Roles, '#/admin/coupons': Coupons, '#/admin/revenue': Revenue, '#/admin/profile': Profile, '#/admin/bookings': Bookings, '#/admin/frontdesk': FrontDesk, '#/admin/rooms': RoomMap, '#/admin/hotel': Hotel, '#/admin/policy': DepositPolicy };
 
 const Forbidden = () => <><PageHead title="No access" sub="Your role does not include this area." /><a className="btn" href="#/admin">Back to dashboard</a></>;
 
-const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/roles': 'roles.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read' };
+const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/roles': 'roles.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read', '#/admin/policy': 'policies.manage' };
 
 export default function Admin({ route }) {
   const { user, loading } = useAuth();

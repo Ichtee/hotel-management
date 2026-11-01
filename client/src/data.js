@@ -6,7 +6,7 @@ export const MENU = [
   { label: 'Housekeeping', items: [['#/admin/cleaning', 'Cleaning tasks', 'Assigned to staff'], ['#/admin/issues', 'Room issues', 'Maintenance reports']] },
   { label: 'Billing', items: [['#/admin/invoices', 'Invoices', ''], ['#/admin/payments', 'Payments', ''], ['#/admin/refunds', 'Refunds', ''], ['#/admin/revenue', 'Revenue', '', ['revenue.read']], ['#/admin/coupons', 'Coupons', '', ['promotions.manage']]] },
   { label: 'Guests & staff', items: [['#/admin/users', 'Users', '', ['users.manage']], ['#/admin/staff', 'Staff', '', ['staff.manage']], ['#/admin/roles', 'Roles', '', ['roles.manage']], ['#/admin/reviews', 'Reviews', '']] },
-  { label: 'Settings', items: [['#/admin/hotel', 'Hotel & policies', '']] }
+  { label: 'Settings', items: [['#/admin/hotel', 'Hotel & policies', ''], ['#/admin/policy', 'Deposit policy', '', ['policies.manage']]] }
 ];
 
 export const STATS = [
@@ -90,9 +90,4 @@ export const REVIEWS = [
   ['Nguyen An', 5, 'Spotless room and super friendly staff. Check-in took two minutes.'],
   ['Sarah K.', 5, 'Great location, amazing breakfast. Will come back.'],
   ['Tran Binh', 4, 'Family suite was spacious. The kids loved the balcony.']
-];
-export const MY_BOOKINGS = [
-  { code: 'BK-1042', room: 'Deluxe Double', dates: '20 Nov – 23 Nov 2026', total: 255, status: 'confirmed', img: ROOM_TYPES[0].img },
-  { code: 'BK-1017', room: 'Family Suite', dates: '02 Sep – 05 Sep 2026', total: 450, status: 'checked_out', img: ROOM_TYPES[2].img },
-  { code: 'BK-0990', room: 'Superior Twin', dates: '11 Aug – 12 Aug 2026', total: 70, status: 'cancelled', img: ROOM_TYPES[1].img }
 ];

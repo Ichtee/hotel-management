@@ -5,7 +5,7 @@ import AdminRoomTypes from './pages/AdminRoomTypes.jsx';
 import './admin.css';
 import { useAuth } from './context/Auth.jsx';
 import { Badge, DataTable, LineChart, PageHead, useApi } from './ui.jsx';
-import { AuthShell, SignIn } from './AuthForms.jsx';
+import { AuthShell, SignIn, ForgotPassword } from './AuthForms.jsx';
 import { Coupons, DepositPolicy, Profile, Revenue, Roles, Users } from './AdminPages.jsx';
 import { money } from './api/client.js';
 
@@ -271,13 +271,30 @@ function Hotel() {
 
 function Login() {
   const { user, signOut } = useAuth();
+  const [forgot, setForgot] = useState(false);
+  const [msg, setMsg] = useState(null);
   if (user && user.scope !== 'self') { location.hash = '#/admin'; return null; }
   return (
     <AuthShell staff>
-      <h1>Staff sign in</h1>
-      <p className="muted">Use your hotel account to continue.</p>
+      <h1>{forgot ? 'Reset staff password' : 'Staff sign in'}</h1>
+      <p className="muted">{forgot ? 'Enter your details to reset your password.' : 'Use your hotel account to continue.'}</p>
+      {msg && <p role="status" className="note ok-note">{msg}</p>}
       {user && <p className="note bad-note">You are signed in as a customer ({user.email}). <button className="linklike" onClick={signOut}>Sign out</button> to use a staff account.</p>}
-      <SignIn onDone={() => { location.hash = '#/admin'; }} hint={<a className="more" href="#/">← Back to website</a>} />
+      {forgot ? (
+        <ForgotPassword
+          onDone={() => {
+            setForgot(false);
+            setMsg('Password reset successfully. Sign in with your new password.');
+          }}
+          onCancel={() => setForgot(false)}
+        />
+      ) : (
+        <SignIn
+          onDone={() => { location.hash = '#/admin'; }}
+          onForgot={() => { setForgot(true); setMsg(null); }}
+          hint={<a className="more" href="#/">← Back to website</a>}
+        />
+      )}
     </AuthShell>
   );
 }

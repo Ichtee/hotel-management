@@ -44,6 +44,7 @@ nav li > a:hover, .dd > button:hover { background: var(--navy-2); }
 .page-head h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); } .page-head p { margin: .2rem 0 0; color: var(--muted); }
 .btn { min-height: 44px; padding: 0 1rem; border-radius: 10px; border: 1px solid var(--line); background: #fff; color: var(--navy); font-weight: 600; transition: background .2s; }
 .btn:hover { background: var(--grey-bg); }
+.linklike { background: none; border: 0; padding: 0; color: inherit; text-decoration: underline; cursor: pointer; font: inherit; }
 .btn.primary { background: var(--navy); color: #fff; border-color: var(--navy); } .btn.primary:hover { background: var(--navy-2); }
 .panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1.1rem; }
 .two { display: grid; gap: 1rem; }

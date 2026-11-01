@@ -136,13 +136,32 @@ test("registration validates fields, hashes credentials, ignores no privileged i
     email: "new@example.com",
     fullName: "New Guest",
     password,
+    phone: "0912345678",
     role: "admin",
+  }).expect(400);
+  // Missing phone is rejected
+  await send(request(app), "post", "/api/auth/register", {
+    username: "newguest",
+    email: "new@example.com",
+    fullName: "New Guest",
+    password,
+  }).expect(400);
+  // Password and confirmPassword mismatch is rejected
+  await send(request(app), "post", "/api/auth/register", {
+    username: "newguest",
+    email: "new@example.com",
+    fullName: "New Guest",
+    password,
+    confirmPassword: "WrongPassword123!",
+    phone: "0912345678",
   }).expect(400);
   const result = await send(request(app), "post", "/api/auth/register", {
     username: "newguest",
     email: "NEW@example.com",
     fullName: "New Guest",
     password,
+    confirmPassword: password,
+    phone: "0912345678",
   }).expect(201);
   assert.equal(result.body.data.role, "customer");
   assert.equal(result.body.data.passwordHash, undefined);
@@ -155,6 +174,7 @@ test("registration validates fields, hashes credentials, ignores no privileged i
     email: "new@example.com",
     fullName: "New Guest",
     password,
+    phone: "0912345678",
   }).expect(409);
   await send(request(app), "post", "/api/auth/register", {
     username: "bad",
@@ -219,6 +239,7 @@ test("password whitespace is preserved at login and password change", async () =
     email: "spaced@example.com",
     fullName: "Spaced Password",
     password: spaced,
+    phone: "0912345678",
   }).expect(201);
   await send(agent, "post", "/api/auth/login", {
     email: "spaced@example.com",
@@ -549,4 +570,52 @@ test("deposit policy: manager versions a percentage rule, old versions are retir
   assert.equal(list.body.meta.current._id, second.body.data._id);
   assert.equal((await currentDepositPolicy(new Date(Date.now() - 86400000))), null);
   assert.equal(list.body.data.filter((p) => p.isActive).length, 1);
+});
+
+test("forgot password generates token, rejects invalid/expired token, resets password and updates authVersion", async () => {
+  await send(request(app), "post", "/api/auth/forgot-password", {
+    email: "nonexistent@example.com",
+  }).expect(200);
+
+  const res = await send(request(app), "post", "/api/auth/forgot-password", {
+    email: "customer@example.com",
+  }).expect(200);
+  assert.ok(res.body.data.resetToken);
+  const token = res.body.data.resetToken;
+
+  await send(request(app), "post", "/api/auth/reset-password", {
+    email: "customer@example.com",
+    token: "WRONGTOKEN",
+    newPassword: "BrandNewPass123!",
+  }).expect(400);
+
+  await send(request(app), "post", "/api/auth/reset-password", {
+    email: "customer@example.com",
+    token,
+    newPassword: "BrandNewPass123!",
+    confirmPassword: "DifferentPass123!",
+  }).expect(400);
+
+  await send(request(app), "post", "/api/auth/reset-password", {
+    email: "customer@example.com",
+    token,
+    newPassword: "BrandNewPass123!",
+    confirmPassword: "BrandNewPass123!",
+  }).expect(200);
+
+  await send(request(app), "post", "/api/auth/reset-password", {
+    email: "customer@example.com",
+    token,
+    newPassword: "AnotherPass123!",
+  }).expect(400);
+
+  await send(request(app), "post", "/api/auth/login", {
+    email: "customer@example.com",
+    password,
+  }).expect(401);
+
+  await send(request(app), "post", "/api/auth/login", {
+    email: "customer@example.com",
+    password: "BrandNewPass123!",
+  }).expect(200);
 });

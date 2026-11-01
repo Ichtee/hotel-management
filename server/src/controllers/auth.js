@@ -1,3 +1,4 @@
+const { randomBytes, createHash } = require("node:crypto");
 const User = require("../models/User");
 const Role = require("../models/Role");
 const v = require("../utils/validation");
@@ -12,12 +13,25 @@ const save = (req) =>
     req.session.save((e) => (e ? reject(e) : resolve())),
   );
 async function register(req, res) {
-  v.keys(req.body, ["username", "email", "fullName", "password", "phone"]);
+  v.keys(req.body, [
+    "username",
+    "email",
+    "fullName",
+    "password",
+    "confirmPassword",
+    "phone",
+  ]);
   const { body } = req;
+  if (
+    body.confirmPassword !== undefined &&
+    body.password !== body.confirmPassword
+  ) {
+    v.fail("Passwords do not match.", "confirmPassword");
+  }
   const data = {
     username: v.username(body.username),
     email: v.email(body.email),
-    phone: v.phone(body.phone),
+    phone: v.phone(body.phone, true),
     customerProfile: { fullName: v.text(body.fullName, "fullName", 2, 50) },
   };
   v.password(body.password);
@@ -113,6 +127,86 @@ async function changePassword(req, res) {
     data: { message: "Password changed. Other sessions have been signed out." },
   });
 }
+async function forgotPassword(req, res) {
+  v.keys(req.body, ["email"]);
+  const email = v.email(req.body.email);
+  const user = await User.findOne({ email });
+  if (!user || user.status !== "active") {
+    return res.json({
+      data: {
+        message:
+          "If your email is registered, you will receive password reset instructions.",
+      },
+    });
+  }
+  const token = randomBytes(4).toString("hex").toUpperCase();
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  user.passwordReset = {
+    tokenHash,
+    expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+  };
+  await user.save();
+
+  try {
+    const { email: sendMail } = require("../services/notifications");
+    if (typeof sendMail === "function") {
+      await sendMail(
+        user._id,
+        "GrandStay - Password Reset Code",
+        `Your password reset code is: ${token}. This code expires in 15 minutes.`,
+      );
+    }
+  } catch (e) {
+    console.error("Failed to send reset email:", e.message);
+  }
+
+  res.json({
+    data: {
+      message:
+        "If your email is registered, you will receive password reset instructions.",
+      resetToken: token,
+    },
+  });
+}
+async function resetPassword(req, res) {
+  v.keys(req.body, ["email", "token", "newPassword", "confirmPassword"]);
+  const email = v.email(req.body.email);
+  const token = v.text(req.body.token, "token", 1, 128);
+  if (
+    req.body.confirmPassword !== undefined &&
+    req.body.newPassword !== req.body.confirmPassword
+  ) {
+    v.fail("Passwords do not match.", "confirmPassword");
+  }
+  const newPassword = v.password(req.body.newPassword, "newPassword");
+  const user = await User.findOne({ email }).select(
+    "+passwordHash +passwordReset.tokenHash +authVersion",
+  );
+  if (!user || user.status !== "active") {
+    v.fail("Invalid or expired reset token.", "token");
+  }
+  const tokenHash = createHash("sha256")
+    .update(token.trim().toUpperCase())
+    .digest("hex");
+  if (
+    !user.passwordReset?.tokenHash ||
+    user.passwordReset.tokenHash !== tokenHash ||
+    !user.passwordReset.expiresAt ||
+    new Date() > user.passwordReset.expiresAt
+  ) {
+    v.fail("Invalid or expired reset token.", "token");
+  }
+  if (await verifyPassword(newPassword, user.passwordHash)) {
+    v.fail("Choose a different new password.", "newPassword");
+  }
+  user.passwordHash = await hashPassword(newPassword);
+  user.authVersion = (user.authVersion || 0) + 1;
+  user.passwordReset = undefined;
+  await user.save();
+  res.json({
+    data: { message: "Password reset successful. You can now sign in." },
+  });
+}
 module.exports = {
   register,
   login,
@@ -120,4 +214,6 @@ module.exports = {
   profile,
   updateProfile,
   changePassword,
+  forgotPassword,
+  resetPassword,
 };

@@ -6,6 +6,7 @@ const helmet = require("helmet");
 const { authenticate, permit } = require("./middleware/auth");
 const auth = require("./controllers/auth");
 const accounts = require("./controllers/accounts");
+const customers = require("./controllers/customers");
 const roles = require("./controllers/roles");
 const promotions = require("./controllers/promotions");
 const bookings = require("./controllers/bookings");
@@ -88,6 +89,8 @@ function createApp({
   app.patch("/api/profile", auth.updateProfile);
   app.put("/api/profile/password", authLimit, auth.changePassword);
   app.get("/api/options", accounts.options);
+  app.get("/api/customers", customers.list);
+  app.patch("/api/customers/:id/blacklist", customers.blacklist);
   app.get("/api/users", permit("users.manage"), accounts.listing(false));
   app.post("/api/users", permit("users.manage"), accounts.create(false));
   app.patch("/api/users/:id", permit("users.manage"), accounts.update(false));

@@ -25,7 +25,7 @@ const Icon = ({ n, size = 18 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={ICONS[n]} /></svg>
 );
 
-const allowed = (item, perms) => !item[3] || item[3].some((p) => perms.includes(p));
+const allowed = (item, perms, role) => !item[3] || (item[3].includes('manager.only') ? role === 'manager' : item[3].some((p) => perms.includes(p)));
 
 function Sidebar({ route, open, onClose }) {
   const { user } = useAuth();
@@ -41,7 +41,7 @@ function Sidebar({ route, open, onClose }) {
         <a className="brand" href="#/admin">Grand<span>Stay</span><small>Management</small></a>
         <div className="snav" role="navigation" aria-label="Sections">
           {link('#/admin', 'Dashboard', 'grid')}
-          {MENU.filter((m) => m.items).map((m) => ({ ...m, items: m.items.filter((i) => allowed(i, user.permissions)) })).filter((m) => m.items.length).map((m) => (
+          {MENU.filter((m) => m.items).map((m) => ({ ...m, items: m.items.filter((i) => allowed(i, user.permissions, user.role)) })).filter((m) => m.items.length).map((m) => (
             <div className="grp" key={m.label}>
               <p>{m.label}</p>
               {m.items.map(([h, l]) => link(h, l, null))}
@@ -231,6 +231,23 @@ function Bookings() {
   );
 }
 
+function CustomerAccounts() {
+  const [query, setQuery] = useState(''); const [status, setStatus] = useState(''); const [selected, setSelected] = useState(null);
+  const list = useApi(`/customers?limit=100&q=${encodeURIComponent(query)}${status ? `&status=${status}` : ''}`);
+  return <><PageHead title="Customer accounts" sub="Search customers and manage the blacklist" />
+    <form className="chips" onSubmit={(e) => e.preventDefault()}><input aria-label="Search customers" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Name, username or email" /><select aria-label="Customer status" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="suspended">Blacklisted</option></select></form>
+    <Notice error={list.error} />
+    <DataTable cols={['Name', 'Username', 'Email', 'Phone', 'Status', '']} rows={(list.data || []).map((u) => [u.customerProfile?.fullName || '—', u.username, u.email, u.phone || '—', u.status, <button className="btn sm" onClick={() => setSelected(u)}>{u.status === 'active' ? 'Blacklist' : 'Restore'}</button>])} />
+    {selected && <CustomerStatus customer={selected} onClose={() => { setSelected(null); list.reload(); }} />}
+  </>;
+}
+
+function CustomerStatus({ customer, onClose }) {
+  const [reason, setReason] = useState(''); const [error, setError] = useState(null); const [saving, setSaving] = useState(false); const blacklisting = customer.status === 'active';
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); try { await api(`/customers/${customer._id}/blacklist`, { method: 'PATCH', body: { action: blacklisting ? 'blacklist' : 'restore', reason } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  return <Modal title={blacklisting ? 'Blacklist customer' : 'Restore customer'} onClose={onClose}><form className="form" onSubmit={submit}><p className="full muted">{customer.customerProfile?.fullName || customer.username}</p><Field label="Reason"><input value={reason} onChange={(e) => setReason(e.target.value)} required /></Field><div className="full"><Notice error={error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : blacklisting ? 'Blacklist customer' : 'Restore customer'}</button></div></form></Modal>;
+}
+
 function CheckOutBooking({ booking, onClose }) {
   const detail = useApi(`/bookings/${booking._id}`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
   if (detail.loading) return <Modal title="Check out customer" onClose={onClose}><p className="muted">Loading final bill…</p></Modal>;
@@ -390,7 +407,7 @@ function Login() {
   );
 }
 
-const PAGES = { '#/admin': Dashboard, '#/admin/users': Users, '#/admin/staff': Users, '#/admin/roles': Roles, '#/admin/coupons': Coupons, '#/admin/revenue': Revenue, '#/admin/profile': Profile, '#/admin/bookings': Bookings, '#/admin/frontdesk': FrontDesk, '#/admin/rooms': RoomMap, '#/admin/hotel': Hotel, '#/admin/policy': DepositPolicy };
+const PAGES = { '#/admin': Dashboard, '#/admin/customers': CustomerAccounts, '#/admin/users': Users, '#/admin/staff': Users, '#/admin/roles': Roles, '#/admin/coupons': Coupons, '#/admin/revenue': Revenue, '#/admin/profile': Profile, '#/admin/bookings': Bookings, '#/admin/frontdesk': FrontDesk, '#/admin/rooms': RoomMap, '#/admin/hotel': Hotel, '#/admin/policy': DepositPolicy };
 
 const Forbidden = () => <><PageHead title="No access" sub="Your role does not include this area." /><a className="btn" href="#/admin">Back to dashboard</a></>;
 
@@ -402,7 +419,7 @@ export default function Admin({ route }) {
   if (loading) return <p className="muted center-msg">Loading…</p>;
   if (route === '#/admin/login') return <Login />;
   if (!user || user.scope === 'self') { if (location.hash !== '#/admin/login') location.hash = '#/admin/login'; return null; }
-  const denied = NEEDS[route] && !user.permissions.includes(NEEDS[route]);
+  const denied = (route === '#/admin/customers' && user.role !== 'manager') || (NEEDS[route] && !user.permissions.includes(NEEDS[route]));
   const id = route.slice(8);
   const Page = denied ? Forbidden : PAGES[route] || (TABLES[id] ? () => <TablePage id={id} /> : Dashboard);
   return (

@@ -19,6 +19,10 @@ const roomRoutes = require("./routes/roomRoutes");
 const housekeepingRoutes = require("./routes/housekeepingRoutes");
 const bookingController = require("./controllers/bookingController");
 
+// Front-desk routes (theanh)
+const frontDeskRoutes = require("./routes/frontDeskBooking.routes");
+const customerRoutes = require("./routes/customer.routes");
+
 function createApp({
   mongoUri,
   sessionSecret,
@@ -154,6 +158,9 @@ function createApp({
   app.use("/api/policies/deposit", permit("policies.manage"));
   app.get("/api/policies/deposit", policies.listing);
   app.post("/api/policies/deposit", policies.create);
+
+  app.use("/api/front-desk/customers", customerRoutes);
+  app.use("/api/front-desk", frontDeskRoutes);
 
   app.get("/api/reports/revenue", permit("revenue.read"), revenue);
 

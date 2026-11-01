@@ -2,10 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { BOOKINGS, MENU, ROOMS, TABLES } from './data.js';
 import './admin.css';
 import { useAuth } from './context/Auth.jsx';
-import { Badge, DataTable, LineChart, PageHead, useApi } from './ui.jsx';
+import { Badge, DataTable, Field, LineChart, Modal, Notice, PageHead, useApi } from './ui.jsx';
 import { AuthShell, SignIn } from './AuthForms.jsx';
 import { Coupons, DepositPolicy, Profile, Revenue, Roles, Users } from './AdminPages.jsx';
-import { money } from './api/client.js';
+import { api, money } from './api/client.js';
 
 const ICONS = {
   grid: 'M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z',
@@ -199,19 +199,48 @@ function Dashboard() {
 }
 
 function Bookings() {
+  const { user } = useAuth();
   const [f, setF] = useState('all');
+  const [creating, setCreating] = useState(false);
   const rows = BOOKINGS.filter((b) => f === 'all' || b.status === f);
   return (
     <>
-      <PageHead title="Bookings" sub="All reservations" action="New booking" />
+      <PageHead title="Bookings" sub="All reservations" action={user.role === 'receptionist' ? 'New booking' : null} onAction={() => setCreating(true)} />
       <div className="chips" role="group" aria-label="Filter by status">
         {['all', 'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled'].map((s) => (
           <button key={s} className={f === s ? 'chip on' : 'chip'} aria-pressed={f === s} onClick={() => setF(s)}>{s.replace('_', ' ')}</button>
         ))}
       </div>
       <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status']} rows={rows.map((b) => [b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status])} />
+      {creating && <WalkInBooking onClose={() => setCreating(false)} />}
     </>
   );
+}
+
+function WalkInBooking({ onClose }) {
+  const types = useApi('/room-types');
+  const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault(); setSaving(true); setError(null);
+    const f = Object.fromEntries(new FormData(e.target));
+    try { await api('/front-desk/bookings', { method: 'POST', body: { ...f, guestCount: Number(f.guestCount) } }); onClose(); }
+    catch (x) { setError(x); } finally { setSaving(false); }
+  };
+  return <Modal title="Create walk-in booking" onClose={onClose}>
+    <form className="form" onSubmit={submit}>
+      <p className="full muted">Walk-in booking · no deposit required</p>
+      <Field label="Check-in"><input name="checkInDate" type="date" required /></Field>
+      <Field label="Check-out"><input name="checkOutDate" type="date" required /></Field>
+      <Field label="Room type"><select name="roomTypeId" required disabled={types.loading}><option value="">Select a room type</option>{types.data?.map((t) => <option key={t._id} value={t._id}>{t.name} · {money(t.basePrice)} / night</option>)}</select></Field>
+      <Field label="Guests"><input name="guestCount" type="number" min="1" max="20" defaultValue="1" required /></Field>
+      <Field label="Guest full name"><input name="fullName" required /></Field>
+      <Field label="Phone"><input name="phone" inputMode="numeric" required /></Field>
+      <Field label="Email"><input name="email" type="email" required /></Field>
+      <Field label="ID / passport number"><input name="idDocumentNo" required /></Field>
+      <div className="full"><Notice error={types.error || error} /></div>
+      <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || types.loading}>{saving ? 'Creating…' : 'Create booking'}</button></div>
+    </form>
+  </Modal>;
 }
 
 function FrontDesk() {

@@ -37,7 +37,7 @@ async function create(req, res) {
   if (guestCount > type.maxOccupancy) v.fail(`This room accommodates up to ${type.maxOccupancy} guests.`, "guestCount");
   const nights = nightsBetween(checkInDate, checkOutDate);
   const assignment = await assignRoom(type._id, checkInDate, checkOutDate);
-  if (assignment.inventoryExists && !assignment.roomId) throw new v.HttpError(409, "No rooms of this type are available for those dates.");
+  if (!assignment.roomId) throw new v.HttpError(409, "No rooms of this type are available for those dates.");
   const roomAmount = priceAt(type, checkInDate) * nights;
   const coupon = req.body.couponCode?.trim() ? await validateCoupon({ code: req.body.couponCode, customerId: req.user._id, subtotal: roomAmount }) : null;
   const discountAmount = coupon?.discountAmount || 0;
@@ -50,4 +50,20 @@ async function create(req, res) {
   res.status(201).json({ data: booking });
 }
 async function roomTypes(_req, res) { res.json({ data: await RoomType.find({ isActive: true }).select("name description basePrice maxOccupancy amenities images bedType roomSizeSqm seasonalPricing").sort({ basePrice: 1 }).lean() }); }
-module.exports = { create, roomTypes };
+async function createWalkIn(req, res) {
+  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can create a walk-in booking.");
+  v.keys(req.body, ["roomTypeId", "checkInDate", "checkOutDate", "guestCount", "fullName", "phone", "email", "idDocumentNo"]);
+  const b = req.body;
+  v.id(b.roomTypeId, "roomTypeId"); v.date(b.checkInDate, "checkInDate"); v.date(b.checkOutDate, "checkOutDate");
+  const guestCount = v.number(b.guestCount, "guestCount", 1, 20);
+  const fullName = v.text(b.fullName, "fullName", 2, 80), phone = v.phone(b.phone, true), email = v.email(b.email), idDocumentNo = v.text(b.idDocumentNo, "idDocumentNo", 3, 40);
+  const type = await RoomType.findOne({ _id: b.roomTypeId, isActive: true });
+  if (!type) throw new v.HttpError(404, "This room type is no longer available.");
+  if (guestCount > type.maxOccupancy) v.fail(`This room accommodates up to ${type.maxOccupancy} guests.`, "guestCount");
+  const nights = nightsBetween(b.checkInDate, b.checkOutDate), assignment = await assignRoom(type._id, b.checkInDate, b.checkOutDate);
+  if (!assignment.roomId) throw new v.HttpError(409, "No rooms of this type are available for those dates.");
+  const unitPrice = priceAt(type, b.checkInDate), roomAmount = unitPrice * nights;
+  const booking = await Booking.create({ bookingReference: reference(), createdBy: req.user._id, checkInDate: b.checkInDate, checkOutDate: b.checkOutDate, status: "confirmed", rooms: [{ roomId: assignment.roomId, roomTypeId: type._id, priceAtBooking: unitPrice, guestCount }], guestName: fullName, guestPhone: phone, guestEmail: email, guestIdDocumentNo: idDocumentNo, roomAmount, totalAmount: roomAmount, depositRequired: 0, bookingSource: "front_desk", events: [{ actorId: req.user._id, type: "created", note: "Walk-in booking created by receptionist" }] });
+  res.status(201).json({ data: booking });
+}
+module.exports = { create, roomTypes, createWalkIn };

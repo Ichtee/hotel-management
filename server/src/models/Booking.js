@@ -32,7 +32,7 @@ const bookingEventSchema = new Schema({
 
 const schema = new Schema({
   bookingReference: { type: String, unique: true, sparse: true, uppercase: true, trim: true },
-  customerId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  customerId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
   createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   checkInDate: { type: Date, required: true },
   checkOutDate: { type: Date, required: true },
@@ -68,6 +68,8 @@ const schema = new Schema({
   events: [bookingEventSchema],
   guestName: { type: String, trim: true },
   guestPhone: String,
+  guestEmail: String,
+  guestIdDocumentNo: { type: String, select: false },
   couponCode: { type: String, uppercase: true, trim: true },
   discountAmount: { type: Number, default: 0, min: 0 },
   roomAmount: { type: Number, required: true, min: 0 },

@@ -24,5 +24,6 @@ function validateAssignment() {
 }
 schema.pre("validate", validateAssignment);
 schema.index({ staffId: 1, isActive: 1, effectiveTo: 1 });
+schema.index({ isActive: 1, shift: 1, effectiveFrom: 1, effectiveTo: 1 });
 
 module.exports = mongoose.model("HousekeepingAssignment", schema);

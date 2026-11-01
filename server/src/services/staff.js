@@ -6,6 +6,8 @@ const Notification = require("../models/Notification");
 const { editableRoles } = require("./staffPermissions");
 const { logChange } = require("./audit");
 const v = require("../utils/validation");
+const { hotelTransaction } = require("./hotelOperations");
+const { planEnd } = require("../utils/hotelTime");
 
 // Chỉ xuất thông tin nhân viên, không lộ dữ liệu xác thực hoặc khách hàng.
 function staffView(user, role) {
@@ -33,11 +35,13 @@ async function releaseResponsibilities(userId, req, reason, session) {
   const now = new Date();
   const tasks = await CleaningTask.updateMany(
     { assignedTo: userId, status: { $in: ["assigned", "pending"] } },
-    { $set: { status: "pending" }, $unset: { assignedTo: 1, assignedBy: 1 } },
+    { $set: { status: "pending" }, $unset: { assignedTo: 1, assignedBy: 1, assignmentId: 1, assignmentDate: 1, assignmentShift: 1 } },
     { session },
   );
+  const activePlans = await HousekeepingAssignment.find({ staffId: userId, isActive: true }).session(session).lean();
+  const planIds = activePlans.filter((plan) => planEnd(plan) > now).map((plan) => plan._id);
   const plans = await HousekeepingAssignment.updateMany(
-    { staffId: userId, isActive: true, effectiveTo: { $gte: now } },
+    { _id: { $in: planIds } },
     { $set: { isActive: false, revokedAt: now, revokedBy: req.user._id, revocationReason: reason } },
     { session },
   );
@@ -83,7 +87,7 @@ async function createStaff(req, data, passwordHash) {
 
 // Thay đổi nhân viên, thu hồi phiên và phân công một cách nguyên tử.
 async function updateStaff(req, data) {
-  const result = await User.db.transaction(async (session) => {
+  const result = await hotelTransaction(async (session) => {
     const roles = await Role.find({ key: { $in: editableRoles } }).session(session);
     const user = await User.findOne({ _id: v.id(req.params.id), roleId: { $in: roles.map((r) => r._id) } })
       .select("+authVersion").session(session);

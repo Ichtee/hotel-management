@@ -203,6 +203,7 @@ function Bookings() {
   const [f, setF] = useState('all');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [cancelling, setCancelling] = useState(null);
   const live = useApi('/bookings?limit=100', user.role === 'receptionist');
   const rows = (live.data || BOOKINGS).filter((b) => f === 'all' || b.status === f);
   return (
@@ -214,11 +215,23 @@ function Bookings() {
         ))}
       </div>
       <Notice error={live.error} />
-      <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status', '']} rows={rows.map((b) => b._id ? [b.bookingReference, b.guestName || '—', b.rooms[0]?.roomId?.roomNumber || 'Assigned at check-in', b.rooms[0]?.roomTypeId?.name || 'Room', b.checkInDate?.slice(0, 10), b.checkOutDate?.slice(0, 10), money(b.totalAmount), b.status, <button className="btn sm" onClick={() => setEditing(b)}>Edit</button>] : [b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status, ''])} />
+      <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status', '']} rows={rows.map((b) => b._id ? [b.bookingReference, b.guestName || '—', b.rooms[0]?.roomId?.roomNumber || 'Assigned at check-in', b.rooms[0]?.roomTypeId?.name || 'Room', b.checkInDate?.slice(0, 10), b.checkOutDate?.slice(0, 10), money(b.totalAmount), b.status, <span className="row-actions"><button className="btn sm" onClick={() => setEditing(b)}>Edit</button>{['pending', 'confirmed'].includes(b.status) && <button className="btn sm" onClick={() => setCancelling(b)}>Cancel</button>}</span>] : [b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status, ''])} />
       {creating && <WalkInBooking onClose={() => setCreating(false)} />}
       {editing && <EditBooking booking={editing} onClose={() => setEditing(null)} />}
+      {cancelling && <CancelBooking booking={cancelling} onClose={() => setCancelling(null)} />}
     </>
   );
+}
+
+function CancelBooking({ booking, onClose }) {
+  const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${booking._id}/cancel`, { method: 'POST', body: { ...f, verificationMethod: 'front_desk_id' } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  return <Modal title={`Cancel ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
+    <p className="full muted">Verify the guest's ID document at the front desk before confirming cancellation.</p>
+    <Field label="Cancellation reason"><input name="reason" required /></Field>
+    <Field label="Refund bank (if deposit was paid)"><input name="bank" /></Field><Field label="Refund account number"><input name="accountNumber" /></Field><Field label="Account holder name"><input name="accountHolderName" /></Field>
+    <div className="full"><Notice error={error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving}>{saving ? 'Cancelling…' : 'Confirm cancellation'}</button></div>
+  </form></Modal>;
 }
 
 function EditBooking({ booking, onClose }) {

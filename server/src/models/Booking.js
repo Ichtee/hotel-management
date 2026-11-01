@@ -43,9 +43,13 @@ const schema = new Schema({
   holdExpiresAt: Date, // BR-29: pending online bookings hold the room for 15 minutes
   cancelledAt: Date,
   cancellationReason: String,
+  cancellationRequestedAt: Date,
+  cancellationVerification: { type: String, enum: ['front_desk_id', 'phone_otp'] },
+  refundableAmount: { type: Number, default: 0, min: 0 },
+  refundAccount: { bank: String, accountNumber: String, accountHolderName: String },
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 'expired'],
+    enum: ['pending', 'confirmed', 'cancellation_requested', 'checked_in', 'checked_out', 'cancelled', 'expired'],
     default: 'pending', index: true
   },
   rooms: {

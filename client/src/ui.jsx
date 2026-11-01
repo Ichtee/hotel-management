@@ -44,7 +44,7 @@ export function useApi(path, enabled = true) {
 }
 
 export function DataTable({ cols, rows }) {
-  const words = /^(confirmed|checked_in|checked_out|cancelled|pending|active|inactive|paid|done|in_progress|open|resolved|high|medium|low|published|suspended|deleted)$/;
+  const words = /^(confirmed|cancellation_requested|checked_in|checked_out|cancelled|pending|active|inactive|paid|done|in_progress|open|resolved|high|medium|low|published|suspended|deleted)$/;
   return (
     <div className="table-wrap">
       <table>

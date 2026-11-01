@@ -100,4 +100,33 @@ async function modifyWalkIn(req, res) {
   booking.events.push({ actorId: req.user._id, type: "modified", note: "Booking modified by receptionist" });
   await booking.save(); res.json({ data: booking });
 }
-module.exports = { create, roomTypes, createWalkIn, modifyWalkIn };
+function refundFor(booking, paidDeposit) {
+  const hours = (booking.checkInDate - new Date()) / 3600000;
+  const tier = (booking.policySnapshot?.cancellationTiers || []).sort((a, b) => b.minHoursBeforeCheckIn - a.minHoursBeforeCheckIn).find((t) => hours >= t.minHoursBeforeCheckIn);
+  return tier ? Math.round(paidDeposit * tier.refundPercent / 100) : 0;
+}
+async function cancelWalkIn(req, res) {
+  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can cancel a booking.");
+  v.keys(req.body, ["reason", "verificationMethod", "bank", "accountNumber", "accountHolderName"]);
+  const b = req.body; const booking = await Booking.findById(v.id(req.params.id));
+  if (!booking) throw new v.HttpError(404, "Booking not found.");
+  if (booking.status === "cancellation_requested") throw new v.HttpError(409, "This cancellation request is already pending review.");
+  if (!["pending", "confirmed"].includes(booking.status)) throw new v.HttpError(409, "This booking cannot be cancelled.");
+  const reason = v.text(b.reason, "reason", 2, 250);
+  const verificationMethod = v.choice(b.verificationMethod, "verificationMethod", ["front_desk_id"]);
+  const deposits = await Payment.find({ bookingId: booking._id, kind: "deposit", status: "success" }).lean();
+  const paidDeposit = deposits.reduce((sum, payment) => sum + payment.amount, 0);
+  booking.cancellationReason = reason; booking.cancellationVerification = verificationMethod;
+  if (!paidDeposit) {
+    booking.status = "cancelled"; booking.cancelledAt = new Date();
+    booking.events.push({ actorId: req.user._id, type: "cancelled", note: `Cancelled at front desk: ${reason}` });
+    await booking.save(); return res.json({ data: booking, meta: { reviewRequired: false } });
+  }
+  const refundableAmount = refundFor(booking, paidDeposit);
+  if (refundableAmount && (!b.bank || !b.accountNumber || !b.accountHolderName)) v.fail("Refund bank, account number and account holder are required.");
+  booking.status = "cancellation_requested"; booking.cancellationRequestedAt = new Date(); booking.refundableAmount = refundableAmount;
+  if (refundableAmount) booking.refundAccount = { bank: v.text(b.bank, "bank", 2, 80), accountNumber: v.text(b.accountNumber, "accountNumber", 4, 40), accountHolderName: v.text(b.accountHolderName, "accountHolderName", 2, 80) };
+  booking.events.push({ actorId: req.user._id, type: "cancelled", note: `Cancellation requested at front desk: ${reason}` });
+  await booking.save(); res.json({ data: booking, meta: { reviewRequired: true, refundableAmount } });
+}
+module.exports = { create, roomTypes, createWalkIn, modifyWalkIn, cancelWalkIn };

@@ -109,6 +109,7 @@ function createApp({
   app.post("/api/bookings", bookingCreation.create);
   app.post("/api/front-desk/bookings", bookingCreation.createWalkIn);
   app.patch("/api/front-desk/bookings/:id", bookingCreation.modifyWalkIn);
+  app.post("/api/front-desk/bookings/:id/cancel", bookingCreation.cancelWalkIn);
   app.get("/api/bookings/:id", bookings.detail);
   app.use("/api/policies/deposit", permit("policies.manage"));
   app.get("/api/policies/deposit", policies.listing);

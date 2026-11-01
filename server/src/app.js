@@ -75,7 +75,7 @@ function createApp({
   const store = MongoStore.create({
     mongoUrl: mongoUri,
     collectionName: "sessions",
-    ttl: 60 * 60 * 8,
+    ttl: 30 * 60,
   });
 
   app.use(
@@ -85,11 +85,13 @@ function createApp({
       store,
       resave: false,
       saveUninitialized: false,
+      // Sliding idle timeout (SRS 4.2.4): every request renews the expiry; login sets 15 or 30 minutes by role.
+      rolling: true,
       cookie: {
         httpOnly: true,
         sameSite: "lax",
         secure: production,
-        maxAge: 8 * 60 * 60 * 1000,
+        maxAge: 30 * 60 * 1000,
       },
     }),
   );
@@ -197,16 +199,17 @@ function createApp({
   // UC10 View Booking History (Session-authenticated)
   app.get("/api/bookings", bookings.listing);
   app.post("/api/bookings", bookingCreation.create);
-  app.post("/api/front-desk/bookings", bookingCreation.createWalkIn);
-  app.patch("/api/front-desk/bookings/:id", bookingCreation.modifyWalkIn);
-  app.post("/api/front-desk/bookings/:id/cancel", bookingCreation.cancelWalkIn);
-  app.get("/api/front-desk/bookings/:id/available-rooms", bookingCreation.availableRooms);
-  app.post("/api/front-desk/bookings/:id/check-in", bookingCreation.checkIn);
-  app.get("/api/front-desk/bookings/:id/change-room-options", bookingCreation.changeRoomOptions);
-  app.post("/api/front-desk/bookings/:id/change-room", bookingCreation.changeRoom);
-  app.get("/api/front-desk/services", bookingCreation.services);
-  app.post("/api/front-desk/bookings/:id/services", bookingCreation.addService);
-  app.post("/api/front-desk/bookings/:id/check-out", bookingCreation.checkOut);
+  // SRS 2.4.3 permissions, so the manager's changes in UC33 apply to these front-desk functions.
+  app.post("/api/front-desk/bookings", permit("bookings.walk_in.create"), bookingCreation.createWalkIn);
+  app.patch("/api/front-desk/bookings/:id", permit("bookings.managed.update"), bookingCreation.modifyWalkIn);
+  app.post("/api/front-desk/bookings/:id/cancel", permit("bookings.managed.cancel"), bookingCreation.cancelWalkIn);
+  app.get("/api/front-desk/bookings/:id/available-rooms", permit("stays.check_in"), bookingCreation.availableRooms);
+  app.post("/api/front-desk/bookings/:id/check-in", permit("stays.check_in"), bookingCreation.checkIn);
+  app.get("/api/front-desk/bookings/:id/change-room-options", permit("rooms.change"), bookingCreation.changeRoomOptions);
+  app.post("/api/front-desk/bookings/:id/change-room", permit("rooms.change"), bookingCreation.changeRoom);
+  app.get("/api/front-desk/services", permit("booking_services.record"), bookingCreation.services);
+  app.post("/api/front-desk/bookings/:id/services", permit("booking_services.record"), bookingCreation.addService);
+  app.post("/api/front-desk/bookings/:id/check-out", permit("stays.check_out"), bookingCreation.checkOut);
   // UC11 View Booking Details
   app.get("/api/bookings/:id", bookings.detail);
 
@@ -243,7 +246,8 @@ function createApp({
   app.post("/api/policies/cancellation", policies.createCancellation);
   app.put("/api/hotel-info", permit("policies.manage"), policies.updateHotelInfo);
 
-  app.use("/api/front-desk/customers", customerRoutes);
+  // Guest contact data is front-desk only (SRS 4.2.4); a Customer session must not read or change other customers.
+  app.use("/api/front-desk/customers", (req, res, next) => permit(req.method === "GET" ? "bookings.managed.read" : "bookings.managed.update")(req, res, next), customerRoutes);
   app.use("/api/front-desk", frontDeskRoutes);
 
   app.get("/api/reports/revenue", permit("revenue.read"), revenue);

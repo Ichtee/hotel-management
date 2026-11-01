@@ -4,6 +4,11 @@ const Role = require("../models/Role");
 const v = require("../utils/validation");
 const { hashPassword, verifyPassword } = require("../utils/password");
 const { publicUser } = require("../middleware/auth");
+const AuditLog = require("../models/AuditLog");
+const MAX_FAILED_LOGINS = 5;
+const LOCK_MS = 15 * 60 * 1000;
+// Phiên hết hạn khi không hoạt động: 30 phút với Customer, 15 phút với nhân viên (SRS 4.2.4).
+const idleMs = (role) => (role.key === "customer" ? 30 : 15) * 60 * 1000;
 // Tạo mã phiên mới để tránh tái sử dụng phiên cũ.
 const regenerate = (req) =>
   new Promise((resolve, reject) =>
@@ -55,12 +60,16 @@ async function login(req, res) {
   v.text(req.body.password, "password", 1, 128);
   const password = req.body.password;
   const user = await User.findOne({ email }).select(
-    "+passwordHash +authVersion",
+    "+passwordHash +authVersion +failedLogins +lockedUntil",
   );
+  // MSG-64 (BR-42): tài khoản đang bị khóa thì từ chối cả mật khẩu đúng.
+  if (user?.lockedUntil > new Date())
+    throw new v.HttpError(423, "Your account is locked for 15 minutes after too many failed login attempts.");
   const valid = await verifyPassword(
     password,
     user?.passwordHash || `scrypt:${"0".repeat(32)}:${"0".repeat(128)}`,
   );
+  if (user && !valid) await recordFailedLogin(req, user);
   const role = user && (await Role.findOne({ _id: user.roleId, isActive: true }));
   if (!valid || user.status !== "active" || !role)
     throw new v.HttpError(
@@ -71,10 +80,21 @@ async function login(req, res) {
   req.session.userId = user.id;
   req.session.authVersion = user.authVersion || 0;
   req.session.roleAuthVersion = role.authVersion || 0;
+  req.session.cookie.maxAge = idleMs(role);
   user.lastLogin = new Date();
+  user.failedLogins = 0;
+  user.lockedUntil = undefined;
   await user.save();
   await save(req);
   res.json({ data: publicUser(user, role) });
+}
+// Đếm lần sai liên tiếp (tăng nguyên tử để các yêu cầu song song không đếm thiếu); lần thứ 5 khóa 15 phút.
+async function recordFailedLogin(req, user) {
+  const { failedLogins } = await User.findByIdAndUpdate(user._id, { $inc: { failedLogins: 1 } }, { new: true }).select("+failedLogins");
+  const locked = failedLogins >= MAX_FAILED_LOGINS;
+  if (locked) await User.updateOne({ _id: user._id }, { $set: { failedLogins: 0, lockedUntil: new Date(Date.now() + LOCK_MS) } });
+  await AuditLog.create({ action: locked ? "account_locked" : "login_failed", targetType: "User", targetId: user._id, ip: req.ip, detail: { failedLogins } });
+  if (locked) throw new v.HttpError(423, "Your account is locked for 15 minutes after too many failed login attempts.");
 }
 // Hủy phiên và cookie đăng nhập.
 async function logout(req, res) {

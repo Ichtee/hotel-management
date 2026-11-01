@@ -207,6 +207,46 @@ test("authentication rejects bad passwords, missing sessions and foreign origins
   await send(agent, "post", "/api/auth/logout").expect(200);
   await agent.get("/api/auth/me").expect(401);
 });
+test("BR-42: 5 consecutive failed logins lock the account for 15 minutes and are audited", async () => {
+  const AuditLog = require("../src/models/AuditLog");
+  const user = await User.create({ username: "lockme", email: "lockme@example.com", passwordHash: await hashPassword(password), roleId: await roleId("customer") });
+  const attempt = (pw) => send(request(app), "post", "/api/auth/login", { email: "lockme@example.com", password: pw });
+  for (let i = 0; i < 4; i++) await attempt("wrong").expect(401);
+  const locked = await attempt("wrong").expect(423);
+  assert.match(locked.body.error.message, /locked for 15 minutes/);
+  await attempt(password).expect(423); // the right password is refused while locked
+  assert.equal(await AuditLog.countDocuments({ targetId: user._id, action: "login_failed" }), 4);
+  assert.equal(await AuditLog.countDocuments({ targetId: user._id, action: "account_locked" }), 1);
+  await User.updateOne({ _id: user._id }, { $set: { lockedUntil: new Date(Date.now() - 1000) } });
+  await attempt(password).expect(200);
+  // a successful login resets the counter
+  for (let i = 0; i < 4; i++) await attempt("wrong").expect(401);
+  await attempt(password).expect(200);
+});
+test("SRS 4.2.4: sessions expire after 15 min idle for staff and 30 min for customers, renewed on activity", async () => {
+  // express-session sends Expires, not Max-Age: round the remaining lifetime to minutes.
+  const maxAge = (res) => Math.round((Date.parse(/Expires=([^;]+)/.exec(res.headers["set-cookie"][0])[1]) - Date.now()) / 60000) * 60;
+  const staffLogin = await send(request(app), "post", "/api/auth/login", { email: "staff@example.com", password }).expect(200);
+  assert.equal(maxAge(staffLogin), 15 * 60);
+  const customerLogin = await send(request(app), "post", "/api/auth/login", { email: "customer@example.com", password }).expect(200);
+  assert.equal(maxAge(customerLogin), 30 * 60);
+  const renewed = await staff.get("/api/auth/me").expect(200);
+  assert.equal(maxAge(renewed), 15 * 60);
+});
+test("front-desk routes follow role permissions: customers cannot read guest data or run front-desk actions", async () => {
+  await customer.get("/api/front-desk/customers").expect(403);
+  await send(customer, "patch", `/api/front-desk/customers/${new mongoose.Types.ObjectId()}`, { phone: "0900000000" }).expect(403);
+  await send(customer, "post", `/api/front-desk/bookings/${new mongoose.Types.ObjectId()}/check-in`).expect(403);
+  await staff.get("/api/front-desk/customers").expect(200);
+  // UC33: removing a permission from the Receptionist role takes it away from the role's users
+  const role = await Role.findOne({ key: "receptionist" });
+  await Role.updateOne({ _id: role._id }, { $pull: { permissions: "stays.check_in" } });
+  try {
+    await send(staff, "post", `/api/front-desk/bookings/${new mongoose.Types.ObjectId()}/check-in`).expect(403);
+  } finally {
+    await Role.updateOne({ _id: role._id }, { $set: { permissions: role.permissions } });
+  }
+});
 test("profile updates only self and password change revokes other sessions", async () => {
   const a = await login("new@example.com");
   const b = await login("new@example.com");

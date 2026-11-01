@@ -53,7 +53,6 @@ async function create(req, res) {
 }
 async function roomTypes(_req, res) { res.json({ data: await RoomType.find({ isActive: true }).select("name description basePrice maxOccupancy amenities images bedType roomSizeSqm seasonalPricing").sort({ basePrice: 1 }).lean() }); }
 async function createWalkIn(req, res) {
-  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can create a walk-in booking.");
   v.keys(req.body, ["roomTypeId", "checkInDate", "checkOutDate", "guestCount", "fullName", "phone", "email", "idDocumentNo"]);
   const b = req.body;
   v.id(b.roomTypeId, "roomTypeId"); v.date(b.checkInDate, "checkInDate"); v.date(b.checkOutDate, "checkOutDate");
@@ -69,7 +68,6 @@ async function createWalkIn(req, res) {
   res.status(201).json({ data: booking });
 }
 async function modifyWalkIn(req, res) {
-  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can modify a booking.");
   v.keys(req.body, ["checkInDate", "checkOutDate", "guestCount", "fullName", "phone", "idDocumentNo"]);
   const booking = await Booking.findById(v.id(req.params.id)).select("+guestIdDocumentNo");
   if (!booking) throw new v.HttpError(404, "Booking not found.");
@@ -108,7 +106,6 @@ function refundFor(booking, paidDeposit) {
   return tier ? Math.round(paidDeposit * tier.refundPercent / 100) : 0;
 }
 async function cancelWalkIn(req, res) {
-  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can cancel a booking.");
   v.keys(req.body, ["reason", "verificationMethod", "bank", "accountNumber", "accountHolderName"]);
   const b = req.body; const booking = await Booking.findById(v.id(req.params.id));
   if (!booking) throw new v.HttpError(404, "Booking not found.");
@@ -133,7 +130,6 @@ async function cancelWalkIn(req, res) {
 }
 const vnDate = (date = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh" }).format(date);
 async function availableRooms(req, res) {
-  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can check in a guest.");
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   const roomTypeId = booking.rooms[0].roomTypeId;
@@ -142,7 +138,6 @@ async function availableRooms(req, res) {
   res.json({ data: candidates.filter((r) => !busy.some((id) => String(id) === String(r._id))) });
 }
 async function checkIn(req, res) {
-  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can check in a guest.");
   v.keys(req.body, ["roomId", "guestCount", "idDocumentNo"]);
   const booking = await Booking.findById(v.id(req.params.id)).select("+guestIdDocumentNo");
   if (!booking) throw new v.HttpError(404, "Booking not found.");
@@ -160,7 +155,6 @@ async function checkIn(req, res) {
   res.json({ data: booking });
 }
 async function changeRoomOptions(req, res) {
-  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can change a room.");
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking || booking.status !== "checked_in") throw new v.HttpError(409, "Only a checked-in booking can change rooms.");
   const current = booking.rooms[0]; const currentType = await RoomType.findById(current.roomTypeId);
@@ -170,7 +164,6 @@ async function changeRoomOptions(req, res) {
   res.json({ data: rooms.map((room) => ({ ...room, roomType: typeById.get(String(room.roomTypeId)) })) });
 }
 async function changeRoom(req, res) {
-  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can change a room.");
   v.keys(req.body, ["newRoomId", "cause"]);
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking || booking.status !== "checked_in") throw new v.HttpError(409, "Only a checked-in booking can change rooms.");
@@ -188,11 +181,9 @@ async function changeRoom(req, res) {
   res.json({ data: booking, meta: { extraCharge: extra } });
 }
 async function services(_req, res) {
-  if (_req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can record services.");
   res.json({ data: await Service.find({ isActive: true }).select("name category unitPrice").sort({ name: 1 }).lean() });
 }
 async function addService(req, res) {
-  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can record services.");
   v.keys(req.body, ["serviceId", "quantity"]);
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking) throw new v.HttpError(404, "Booking not found.");
@@ -206,7 +197,6 @@ async function addService(req, res) {
   await booking.save(); res.status(201).json({ data: booking });
 }
 async function checkOut(req, res) {
-  if (req.role.key !== "receptionist") throw new v.HttpError(403, "Only a receptionist can check out a guest.");
   v.keys(req.body, ["inspectionConfirmed", "paymentMethod", "transactionRef"]);
   if (req.body.inspectionConfirmed !== true) v.fail("Room inspection must be completed or explicitly skipped.", "inspectionConfirmed");
   const booking = await Booking.findById(v.id(req.params.id));

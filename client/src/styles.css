@@ -121,6 +121,22 @@ input, select { min-height: 44px; padding: 0 .75rem; border: 1px solid var(--lin
 .site .dd-menu { background: #fff; border: 1px solid var(--line); }
 .site .dd-menu a:hover { background: var(--grey-bg); }
 .site .menu-btn { color: var(--navy); border-color: var(--line); }
+/* Account menu: one entry point for bookings, profile and sign out. */
+.site .right { gap: .75rem; }
+.site .dd > button.acct { width: auto; gap: .5rem; padding: 0 .65rem 0 .3rem; border: 1px solid var(--line); border-radius: 99px; background: #fff; }
+.site .dd > button.acct:hover, .site .dd > button.acct[aria-expanded="true"] { background: var(--grey-bg); }
+.acct .avatar { width: 34px; height: 34px; font-size: .85rem; }
+.acct-name { max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-head { display: grid; padding: .55rem .75rem .65rem; margin-bottom: .25rem; border-bottom: 1px solid var(--line); }
+.acct-head small { color: var(--muted); font-weight: 400; }
+.dd-menu .signout { width: 100%; min-height: 44px; padding: .5rem .75rem; border: 0; border-radius: 8px; background: none; color: var(--red); font-weight: 600; text-align: left; }
+.dd-menu .signout:hover { background: var(--red-bg); }
+.signin { display: inline-flex; align-items: center; min-height: 44px; padding: 0 .75rem; border-radius: 10px; color: var(--navy); font-weight: 600; text-decoration: none; }
+.signin:hover { background: var(--grey-bg); }
+@media (max-width: 999px) {
+  .site .right { flex-direction: column; align-items: stretch; padding-top: .75rem; border-top: 1px solid var(--line); }
+  .site .dd > button.acct { width: 100%; }
+}
 .btn.gold { background: var(--gold); border-color: var(--gold); color: #1a1205; } .btn.gold:hover { background: #a8761f; color: #fff; }
 .btn.ghost-w { text-decoration: none; display: inline-flex; align-items: center; }
 .site .right a { text-decoration: none; display: inline-flex; align-items: center; }

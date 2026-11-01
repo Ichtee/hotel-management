@@ -12,7 +12,6 @@ const NAV = [
   { label: 'Home', href: '#/' },
   { label: 'Rooms', items: [['#/rooms', 'All rooms', 'Compare every room type'], ['#/rooms?cat=standard', 'Standard rooms', 'Deluxe & Superior'], ['#/rooms?cat=suite', 'Suites', 'Family & Presidential']] },
   { label: 'Offers', href: '#/offers' },
-  { label: 'My trips', items: [['#/my-bookings', 'My bookings', 'Upcoming & past stays'], ['#/login', 'Sign in / Register', '']] },
   { label: 'Help', items: [['#/offers', 'Cancellation policy', 'Free cancel up to 48h'], ['#/', 'Contact us', 'hello@grandstay.example']] }
 ];
 
@@ -40,8 +39,7 @@ function SiteHeader({ route }) {
   }, []);
 
   const done = () => { setOpen(null); setMobile(false); };
-
-  const nav = NAV.map((m) => (m.label === 'My trips' ? { ...m, items: m.items.filter(([h]) => (user ? h !== '#/login' : true)).concat(user ? [['#/profile', 'My profile', user.email]] : []) } : m));
+  const name = user?.customerProfile?.fullName || user?.username || '';
 
   return (
     <header className="topbar site" ref={ref}>
@@ -50,7 +48,7 @@ function SiteHeader({ route }) {
         <button className="menu-btn" aria-expanded={mobile} aria-controls="nav" onClick={() => setMobile(!mobile)}>{mobile ? 'Close' : 'Menu'}</button>
         <nav id="nav" className={mobile ? 'open' : ''} aria-label="Main">
           <ul>
-            {nav.map((m, i) => m.items ? (
+            {NAV.map((m, i) => m.items ? (
               <li className="dd" key={m.label}>
                 <button aria-expanded={open === i} aria-haspopup="true" onClick={() => setOpen(open === i ? null : i)}>{m.label} <span className="caret" aria-hidden="true">▾</span></button>
                 {open === i && (
@@ -64,31 +62,27 @@ function SiteHeader({ route }) {
           <div className="right">
             {user ? (
               <>
-                <a
-                  href="#/profile"
-                  className="btn ghost-w"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 7, textDecoration: 'none', padding: '0 .85rem' }}
-                  onClick={done}
-                  title="View Profile"
-                >
-                  <span className="avatar" style={{ width: 24, height: 24, fontSize: '.75rem', background: 'var(--gold)', color: '#1a1205' }}>
-                    {(user.fullName || user.email || 'U')[0].toUpperCase()}
-                  </span>
-                  <span style={{ color: 'var(--gold-ink)', fontWeight: 600 }}>{user.fullName || user.email?.split('@')[0]}</span>
-                </a>
-                {staff && <a className="btn ghost-w" href="#/admin" onClick={done}>Staff portal</a>}
-                <button
-                  className="btn ghost-w"
-                  onClick={async () => { done(); await signOut(); location.hash = '#/'; }}
-                  style={{ border: '1px solid rgba(255,255,255,0.3)', color: '#fff', background: 'transparent' }}
-                >
-                  Sign out
-                </button>
-                <a className="btn gold" href="#/my-bookings" onClick={done}>My trips</a>
+                <a className="btn gold" href="#/rooms" onClick={done}>Book now</a>
+                <div className="dd account">
+                  <button className="acct" aria-expanded={open === 'acct'} aria-haspopup="true" onClick={() => setOpen(open === 'acct' ? null : 'acct')}>
+                    <span className="avatar" aria-hidden="true">{(name || 'U')[0].toUpperCase()}</span>
+                    <span className="acct-name">{name}</span>
+                    <span className="caret" aria-hidden="true">▾</span>
+                  </button>
+                  {open === 'acct' && (
+                    <ul className="dd-menu end">
+                      <li className="acct-head"><strong>{name}</strong><small>{user.email}</small></li>
+                      <li><a href="#/my-bookings" onClick={done}><strong>My bookings</strong></a></li>
+                      <li><a href="#/profile" onClick={done}><strong>My profile</strong></a></li>
+                      {staff && <li><a href="#/admin" onClick={done}><strong>Staff portal</strong></a></li>}
+                      <li><button className="signout" onClick={async () => { done(); await signOut(); location.hash = '#/'; }}>Sign out</button></li>
+                    </ul>
+                  )}
+                </div>
               </>
             ) : (
               <>
-                <a className="btn ghost-w" href="#/login" onClick={done}>Sign in</a>
+                <a className="signin" href="#/login" onClick={done}>Sign in</a>
                 <a className="btn gold" href="#/rooms" onClick={done}>Book now</a>
               </>
             )}

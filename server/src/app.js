@@ -9,6 +9,7 @@ const accounts = require("./controllers/accounts");
 const roles = require("./controllers/roles");
 const promotions = require("./controllers/promotions");
 const bookings = require("./controllers/bookings");
+const bookingCreation = require("./controllers/bookingCreation");
 const policies = require("./controllers/policies");
 const { revenue } = require("./controllers/revenue");
 const { HttpError } = require("./utils/validation");
@@ -67,6 +68,7 @@ function createApp({
     next();
   });
   app.get("/api/health", (req, res) => res.json({ data: { status: "ok" } }));
+  app.get("/api/room-types", bookingCreation.roomTypes);
   const authLimit = rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 100,
@@ -104,6 +106,7 @@ function createApp({
   app.patch("/api/promotions/:id", promotions.update);
   app.delete("/api/promotions/:id", promotions.remove);
   app.get("/api/bookings", bookings.listing);
+  app.post("/api/bookings", bookingCreation.create);
   app.get("/api/bookings/:id", bookings.detail);
   app.use("/api/policies/deposit", permit("policies.manage"));
   app.get("/api/policies/deposit", policies.listing);

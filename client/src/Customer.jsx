@@ -4,6 +4,7 @@ import { AuthShell, AuthTabs, SignIn, Register } from './AuthForms.jsx';
 import { Profile } from './AdminPages.jsx';
 import { EXTRAS, OFFERS, REVIEWS, ROOM_TYPES } from './data.js';
 import { MyBookings } from './Bookings.jsx';
+import { api } from './api/client.js';
 
 const NAV = [
   { label: 'Home', href: '#/' },
@@ -262,7 +263,23 @@ function Checkout({ q }) {
   const sub = nights * r.price + ex.reduce((s, [, p]) => s + p, 0);
   const total = sub * (1 - (offer?.pct || 0) / 100);
   const [pay, setPay] = useState('deposit');
-  const confirm = (e) => { e.preventDefault(); location.hash = '#/confirmation'; };
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const confirm = async (e) => {
+    e.preventDefault();
+    setSaving(true); setError('');
+    try {
+      const types = await api('/room-types');
+      const type = types.data.find((item) => item.name === r.name);
+      if (!type) throw new Error('This room is no longer available. Please choose another room.');
+      const created = await api('/bookings', { method: 'POST', body: {
+        roomTypeId: type._id, checkInDate: q.in, checkOutDate: q.out,
+        guestCount: Number(q.guests), couponCode: q.coupon || undefined, paymentOption: pay
+      } });
+      location.hash = `#/confirmation?${new URLSearchParams({ ref: created.data.bookingReference })}`;
+    } catch (err) { setError(err.message || 'Unable to create your booking.'); }
+    finally { setSaving(false); }
+  };
   return (
     <div className="c-wrap c-section">
       <h1 className="title">Checkout</h1>
@@ -279,7 +296,8 @@ function Checkout({ q }) {
               <label className="check" key={v}><input type="radio" name="pay" checked={pay === v} onChange={() => setPay(v)} />{l}</label>
             ))}
           </fieldset>
-          <button className="btn primary" type="submit">Confirm booking</button>
+          {error && <p className="note bad-note full" role="alert">{error}</p>}
+          <button className="btn primary" type="submit" disabled={saving}>{saving ? 'Creating booking…' : 'Confirm booking'}</button>
         </form>
         <aside className="panel book">
           <img className="thumb" src={r.img} alt="" />
@@ -297,11 +315,11 @@ function Checkout({ q }) {
   );
 }
 
-const Confirmation = () => (
+const Confirmation = ({ q }) => (
   <div className="c-wrap c-section center">
     <p className="done" aria-hidden="true">✓</p>
     <h1 className="title">Booking confirmed</h1>
-    <p className="muted">Your booking code is <strong>BK-1050</strong>. A confirmation email is on its way.</p>
+    <p className="muted">Your booking code is <strong>{q.ref || 'confirmed'}</strong>. A confirmation email is on its way.</p>
     <p><a className="btn primary" href="#/my-bookings">View my bookings</a></p>
   </div>
 );
@@ -350,7 +368,7 @@ export default function Customer({ route }) {
   else if (path === '#/rooms') page = <Rooms q={q} />;
   else if (path === '#/offers') page = <Offers />;
   else if (path === '#/checkout') page = <Checkout q={q} />;
-  else if (path === '#/confirmation') page = <Confirmation />;
+  else if (path === '#/confirmation') page = <Confirmation q={q} />;
   else if (path === '#/my-bookings') page = <MyBookings />;
   else if (path === '#/login') page = <Auth />;
   else page = <Home />;

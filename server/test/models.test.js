@@ -11,7 +11,7 @@ const models = Object.fromEntries(fs.readdirSync(modelsDir)
   }));
 
 async function validateModels() {
-  assert.equal(Object.keys(models).length, 18);
+  assert.equal(Object.keys(models).length, 19);
   assert.equal(models.Hotel, undefined);
   for (const [name, model] of Object.entries(models)) {
     assert.equal(model.modelName, name);
@@ -53,7 +53,7 @@ async function validateModels() {
 
   const fields = { RoomType: 'bedType roomSizeSqm seasonalPricing', Room: 'viewType description images isActive', Service: 'category description', Booking: 'bookingReference holdExpiresAt', Coupon: 'code description minimumSpend', Refund: 'requestedBy', Invoice: 'invoiceNumber subtotal status billingAddress', Review: 'title hotelResponse', Notification: 'title' };
   for (const [name, list] of Object.entries(fields)) for (const f of list.split(' ')) assert.ok(models[name].schema.path(f), `${name}.${f} missing`);
-  console.log('Validated 18 Mongoose models and key booking/payment/policy rules');
+  console.log('Validated 19 Mongoose models and key booking/payment/policy rules');
 }
 
 validateModels().catch(error => { console.error(error); process.exitCode = 1; });

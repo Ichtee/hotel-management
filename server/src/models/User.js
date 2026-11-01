@@ -8,8 +8,10 @@ const userSchema = new Schema({
   phone: String,
   status: { type: String, enum: ['active', 'suspended', 'deleted'], default: 'active' },
   lastLogin: Date,
-  passwordReset: { tokenHash: { type: String, select: false }, expiresAt: Date }, // Forgot Password (UC02)
+  passwordReset: { tokenHash: { type: String, select: false }, expiresAt: Date },
   authVersion: { type: Number, default: 0, select: false },
+  mustChangePassword: { type: Boolean, default: false },
+  statusReason: { type: String, trim: true, maxlength: 500 },
   customerProfile: { fullName: String, address: String, dateOfBirth: Date, loyaltyPoints: { type: Number, default: 0, min: 0 }, idDocumentNo: { type: String, select: false } },
   employeeProfile: { position: String, hireDate: Date, shift: String }
 }, { timestamps: true });

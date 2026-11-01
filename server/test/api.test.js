@@ -1,7 +1,7 @@
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const mongoose = require("mongoose");
-const { MongoMemoryServer } = require("mongodb-memory-server");
+const { MongoMemoryReplSet } = require("mongodb-memory-server");
 const request = require("supertest");
 const { createApp } = require("../src/app");
 const { seedRoles } = require("../src/services/roles");
@@ -32,12 +32,13 @@ async function login(email) {
   return agent;
 }
 before(async () => {
-  db = await MongoMemoryServer.create();
+  db = await MongoMemoryReplSet.create({ replSet: { count: 1, storageEngine: "wiredTiger" } });
   await mongoose.connect(db.getUri());
   const { bootstrap } = require("../scripts/setup");
   await bootstrap({ ADMIN_USERNAME: "admin", ADMIN_EMAIL: "admin@example.com", ADMIN_NAME: "Administrator", ADMIN_PASSWORD: password });
   await seedRoles();
   await Promise.all([User.init(), Coupon.init(), CouponUsage.init()]);
+  await Promise.all(Object.values(mongoose.models).map((model) => model.init()));
   const passwordHash = await hashPassword(password);
   for (const [username, role] of [
     ["manager", "manager"],
@@ -81,7 +82,7 @@ test("inactive roles do not prevent account and staff deactivation", async () =>
       status: "suspended",
       role: "customer",
     }).expect(200);
-    await send(manager, "delete", `/api/staff/${employee.id}`).expect(200);
+    await send(manager, "delete", `/api/staff/${employee.id}`, { reason: "Staff is on leave." }).expect(200);
     assert.equal((await User.findById(guest.id)).status, "suspended");
     assert.equal((await User.findById(employee.id)).status, "suspended");
     await send(admin, "post", "/api/users", {
@@ -254,7 +255,7 @@ test("admin manages accounts, cannot demote admin; deactivation takes effect on 
   assert.equal(listing.body.data[0].passwordHash, undefined);
   await admin.get("/api/users?page=-1").expect(400);
 });
-test("role administration validates privilege scope, protects admin and applies changed permissions immediately", async () => {
+test("legacy role administration validates scope and cannot mutate fixed system roles", async () => {
   await manager.get("/api/roles").expect(403);
   await send(admin, "post", "/api/roles", {
     key: "auditor",
@@ -270,18 +271,15 @@ test("role administration validates privilege scope, protects admin and applies 
   }).expect(400);
   const r = await Role.findOne({ key: "admin" });
   await send(admin, "patch", `/api/roles/${r.id}`, { permissions: [] }).expect(
-    409,
+    403,
   );
   const managerRole = await Role.findOne({ key: "manager" });
   await send(admin, "patch", `/api/roles/${managerRole.id}`, {
     permissions: ["staff.manage", "promotions.manage"],
-  }).expect(200);
+  }).expect(403);
   await manager
     .get("/api/reports/revenue?from=2026-01-01&to=2026-01-31")
-    .expect(403);
-  await send(admin, "patch", `/api/roles/${managerRole.id}`, {
-    permissions: ["staff.manage", "promotions.manage", "revenue.read", "policies.manage"],
-  }).expect(200);
+    .expect(200);
   await send(admin, "delete", `/api/roles/${managerRole.id}`).expect(409);
   const custom = await Role.findOne({ key: "auditor" });
   await send(admin, "delete", `/api/roles/${custom.id}`).expect(200);
@@ -321,7 +319,7 @@ test("staff CRUD validates SRS contact data and blocks manager privilege escalat
     fullName: "Edited Staff",
     role: "receptionist",
   }).expect(200);
-  await send(manager, "delete", `/api/staff/${id}`).expect(200);
+  await send(manager, "delete", `/api/staff/${id}`, { reason: "Contract ended." }).expect(200);
   assert.equal((await User.findById(id)).status, "suspended");
 });
 test("promotions validate bounds, minimum spend, expiry and usage; used coupons cannot be deleted", async () => {

@@ -9,7 +9,7 @@
     "start": "node src/index.js",
     "db:init": "node scripts/initDatabase.js",
     "db:watch": "node scripts/watchDatabase.js",
-    "test": "node test/models.test.js && node --test test/api.test.js"
+    "test": "node test/models.test.js && node --test test/api.test.js test/staff.test.js"
   },
   "dependencies": {
     "connect-mongo": "^6.0.0",

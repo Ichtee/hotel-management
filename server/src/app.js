@@ -3,7 +3,9 @@ const session = require("express-session");
 const { MongoStore } = require("connect-mongo");
 const { rateLimit } = require("express-rate-limit");
 const helmet = require("helmet");
-const { authenticate, permit } = require("./middleware/auth");
+const { authenticate, permit, requireManager, requirePasswordChanged } = require("./middleware/auth");
+const staff = require("./controllers/staff");
+const staffRoles = require("./controllers/staffRoles");
 const auth = require("./controllers/auth");
 const accounts = require("./controllers/accounts");
 const roles = require("./controllers/roles");
@@ -12,6 +14,7 @@ const bookings = require("./controllers/bookings");
 const policies = require("./controllers/policies");
 const { revenue } = require("./controllers/revenue");
 const { HttpError } = require("./utils/validation");
+// Khởi tạo API với xác thực và kiểm soát quyền tại backend.
 function createApp({
   mongoUri,
   sessionSecret,
@@ -83,8 +86,9 @@ function createApp({
   app.use("/api", authenticate);
   app.get("/api/auth/me", auth.profile);
   app.get("/api/profile", auth.profile);
-  app.patch("/api/profile", auth.updateProfile);
   app.put("/api/profile/password", authLimit, auth.changePassword);
+  app.use("/api", requirePasswordChanged);
+  app.patch("/api/profile", auth.updateProfile);
   app.get("/api/options", accounts.options);
   app.get("/api/users", permit("users.manage"), accounts.listing(false));
   app.post("/api/users", permit("users.manage"), accounts.create(false));
@@ -93,11 +97,14 @@ function createApp({
   app.post("/api/roles", permit("roles.manage"), roles.create);
   app.patch("/api/roles/:id", permit("roles.manage"), roles.update);
   app.delete("/api/roles/:id", permit("roles.manage"), roles.remove);
-  app.use("/api/staff", permit("staff.manage"));
-  app.get("/api/staff", accounts.listing(true));
-  app.post("/api/staff", accounts.create(true));
-  app.patch("/api/staff/:id", accounts.update(true));
-  app.delete("/api/staff/:id", accounts.deactivateStaff);
+  app.use("/api/staff", requireManager);
+  app.get("/api/staff/roles", staffRoles.listing);
+  app.patch("/api/staff/roles/:id/permissions", staffRoles.updatePermissions);
+  app.get("/api/staff", staff.listing);
+  app.post("/api/staff", staff.create);
+  app.get("/api/staff/:id", staff.detail);
+  app.patch("/api/staff/:id", staff.update);
+  app.delete("/api/staff/:id", staff.deactivate);
   app.use("/api/promotions", permit("promotions.manage"));
   app.get("/api/promotions", promotions.listing);
   app.post("/api/promotions", promotions.create);
@@ -141,6 +148,7 @@ function createApp({
               ? "Something went wrong. Please try again."
               : error.message,
           fields: error.fields,
+          ...(typeof error.code === "string" ? { code: error.code } : {}),
         },
       });
   });

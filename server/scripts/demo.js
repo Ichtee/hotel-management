@@ -1,13 +1,14 @@
-const { MongoMemoryServer } = require("mongodb-memory-server");
+const { MongoMemoryReplSet } = require("mongodb-memory-server");
 const mongoose = require("mongoose");
 const { randomBytes } = require("node:crypto");
 const { createApp } = require("../src/app");
 const { seedDemo } = require("./seedDemo");
+// Chạy replica set tạm để hỗ trợ giao dịch của API nhân viên.
 async function main() {
   if (process.env.NODE_ENV === "production")
     throw new Error("Demo mode must not run in production.");
-  const db = await MongoMemoryServer.create({
-    instance: { dbName: "hotel_member1_demo" },
+  const db = await MongoMemoryReplSet.create({
+    replSet: { count: 1, storageEngine: "wiredTiger", dbName: "hotel_member1_demo" },
   });
   const mongoUri = db.getUri("hotel_member1_demo");
   await mongoose.connect(mongoUri);

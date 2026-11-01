@@ -74,7 +74,7 @@ function SiteHeader({ route }) {
                   <span className="avatar" style={{ width: 24, height: 24, fontSize: '.75rem', background: 'var(--gold)', color: '#1a1205' }}>
                     {(user.fullName || user.email || 'U')[0].toUpperCase()}
                   </span>
-                  <span style={{ color: 'var(--gold)', fontWeight: 600 }}>{user.fullName || user.email?.split('@')[0]}</span>
+                  <span style={{ color: 'var(--gold-ink)', fontWeight: 600 }}>{user.fullName || user.email?.split('@')[0]}</span>
                 </a>
                 {staff && <a className="btn ghost-w" href="#/admin" onClick={done}>Staff portal</a>}
                 <button
@@ -281,7 +281,7 @@ function Rooms({ q }) {
     }
   }, [q.in, q.out, q.guests]);
 
-  const guests = +q.guests || 1;
+  const guests = +q.guests || 2;
   const sourceList = apiRooms !== null ? apiRooms : ROOM_TYPES;
   const list = sourceList.filter((r) => r.price <= price && r.guests >= guests && (cat === 'all' || r.cat === cat));
   const carry = q.in ? `?${new URLSearchParams({ in: q.in, out: q.out, guests: q.guests })}` : '';

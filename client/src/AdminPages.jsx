@@ -175,7 +175,7 @@ export function Users() {
           </span>
         ])} />
       )}
-      {list.data?.length === 0 && <p className="muted">No accounts match.</p>}
+      {list.data?.length === 0 && <p className="empty muted">No accounts match.</p>}
       {edit && <UserForm user={edit} isStaff={!isAdmin} base={base} options={options.data} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); list.reload(); }} />}
     </>
   );
@@ -312,7 +312,7 @@ export function Coupons() {
           </span>
         ])} />
       )}
-      {list.data?.length === 0 && <p className="muted">No coupons yet.</p>}
+      {list.data?.length === 0 && <p className="empty muted">No coupons yet.</p>}
       {edit && <CouponForm coupon={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); list.reload(); }} />}
     </>
   );

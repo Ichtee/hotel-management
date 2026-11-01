@@ -3,7 +3,7 @@ import { api, dateLabel, money } from './api/client.js';
 import { Badge, DataTable, Field, Modal, Notice, PageHead, useApi } from './ui.jsx';
 
 const Booker = ({ p }) => <span>{p.name || '—'}<br /><small className="muted">{p.phone || 'no phone'} · {p.email || 'no e-mail'}</small></span>;
-const Loading = ({ s, empty }) => s.loading ? <p className="muted">Loading…</p> : s.error ? <Notice error={s.error} /> : s.data.length === 0 ? <p className="muted">{empty}</p> : null;
+const Loading = ({ s, empty }) => s.loading ? <p className="muted">Loading…</p> : s.error ? <Notice error={s.error} /> : s.data.length === 0 ? <p className="empty muted">{empty}</p> : null;
 
 // UC35: requests waiting for review (never rejected; approved automatically after 24 h or at check-in).
 export function Cancellations() {

@@ -43,6 +43,21 @@ const schema = new Schema({
   holdExpiresAt: Date, // BR-29: pending online bookings hold the room for 15 minutes
   cancelledAt: Date,
   cancellationReason: String,
+  // BR-32 / BR-36 / BR-37: the request, its locked refundable amount and its approval.
+  cancellation: {
+    requestedAt: Date,
+    requestedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    channel: { type: String, enum: ['online', 'front_desk'] },
+    verifyMethod: { type: String, enum: ['login', 'otp', 'id_document', 'hotel'] },
+    reason: String,
+    refundableAmount: { type: Number, min: 0 },
+    hotelCaused: Boolean,
+    approvedAt: Date,
+    approvedBy: { type: Schema.Types.ObjectId, ref: 'User' }, // empty when approved by the system
+    autoApproved: Boolean
+  },
+  // BR-42: one-time code of a cancellation requested by phone.
+  cancellationOtp: { type: new Schema({ hash: String, expiresAt: Date, attempts: Number }, { _id: false }), select: false },
   status: {
     type: String,
     enum: ['pending', 'confirmed', 'cancellation_requested', 'checked_in', 'checked_out', 'cancelled', 'expired'],

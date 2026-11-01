@@ -7,6 +7,7 @@ import { useAuth } from './context/Auth.jsx';
 import { Badge, DataTable, LineChart, PageHead, useApi } from './ui.jsx';
 import { AuthShell, SignIn, ForgotPassword } from './AuthForms.jsx';
 import { Coupons, DepositPolicy, Profile, Revenue, Roles, Users } from './AdminPages.jsx';
+import { Cancellations, Refunds } from './Cancellations.jsx';
 import { money } from './api/client.js';
 
 const ICONS = {
@@ -312,12 +313,14 @@ const PAGES = {
   '#/admin/rooms': AdminRoomMap,
   '#/admin/roomtypes': AdminRoomTypes,
   '#/admin/hotel': Hotel,
-  '#/admin/policy': DepositPolicy
+  '#/admin/policy': DepositPolicy,
+  '#/admin/cancellations': Cancellations,
+  '#/admin/refunds': Refunds
 };
 
 const Forbidden = () => <><PageHead title="No access" sub="Your role does not include this area." /><a className="btn" href="#/admin">Back to dashboard</a></>;
 
-const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/roles': 'roles.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read', '#/admin/policy': 'policies.manage' };
+const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/roles': 'roles.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read', '#/admin/policy': 'policies.manage', '#/admin/cancellations': 'cancellations.review', '#/admin/refunds': 'refunds.handle' };
 
 export default function Admin({ route }) {
   const { user, loading } = useAuth();

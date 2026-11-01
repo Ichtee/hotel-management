@@ -6,7 +6,7 @@ const schema = new Schema({
   kind: { type: String, enum: ['deposit', 'final', 'additional'], required: true },
   amount: { type: Number, required: true, min: 1 },
   currency: { type: String, default: 'VND', uppercase: true, trim: true },
-  method: { type: String, enum: ['credit_card', 'e_wallet', 'bank_transfer', 'cash'], required: true },
+  method: { type: String, enum: ['credit_card', 'e_wallet', 'bank_transfer', 'cash', 'pos'], required: true },
   status: { type: String, enum: ['pending', 'success', 'failed', 'cancelled'], default: 'pending' },
   gateway: String,
   gatewayOrderId: String,
@@ -14,6 +14,8 @@ const schema = new Schema({
   idempotencyKey: { type: String, unique: true, sparse: true },
   failureReason: String,
   paidAt: Date,
+  refundedAmount: { type: Number, default: 0, min: 0 }, // BR-17: refunded once; the status stays success
+  isLateDeposit: { type: Boolean, default: false }, // confirmed after the booking expired or was cancelled
   recordedBy: { type: Schema.Types.ObjectId, ref: 'User' }
 }, { timestamps: true });
 

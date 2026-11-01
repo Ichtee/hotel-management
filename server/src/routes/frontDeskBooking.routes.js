@@ -5,7 +5,7 @@ const { requireActor } = require('../middleware/actor');
 router.use(requireActor);
 router.post('/bookings', controller.create);
 router.patch('/bookings/:bookingId', controller.modify);
-router.post('/bookings/:bookingId/cancel', controller.cancel);
+// Cancellation (UC16) is recorded through POST /api/frontdesk/cancellations (M3), which applies BR-16/BR-36.
 router.post('/bookings/:bookingId/check-in', controller.checkIn);
 router.post('/bookings/:bookingId/change-room', controller.changeRoom);
 router.post('/bookings/:bookingId/services', controller.recordService);

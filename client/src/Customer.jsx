@@ -6,6 +6,7 @@ import { EXTRAS, OFFERS, REVIEWS, ROOM_TYPES } from './data.js';
 import { MyBookings } from './Bookings.jsx';
 import { roomApi } from './api/roomApi.js';
 import { bookingApi } from './api/bookingApi.js';
+import { PaymentPage, PaymentResult, SandboxGateway } from './Payments.jsx';
 
 const NAV = [
   { label: 'Home', href: '#/' },
@@ -578,8 +579,12 @@ export default function Customer({ route }) {
 
   let page;
   if (loading) page = <p className="muted c-wrap c-section">Loading…</p>;
-  else if (PROTECTED.includes(path) && !user) { sessionStorage.setItem('next', route); page = <Auth note="Please sign in to continue." />; }
+  else if ((PROTECTED.includes(path) || path.startsWith('#/pay/')) && !user) { sessionStorage.setItem('next', route); page = <Auth note="Please sign in to continue." />; }
   else if (path === '#/profile') page = <div className="c-wrap c-section"><Profile /></div>;
+  else
+  if (path === '#/pay/result') page = <PaymentResult paymentId={q.payment} back={q.r} />;
+  else if (path.startsWith('#/pay/sandbox/')) page = <SandboxGateway orderId={path.split('/')[3]} paymentId={q.payment} />;
+  else if (path.startsWith('#/pay/')) page = <PaymentPage id={path.split('/')[2]} kind={q.kind} />;
   else if (path.startsWith('#/room/')) page = <RoomDetail id={path.split('/')[2]} q={q} />;
   else if (path === '#/rooms') page = <Rooms q={q} />;
   else if (path === '#/offers') page = <Offers />;

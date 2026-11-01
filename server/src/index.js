@@ -6,6 +6,7 @@ const mongoose = require("mongoose");
 const { createApp } = require("./app");
 const connectDatabase = require("./config/database");
 const { seedRoles } = require("./services/roles");
+const { schedule } = require("./services/jobs");
 const { startHousekeepingScheduler } = require("./services/housekeepingScheduler");
 // Khởi động API và lịch housekeeping sau khi kết nối database.
 async function start() {
@@ -26,6 +27,7 @@ async function start() {
   const server = app.listen(process.env.PORT || 3001, () =>
     console.log("Hotel API listening on port", process.env.PORT || 3001),
   );
+  schedule();
   const stop = () =>
     server.close(async () => {
       await stopScheduler();

@@ -61,6 +61,17 @@ Client: http://localhost:5173; API: http://localhost:3001. Vite proxies `/api` t
 
 `npm run build` builds `client/dist`. A production deployment must serve those static files with SPA fallback and proxy `/api` to `npm start --prefix server`, on the same HTTPS origin. Set `NODE_ENV=production`, `CLIENT_ORIGIN` to the exact HTTPS origin and `SESSION_SECRET`. Secure cookies require HTTPS; the API assumes one trusted reverse proxy in production. Deployment is not included in this change.
 
+## Payment gateway (SePay)
+
+Deposits (UC12) and final payments (UC13) go through a gateway adapter. By default a built-in sandbox gateway is used (tests, offline demo). To use SePay set `PAYMENT_PROVIDER=sepay` plus `SEPAY_ENV`, `SEPAY_MERCHANT_ID`, `SEPAY_SECRET_KEY` and `PUBLIC_URL` (see `server/.env.example`).
+
+1. Create a SePay Payment Gateway account at my.sepay.vn, start with **Sandbox** and copy its Merchant ID and Secret Key.
+2. In SePay open Payment Gateway, then IPN, and set the URL to `https://<api-host>/api/payments/sepay/ipn` (public HTTPS; use a tunnel such as ngrok for a local server).
+3. The browser is sent to SePay with a form signed on the server, then back to `PUBLIC_URL/api/payments/return`, which only opens the result screen. The IPN (header `X-Secret-Key`, event `ORDER_PAID`) confirms the payment after the server checks the amount and asks SePay for the order; if no IPN arrives, the result screen asks SePay itself.
+4. Frontend and API on different domains (for example Vercel and Render) break the session cookie. Let the frontend host proxy `/api` to the API (a Vercel rewrite from `/api/:path*`), and set `PUBLIC_URL` and `CLIENT_ORIGIN` to the frontend domain.
+
+SePay's own pages are mocked in the automated tests; `client/e2e/sepay.spec.js` documents how to run the browser check against SePay mode.
+
 ## Verify
 
 ```powershell

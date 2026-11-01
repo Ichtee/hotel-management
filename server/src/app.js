@@ -15,6 +15,10 @@ const roles = require("./controllers/roles");
 const promotions = require("./controllers/promotions");
 const bookings = require("./controllers/bookings");
 const policies = require("./controllers/policies");
+const payments = require("./controllers/payments");
+const cancellations = require("./controllers/cancellations");
+const refunds = require("./controllers/refunds");
+const jobs = require("./controllers/jobs");
 const { revenue } = require("./controllers/revenue");
 const { HttpError } = require("./utils/validation");
 
@@ -28,6 +32,9 @@ const bookingController = require("./controllers/bookingController");
 const frontDeskRoutes = require("./routes/frontDeskBooking.routes");
 const customerRoutes = require("./routes/customer.routes");
 
+// The gateway calls this server-to-server, so it has no browser Origin or session; its HMAC signature authenticates it.
+const GATEWAY_CALLBACK = "/api/payments/gateway/callback";
+const PUBLIC_HOOKS = [GATEWAY_CALLBACK, "/api/payments/sepay/ipn"];
 // Khởi tạo API với xác thực và kiểm soát quyền tại backend.
 function createApp({
   mongoUri,
@@ -56,7 +63,7 @@ function createApp({
       res.set("Access-Control-Allow-Headers", "Content-Type,x-admin-secret,x-user-id");
       return res.sendStatus(204);
     }
-    if (!["GET", "HEAD"].includes(req.method) && !allowed)
+    if (!["GET", "HEAD"].includes(req.method) && !allowed && !PUBLIC_HOOKS.includes(req.path))
       throw new HttpError(403, "Request origin is not allowed.");
     next();
   });
@@ -101,9 +108,7 @@ function createApp({
   app.post("/api/bookings", (req, res, next) => {
     bookingController.create(req, res, next);
   });
-  app.post("/api/bookings/:id/cancel", (req, res, next) => {
-    bookingController.cancel(req, res, next);
-  });
+  // Cancellation (UC08) is M3's and needs a session: see /api/bookings/:id/cancel below.
   app.get("/api/bookings/ref/:reference", (req, res, next) => {
     bookingController.getByReference(req, res, next);
   });
@@ -130,6 +135,11 @@ function createApp({
   app.post("/api/auth/reset-password", authLimit, auth.resetPassword);
 
   // --- Authenticated Routes ---
+  app.post(GATEWAY_CALLBACK, payments.callback);
+  app.post("/api/payments/sepay/ipn", payments.sepayIpn);
+  app.get("/api/payments/return", payments.back);
+  app.post("/api/jobs/:name", jobs.run);
+  app.get("/api/hotel-info", policies.hotelInfo);
   app.use("/api", authenticate);
 
   app.get("/api/auth/me", auth.profile);
@@ -187,9 +197,38 @@ function createApp({
   // UC11 View Booking Details
   app.get("/api/bookings/:id", bookings.detail);
 
-  app.use("/api/policies/deposit", permit("policies.manage"));
+  app.post("/api/bookings/:id/payments/deposit", payments.deposit);
+  app.post("/api/bookings/:id/payments/final", payments.finalPayment);
+  app.get("/api/payments/methods", payments.methods);
+  app.get("/api/payments/:id", payments.show);
+  if (!production) app.post("/api/sandbox-gateway/orders/:orderId", payments.sandbox);
+  // UC08 Cancel Reservation (customer)
+  app.get("/api/bookings/:id/refund-estimate", cancellations.estimate);
+  app.post("/api/bookings/:id/cancel", cancellations.requestOnline);
+  app.delete("/api/bookings/:id/cancel", cancellations.withdraw);
+  app.post("/api/bookings/:id/cancel-payment", cancellations.cancelPayment);
+
+  // Front desk money flows: UC11, UC16, UC35, UC21
+  // SRS 2.4.3 permissions (UC33 lets the manager change them).
+  const settle = permit("payments.settle"), cancel = permit("bookings.managed.cancel"), review = permit("cancellations.review"), refund = permit("refunds.handle");
+  app.post("/api/frontdesk/bookings/:id/payments", settle, payments.finalPayment);
+  app.post("/api/frontdesk/bookings/:id/cancel-otp", cancel, cancellations.sendOtp);
+  app.get("/api/frontdesk/cancellations/lookup", cancel, cancellations.lookup);
+  app.get("/api/frontdesk/cancellations", review, cancellations.listing);
+  app.post("/api/frontdesk/cancellations", cancel, cancellations.record);
+  app.post("/api/frontdesk/cancellations/:id/approve", review, cancellations.approve);
+  app.get("/api/frontdesk/refunds", refund, refunds.listing);
+  app.put("/api/frontdesk/refunds/:id/account", refund, refunds.setAccount);
+  app.post("/api/frontdesk/refunds/:id/contacts", refund, refunds.addContact);
+  app.post("/api/frontdesk/refunds/:id", refund, refunds.record);
+
+  // UC27 Deposit & Cancellation Policy, hotel information
+  app.use("/api/policies", permit("policies.manage"));
   app.get("/api/policies/deposit", policies.listing);
   app.post("/api/policies/deposit", policies.create);
+  app.get("/api/policies/cancellation", policies.cancellationListing);
+  app.post("/api/policies/cancellation", policies.createCancellation);
+  app.put("/api/hotel-info", permit("policies.manage"), policies.updateHotelInfo);
 
   app.use("/api/front-desk/customers", customerRoutes);
   app.use("/api/front-desk", frontDeskRoutes);

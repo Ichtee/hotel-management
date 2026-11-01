@@ -12,4 +12,8 @@ async function logChange(req, action, targetType, targetId, detail, session) {
   }], { session });
 }
 
-module.exports = { logChange };
+// M3 (cancellations, refunds, jobs): actorId null = a scheduled job.
+const audit = (actorId, action, targetType, targetId, detail) =>
+  AuditLog.create({ actorId: actorId || undefined, action, targetType, targetId, detail });
+
+module.exports = { logChange, audit };

@@ -6,7 +6,7 @@ const Service = require('../models/Service');
 const Invoice = require('../models/Invoice');
 const { appError } = require('../utils/http');
 
-const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed', 'checked_in'];
+const ACTIVE_BOOKING_STATUSES = ['pending', 'confirmed', 'cancellation_requested', 'checked_in'];
 const editableStatuses = ['pending', 'confirmed'];
 const isId = value => mongoose.isObjectIdOrHexString(value);
 const asDate = value => {

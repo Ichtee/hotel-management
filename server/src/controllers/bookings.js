@@ -21,7 +21,7 @@ async function listing(req, res) {
   const { page, limit } = v.pagination(req.query);
   const [rows, total] = await Promise.all([
     Booking.find(filter)
-      .select("bookingReference status checkInDate checkOutDate rooms roomAmount totalAmount depositRequired currency createdAt")
+      .select("bookingReference status checkInDate checkOutDate rooms roomAmount totalAmount depositRequired holdExpiresAt currency createdAt")
       .populate("rooms.roomTypeId", "name images")
       .sort({ createdAt: -1, _id: -1 })
       .skip((page - 1) * limit)
@@ -46,7 +46,7 @@ async function detail(req, res) {
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   const [payments, refunds] = await Promise.all([
     Payment.find({ bookingId: booking._id }).select("kind amount currency method status paidAt createdAt").sort({ createdAt: 1 }).lean(),
-    Refund.find({ bookingId: booking._id }).select("amount currency status reason processedAt createdAt").sort({ createdAt: 1 }).lean(),
+    Refund.find({ bookingId: booking._id }).select("amount currency status reason bankTransactionCode processedAt createdAt").sort({ createdAt: 1 }).lean(),
   ]);
   res.json({ data: { ...booking, ...paymentStatus(booking, payments), payments, refunds } });
 }

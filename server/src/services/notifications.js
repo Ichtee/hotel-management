@@ -15,6 +15,18 @@ const events = {
   ],
   refund_status: (d) => ["Refund update", `Refund for booking ${d.reference} is now ${d.status}.`],
   room_issue: (d) => ["Room issue reported", `Room ${d.roomNumber}: ${d.description}`],
+  cancellation_requested: (d) => ["Cancellation request", `Booking ${d.reference} asks to be cancelled. Refundable amount: ${money(d.amount)}.`],
+  cancellation_withdrawn: (d) => ["Cancellation withdrawn", `The cancellation request of booking ${d.reference} was withdrawn.`],
+  // MSG-58 / MSG-42
+  cancellation_approved: (d) => [
+    "Cancellation approved",
+    d.amount > 0
+      ? `Your cancellation of booking ${d.reference} has been approved. The front desk will contact you by phone or e-mail to get the bank account for the refund of ${money(d.amount)}.`
+      : `Booking ${d.reference} has been cancelled and is not eligible for a refund.`,
+  ],
+  cancellation_auto_approved: (d) => ["Cancellation approved automatically", `Booking ${d.reference} was cancelled automatically. Refund due: ${money(d.amount)}.`],
+  refund_completed: (d) => ["Refund sent", `We refunded ${money(d.amount)} for booking ${d.reference}. Bank transaction code: ${d.code}.`],
+  reconciliation: (d) => ["Payment reconciliation", `${d.settled} gateway payment(s) were settled by the daily reconciliation.`],
 };
 let transport;
 const getTransport = () =>
@@ -55,4 +67,4 @@ async function notifyRole(event, roleKey, data, refs) {
   const users = await User.find({ roleId: role._id, status: "active" }).select("_id");
   return Promise.all(users.map((u) => notify(event, u._id, data, refs)));
 }
-module.exports = { notify, notifyRole, setTransport, events };
+module.exports = { notify, notifyRole, email, setTransport, getTransport, events };

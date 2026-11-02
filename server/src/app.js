@@ -22,6 +22,7 @@ const cancellations = require("./controllers/cancellations");
 const refunds = require("./controllers/refunds");
 const jobs = require("./controllers/jobs");
 const { revenue } = require("./controllers/revenue");
+const { occupancy } = require("./controllers/occupancy");
 const housekeepingTasks = require("./controllers/housekeepingTasks");
 const { HttpError } = require("./utils/validation");
 
@@ -253,6 +254,7 @@ function createApp({
   app.use("/api/front-desk", frontDeskRoutes);
 
   app.get("/api/reports/revenue", permit("revenue.read"), revenue);
+  app.get("/api/reports/occupancy", permit("revenue.read"), occupancy);
 
   app.use((req, res) =>
     res.status(404).json({ error: { message: "Endpoint not found." } }),

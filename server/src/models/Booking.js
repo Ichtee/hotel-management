@@ -22,7 +22,7 @@ const bookingEventSchema = new Schema({
   actorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   type: {
     type: String, required: true,
-    enum: ['created', 'modified', 'cancelled', 'checked_in', 'room_changed', 'service_added', 'checked_out']
+    enum: ['created', 'modified', 'cancelled', 'checked_in', 'room_changed', 'service_added', 'checked_out', 'cancellation_requested', 'cancellation_withdrawn']
   },
   note: String,
   oldValue: Schema.Types.Mixed,
@@ -43,9 +43,25 @@ const schema = new Schema({
   holdExpiresAt: Date, // BR-29: pending online bookings hold the room for 15 minutes
   cancelledAt: Date,
   cancellationReason: String,
+  refundAccount: {
+    bank: { type: String, trim: true },
+    accountNumber: { type: String, trim: true },
+    holderName: { type: String, trim: true },
+    status: { type: String, enum: ['declared', 'needs_correction'], default: 'declared' },
+    reason: String
+  },
+  cancellation: {
+    requestedAt: Date,
+    reason: String,
+    requestedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    refundableAmount: { type: Number, default: 0, min: 0 },
+    autoApproved: { type: Boolean, default: false },
+    approvedAt: Date,
+    approvedBy: { type: Schema.Types.ObjectId, ref: 'User' }
+  },
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 'expired'],
+    enum: ['pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 'expired', 'cancellation_requested'],
     default: 'pending', index: true
   },
   rooms: {

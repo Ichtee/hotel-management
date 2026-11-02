@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { BOOKINGS, MENU, ROOMS, TABLES } from './data.js';
 import AdminRoomMap from './pages/AdminRoomMap.jsx';
 import AdminRoomTypes from './pages/AdminRoomTypes.jsx';
+import AdminCleaningTasks from './pages/AdminCleaningTasks.jsx';
+import AdminRoomIssues from './pages/AdminRoomIssues.jsx';
 import './admin.css';
 import { useAuth } from './context/Auth.jsx';
 import { Badge, DataTable, LineChart, PageHead, useApi } from './ui.jsx';
 import { AuthShell, SignIn } from './AuthForms.jsx';
-import { Coupons, DepositPolicy, Profile, Revenue, Roles, Users } from './AdminPages.jsx';
+import { Coupons, DepositPolicy, Occupancy, Profile, Revenue, Roles, Users } from './AdminPages.jsx';
 import { money } from './api/client.js';
 
 const ICONS = {
@@ -202,16 +204,43 @@ function Dashboard() {
 
 function Bookings() {
   const [f, setF] = useState('all');
-  const rows = BOOKINGS.filter((b) => f === 'all' || b.status === f);
+  const [search, setSearch] = useState('');
+  const statusParam = f !== 'all' ? `&status=${f}` : '';
+  const searchParam = search ? `&reference=${encodeURIComponent(search)}` : '';
+  const list = useApi(`/bookings/search?limit=50${statusParam}${searchParam}`);
+
+  const liveRows = list.data?.map((b) => [
+    b.bookingReference || b._id.slice(-8).toUpperCase(),
+    b.guestName || 'Guest',
+    b.rooms?.[0]?.roomId?.roomNumber ? `Room ${b.rooms[0].roomId.roomNumber}` : 'Unassigned',
+    b.rooms?.[0]?.roomTypeId?.name || 'Standard',
+    b.checkInDate ? b.checkInDate.slice(0, 10) : '—',
+    b.checkOutDate ? b.checkOutDate.slice(0, 10) : '—',
+    money(b.totalAmount),
+    b.status
+  ]);
+
+  const fallbackRows = BOOKINGS.filter((b) => f === 'all' || b.status === f).map((b) => [b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status]);
+  const rows = liveRows && liveRows.length > 0 ? liveRows : fallbackRows;
+
   return (
     <>
-      <PageHead title="Bookings" sub="All reservations" action="New booking" />
-      <div className="chips" role="group" aria-label="Filter by status">
-        {['all', 'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled'].map((s) => (
-          <button key={s} className={f === s ? 'chip on' : 'chip'} aria-pressed={f === s} onClick={() => setF(s)}>{s.replace('_', ' ')}</button>
-        ))}
+      <PageHead title="Bookings" sub="All reservations with real-time status and search" />
+      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap' }}>
+        <div className="chips" role="group" aria-label="Filter by status" style={{ margin: 0 }}>
+          {['all', 'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled'].map((s) => (
+            <button key={s} className={f === s ? 'chip on' : 'chip'} aria-pressed={f === s} onClick={() => setF(s)}>{s.replace('_', ' ')}</button>
+          ))}
+        </div>
+        <input
+          type="search"
+          placeholder="Search booking code or reference…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ padding: '0.45rem 0.8rem', borderRadius: '4px', border: '1px solid #ccc', minWidth: '220px' }}
+        />
       </div>
-      <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status']} rows={rows.map((b) => [b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status])} />
+      <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status']} rows={rows} />
     </>
   );
 }
@@ -289,18 +318,29 @@ const PAGES = {
   '#/admin/roles': Roles,
   '#/admin/coupons': Coupons,
   '#/admin/revenue': Revenue,
+  '#/admin/occupancy': Occupancy,
   '#/admin/profile': Profile,
   '#/admin/bookings': Bookings,
   '#/admin/frontdesk': FrontDesk,
   '#/admin/rooms': AdminRoomMap,
   '#/admin/roomtypes': AdminRoomTypes,
+  '#/admin/cleaning': AdminCleaningTasks,
+  '#/admin/issues': AdminRoomIssues,
   '#/admin/hotel': Hotel,
   '#/admin/policy': DepositPolicy
 };
 
 const Forbidden = () => <><PageHead title="No access" sub="Your role does not include this area." /><a className="btn" href="#/admin">Back to dashboard</a></>;
 
-const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/roles': 'roles.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read', '#/admin/policy': 'policies.manage' };
+const NEEDS = {
+  '#/admin/users': 'users.manage',
+  '#/admin/staff': 'staff.manage',
+  '#/admin/roles': 'roles.manage',
+  '#/admin/coupons': 'promotions.manage',
+  '#/admin/revenue': 'revenue.read',
+  '#/admin/occupancy': 'revenue.read',
+  '#/admin/policy': 'policies.manage'
+};
 
 export default function Admin({ route }) {
   const { user, loading } = useAuth();

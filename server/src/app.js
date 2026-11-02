@@ -94,12 +94,36 @@ function createApp({
   app.post("/api/bookings/:id/cancel", (req, res, next) => {
     bookingController.cancel(req, res, next);
   });
+  // BR-29: Abandon payment and release pending hold immediately
+  app.post("/api/bookings/:id/cancel-payment", (req, res, next) => {
+    bookingController.cancelPayment(req, res, next);
+  });
+  // BR-36: Withdraw cancellation request — restore to confirmed
+  app.post("/api/bookings/:id/withdraw-cancellation", (req, res, next) => {
+    bookingController.withdrawCancellation(req, res, next);
+  });
+  app.post("/api/bookings/:id/modify", (req, res, next) => {
+    bookingController.modify(req, res, next);
+  });
+  app.patch("/api/bookings/:id/modify", (req, res, next) => {
+    bookingController.modify(req, res, next);
+  });
+  app.patch("/api/bookings/:id", (req, res, next) => {
+    bookingController.modify(req, res, next);
+  });
   app.get("/api/bookings/ref/:reference", (req, res, next) => {
     bookingController.getByReference(req, res, next);
   });
   app.get("/api/bookings/my", (req, res, next) => {
     bookingController.getMyBookings(req, res, next);
   });
+  app.get("/api/bookings/search", (req, res, next) => {
+    bookingController.search(req, res, next);
+  });
+  app.get("/api/reports/occupancy", (req, res, next) => {
+    bookingController.occupancyReport(req, res, next);
+  });
+
 
   // --- Auth Rate Limiter & Public Auth Routes ---
   const authLimit = rateLimit({

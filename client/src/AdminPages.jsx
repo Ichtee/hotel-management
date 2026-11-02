@@ -310,6 +310,100 @@ export function Revenue() {
   );
 }
 
+/* ---------------- Occupancy Report (UC37 - Member 2) ---------------- */
+export function Occupancy() {
+  const [p, setP] = useState({ from: day(-29), to: day(0) });
+  const rep = useApi(`/reports/occupancy?${qs(p)}`);
+  const d = rep.data;
+  const labels = d?.series.map((r) => r.date) || [];
+  const pctFmt = (n) => `${Number(n || 0).toFixed(1)}%`;
+
+  return (
+    <>
+      <PageHead
+        title="Occupancy Report"
+        sub="Room-night utilization and capacity, excluding maintenance/blocked rooms"
+        extra={<a className="btn" href={`/api/reports/occupancy?${qs({ ...p, format: 'csv' })}`}>Export CSV</a>}
+      />
+      <form className="filters-row" onSubmit={(e) => { e.preventDefault(); setP(Object.fromEntries(new FormData(e.target))); }}>
+        <label>From<input name="from" type="date" defaultValue={p.from} required /></label>
+        <label>To<input name="to" type="date" defaultValue={p.to} required /></label>
+        <button className="btn" type="submit">Apply</button>
+      </form>
+      <Loading s={rep} />
+      {d && (
+        <>
+          <div className="kpis">
+            <div className="kpi">
+              <p>Average Occupancy</p>
+              <strong style={{ color: '#059669' }}>{d.totals.averageOccupancyRate}%</strong>
+              <small>{d.from} → {d.to}</small>
+            </div>
+            <div className="kpi">
+              <p>Occupied Room-Nights</p>
+              <strong>{d.totals.totalOccupiedNights}</strong>
+              <small>Sold guest nights</small>
+            </div>
+            <div className="kpi">
+              <p>Sellable Room-Nights</p>
+              <strong>{d.totals.totalSellableNights}</strong>
+              <small>Available capacity</small>
+            </div>
+            <div className="kpi">
+              <p>Maintenance Nights</p>
+              <strong style={{ color: '#dc2626' }}>{d.totals.totalMaintenanceNights}</strong>
+              <small>Blocked from sale</small>
+            </div>
+          </div>
+
+          <section className="panel">
+            <div className="phead"><h2>Daily Occupancy Rate (%)</h2></div>
+            {d.series.length > 1 ? (
+              <LineChart
+                labels={labels}
+                cur={d.series.map((r) => r.occupancyRate)}
+                format={pctFmt}
+                summary={`Daily occupancy from ${d.from} to ${d.to}, average ${d.totals.averageOccupancyRate}%`}
+              />
+            ) : (
+              <p className="muted">Choose a longer range to see an occupancy trend.</p>
+            )}
+          </section>
+
+          {d.roomTypeBreakdown?.length > 0 && (
+            <>
+              <h2 className="mt">Room Type Breakdown</h2>
+              <DataTable
+                cols={['Room Type', 'Total Rooms', 'Sellable Nights', 'Occupied Nights', 'Occupancy Rate']}
+                rows={d.roomTypeBreakdown.map((rt) => [
+                  rt.roomType,
+                  rt.totalRooms,
+                  rt.sellableNights,
+                  rt.occupiedNights,
+                  <strong key={rt.roomType}>{rt.occupancyRate}%</strong>
+                ])}
+              />
+            </>
+          )}
+
+          <h2 className="mt">Daily Details</h2>
+          <DataTable
+            cols={['Date', 'Physical Rooms', 'Maintenance', 'Sellable', 'Occupied', 'Occupancy Rate']}
+            rows={d.series.map((r) => [
+              r.date,
+              r.totalRooms,
+              r.maintenanceRooms > 0 ? <span style={{ color: '#dc2626' }}>{r.maintenanceRooms}</span> : '0',
+              r.sellableRooms,
+              r.occupiedRooms,
+              <strong key={r.date}>{r.occupancyRate}%</strong>
+            ])}
+          />
+        </>
+      )}
+    </>
+  );
+}
+
 /* ---------------- Profile & password (UC03), shared by both shells ---------------- */
 export function Profile() {
   const { user, setUser } = useAuth();

@@ -23,6 +23,7 @@ const refunds = require("./controllers/refunds");
 const jobs = require("./controllers/jobs");
 const { revenue } = require("./controllers/revenue");
 const { occupancy } = require("./controllers/occupancy");
+const roomIssues = require("./controllers/roomIssues");
 const housekeepingTasks = require("./controllers/housekeepingTasks");
 const { HttpError } = require("./utils/validation");
 
@@ -149,6 +150,9 @@ function createApp({
   app.put("/api/profile/password", authLimit, auth.changePassword);
   app.use("/api", requirePasswordChanged);
   app.patch("/api/profile", auth.updateProfile);
+  app.get("/api/room-issues/options", permit("room_issues.report"), roomIssues.options);
+  app.post("/api/room-issues", permit("room_issues.report"), roomIssues.create);
+  app.get("/api/room-issues", requireManager, roomIssues.listing);
   // M5 housekeeping workflows are authenticated: a Housekeeping user can only see/update own tasks.
   app.get("/api/housekeeping/tasks/mine", permit("cleaning_tasks.own.read"), housekeepingTasks.mine);
   app.patch("/api/housekeeping/tasks/:id/status", permit("cleaning_tasks.status.update"), housekeepingTasks.updateMine);

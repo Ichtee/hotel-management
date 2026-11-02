@@ -156,6 +156,7 @@ function createApp({
   // M5 housekeeping workflows are authenticated: a Housekeeping user can only see/update own tasks.
   app.get("/api/housekeeping/tasks/mine", permit("cleaning_tasks.own.read"), housekeepingTasks.mine);
   app.patch("/api/housekeeping/tasks/:id/status", permit("cleaning_tasks.status.update"), housekeepingTasks.updateMine);
+  app.get("/api/housekeeping/tasks/ad-hoc/options", permit("cleaning_tasks.ad_hoc.create"), housekeepingTasks.adHocOptions);
   app.post("/api/housekeeping/tasks/ad-hoc", permit("cleaning_tasks.ad_hoc.create"), housekeepingTasks.createAdHoc);
   app.get("/api/options", accounts.options);
   app.get("/api/customers", customers.list);

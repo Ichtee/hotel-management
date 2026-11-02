@@ -1,4 +1,5 @@
 const Task = require("../models/CleaningTask");
+const Room = require("../models/Room");
 const v = require("../utils/validation");
 const { createCleaningTask, updateOwnTaskStatus } = require("../services/housekeepingTasks");
 
@@ -26,4 +27,10 @@ async function createAdHoc(req, res) {
   res.status(201).json(result);
 }
 
-module.exports = { mine, updateMine, createAdHoc };
+async function adHocOptions(_req, res) {
+  const data = await Room.find({ isActive: true, status: { $in: ["available", "occupied", "cleaning"] } })
+    .select("roomNumber floor status").sort({ floor: 1, roomNumber: 1 }).lean();
+  res.json({ data });
+}
+
+module.exports = { mine, updateMine, createAdHoc, adHocOptions };

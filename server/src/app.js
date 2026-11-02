@@ -24,6 +24,7 @@ const jobs = require("./controllers/jobs");
 const { revenue } = require("./controllers/revenue");
 const { occupancy } = require("./controllers/occupancy");
 const roomIssues = require("./controllers/roomIssues");
+const stayRequests = require("./controllers/stayRequests");
 const housekeepingTasks = require("./controllers/housekeepingTasks");
 const { HttpError } = require("./utils/validation");
 
@@ -221,6 +222,7 @@ function createApp({
   app.post("/api/front-desk/bookings/:id/check-out", permit("stays.check_out"), bookingCreation.checkOut);
   // UC11 View Booking Details
   app.get("/api/bookings/:id", bookings.detail);
+  app.post("/api/bookings/:id/requests", stayRequests.create);
 
   app.post("/api/bookings/:id/payments/deposit", payments.deposit);
   app.get("/api/payments/methods", payments.methods);
@@ -236,6 +238,8 @@ function createApp({
   // SRS 2.4.3 permissions (UC33 lets the manager change them).
   const settle = permit("payments.settle"), cancel = permit("bookings.managed.cancel"), review = permit("cancellations.review"), refund = permit("refunds.handle");
   app.post("/api/frontdesk/bookings/:id/payments", settle, payments.finalPayment);
+  app.get("/api/frontdesk/requests", permit("stay_requests.manage"), stayRequests.listing);
+  app.patch("/api/frontdesk/requests/:id", permit("stay_requests.manage"), stayRequests.handle);
   app.post("/api/frontdesk/bookings/:id/cancel-otp", cancel, cancellations.sendOtp);
   app.get("/api/frontdesk/cancellations/lookup", cancel, cancellations.lookup);
   app.get("/api/frontdesk/cancellations", review, cancellations.listing);

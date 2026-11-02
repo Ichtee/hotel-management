@@ -160,6 +160,12 @@ export function MyBookings() {
   const [msg, setMsg] = useState(null);
   const s = useApi('/bookings?limit=100');
   const changed = (m) => { setMsg(m); setOpen(null); s.reload(); };
+  const requestStayChange = async (booking, type) => {
+    const requestedTime = window.prompt(`Requested ${type.replace('_', ' ')} time (YYYY-MM-DDTHH:mm):`, new Date().toISOString().slice(0, 16));
+    if (!requestedTime) return;
+    const note = window.prompt('Optional note for the front desk:', '') || '';
+    try { await api(`/bookings/${booking._id}/requests`, { method: 'POST', body: { type, requestedTime, note } }); setMsg('Your request was sent to the front desk.'); s.reload(); } catch (error) { setMsg(error.message); }
+  };
   const all = s.data || [];
   const isUp = (b) => UPCOMING.includes(b.status);
   const counts = { upcoming: all.filter(isUp).length, past: all.filter((b) => !isUp(b)).length };
@@ -202,6 +208,8 @@ export function MyBookings() {
                       {open === b._id ? 'Hide details' : 'View details'}
                     </button>
                     {b.status === 'confirmed' && <button className="btn" onClick={() => { setOpen(b._id); setCancelFor(b._id); setMsg(null); }}>Cancel</button>}
+                    {b.status === 'confirmed' && <button className="btn" onClick={() => requestStayChange(b, 'check_in')}>Request early check-in</button>}
+                    {b.status === 'checked_in' && <button className="btn" onClick={() => requestStayChange(b, 'check_out')}>Request late check-out</button>}
                     {b.status === 'checked_out' && <button className="btn">Write review</button>}
                   </div>
                 </article>

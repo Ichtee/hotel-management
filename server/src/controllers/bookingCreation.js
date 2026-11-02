@@ -10,6 +10,7 @@ const Invoice = require("../models/Invoice");
 const { validateCoupon } = require("../services/promotions");
 const { currentDepositPolicy } = require("../services/policies");
 const { createCleaningTask } = require("../services/housekeepingTasks");
+const { closeForBooking } = require("./stayRequests");
 const v = require("../utils/validation");
 
 const ACTIVE = ["pending", "confirmed", "checked_in"];
@@ -153,6 +154,7 @@ async function checkIn(req, res) {
   booking.status = "checked_in"; booking.actualCheckInAt = new Date(); booking.checkedInBy = req.user._id;
   booking.events.push({ actorId: req.user._id, type: "checked_in", note: `Checked in to room ${room.roomNumber}` });
   room.status = "occupied"; await room.save(); await booking.save();
+  await closeForBooking(booking._id);
   res.json({ data: booking });
 }
 async function changeRoomOptions(req, res) {
@@ -216,6 +218,7 @@ async function checkOut(req, res) {
   booking.status = "checked_out"; booking.actualCheckOutAt = new Date(); booking.checkedOutBy = req.user._id;
   booking.events.push({ actorId: req.user._id, type: "checked_out", note: `Checked out; final payment ${balance}` });
   await booking.save();
+  await closeForBooking(booking._id);
   const invoice = await Invoice.findOneAndUpdate({ bookingId: booking._id }, { $setOnInsert: { bookingId: booking._id, invoiceNumber: `INV-${Date.now()}`, issuedBy: req.user._id, issuedAt: new Date() }, $set: { subtotal: booking.roomAmount + booking.serviceAmount, totalAmount: booking.totalAmount, status: "paid" } }, { new: true, upsert: true });
   const turnovers = await Promise.all(roomIds.map((roomId) => createCleaningTask({ roomId: String(roomId), bookingId: String(booking._id), type: "turnover" })));
   res.json({ data: { booking, invoice, paidAmount: paidAmount + balance, balance, turnoverTasks: turnovers.map((item) => item.data) } });

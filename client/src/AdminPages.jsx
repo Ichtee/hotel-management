@@ -386,7 +386,7 @@ export function Revenue() {
 
 /* ---------------- Profile & password (UC03), shared by both shells ---------------- */
 export function Profile() {
-  const { user, setUser } = useAuth();
+  const { user, setUser, signOut } = useAuth();
   const [err, setErr] = useState(null);
   const [ok, setOk] = useState('');
   const [pErr, setPErr] = useState(null);
@@ -406,7 +406,7 @@ export function Profile() {
   };
   return (
     <>
-      <PageHead title="My profile" sub={`${user.roleName} · ${user.email}`} />
+      <PageHead title="My profile" sub={`${user.roleName || user.email} · ${user.email}`} />
       <div className="two">
         <form className="panel form one" onSubmit={save}>
           <h2>Personal details</h2>
@@ -424,6 +424,7 @@ export function Profile() {
           <Notice error={pErr && !pErr.fields ? pErr : null} ok={pOk} />
           <button className="btn primary" type="submit">Update password</button>
         </form>
+        <div className="panel form one full" style={{ gridColumn: "1 / -1", marginTop: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(211, 47, 47, 0.04)", borderColor: "rgba(211, 47, 47, 0.2)" }}><div><h3 style={{ margin: 0, color: "#d32f2f" }}>Sign out</h3><p className="muted" style={{ margin: "0.25rem 0 0" }}>End your current session on this device.</p></div><button type="button" className="btn" style={{ color: "#d32f2f", borderColor: "#d32f2f", background: "transparent" }} onClick={async () => { await signOut(); location.hash = "#/"; }}>Sign out</button></div>
       </div>
     </>
   );

@@ -27,7 +27,7 @@ export const roomApi = {
   // --- Room Types (UC31, UC06, UC32) ---
   async getRoomTypes(params = {}) {
     const q = new URLSearchParams(params).toString();
-    return request(`/room-types${q ? '?' + q : ''}`);
+    return request(`/public/room-types${q ? '?' + q : ''}`).catch(() => request(`/room-types${q ? '?' + q : ''}`));
   },
 
   async getRoomTypeById(id) {

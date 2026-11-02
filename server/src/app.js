@@ -23,6 +23,7 @@ const refunds = require("./controllers/refunds");
 const jobs = require("./controllers/jobs");
 const { revenue } = require("./controllers/revenue");
 const { HttpError } = require("./utils/validation");
+const RoomType = require("./models/RoomType");
 
 // Member 2 Routes & Controllers
 const roomTypeRoutes = require("./routes/roomTypeRoutes");
@@ -133,6 +134,14 @@ function createApp({
   app.post("/api/auth/login", authLimit, auth.login);
   app.post("/api/auth/logout", auth.logout);
   app.get("/api/public/room-types/:id/reviews", roomTypes.reviews);
+  app.get("/api/public/room-types", async (req, res, next) => {
+    try {
+      const data = await RoomType.find({ isActive: true }).lean();
+      res.json({ success: true, count: data.length, data });
+    } catch (err) {
+      next(err);
+    }
+  });
   app.post("/api/auth/forgot-password", authLimit, auth.forgotPassword);
   app.post("/api/auth/reset-password", authLimit, auth.resetPassword);
 

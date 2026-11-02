@@ -56,6 +56,11 @@ function SiteHeader({ route }) {
                 {open === i && (
                   <ul className="dd-menu">
                     {m.items.map(([h, l, s]) => <li key={l}><a href={h} onClick={done}><strong>{l}</strong>{s && <small>{s}</small>}</a></li>)}
+                    {/* My trips dropdown sign out */ user && m.label === "My trips" && (
+                      <li style={{ borderTop: "1px solid rgba(255,255,255,0.1)", marginTop: 4, paddingTop: 4 }}>
+                        <button type="button" onClick={async () => { done(); await signOut(); location.hash = "#/"; }} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", padding: ".5rem 1rem", color: "#ff6b6b", cursor: "pointer", fontSize: ".9rem", fontWeight: 600 }}>Sign out</button>
+                      </li>
+                    )}
                   </ul>
                 )}
               </li>
@@ -78,9 +83,21 @@ function SiteHeader({ route }) {
                 </a>
                 {staff && <a className="btn ghost-w" href="#/admin" onClick={done}>Staff portal</a>}
                 <button
+                  type="button"
                   className="btn ghost-w"
                   onClick={async () => { done(); await signOut(); location.hash = '#/'; }}
-                  style={{ border: '1px solid rgba(255,255,255,0.3)', color: '#fff', background: 'transparent' }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    color: 'var(--navy)',
+                    border: '1px solid var(--line)',
+                    background: '#fff',
+                    fontWeight: 600,
+                    padding: '0 .95rem'
+                  }}
+                  title="Sign out"
                 >
                   Sign out
                 </button>
@@ -390,7 +407,7 @@ function Checkout({ q, user }) {
     e.preventDefault();
     setSaving(true); setError('');
     try {
-      const types = await api('/room-types');
+      const types = await api('/public/room-types').catch(() => api('/room-types'));
       const type = types.data.find((item) => item.name === r.name);
       if (!type) throw new Error('This room is no longer available. Please choose another room.');
       const created = await api('/bookings', { method: 'POST', body: {
@@ -454,9 +471,20 @@ const Confirmation = ({ q }) => (
 function Auth({ note }) {
   const [mode, setMode] = useState('login');
   const [resetSuccess, setResetSuccess] = useState(null);
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const done = () => { location.hash = sessionStorage.getItem('next') || '#/my-bookings'; sessionStorage.removeItem('next'); };
-  if (user) { if (user.scope === 'self') done(); else location.hash = '#/admin'; return null; }
+  if (user) {
+    return (
+      <AuthShell>
+        <h1>Already signed in</h1>
+        <p className="muted">You are currently signed in as <strong>{user.customerProfile?.fullName || user.fullName || user.email}</strong>.</p>
+        <div style={{ display: "flex", gap: "0.75rem", marginTop: "1.5rem", flexWrap: "wrap" }}>
+          <button className="btn primary" onClick={done}>Go to My bookings</button>
+          <button className="btn" style={{ color: "#d32f2f", borderColor: "#d32f2f", background: "transparent" }} onClick={async () => { await signOut(); location.hash = "#/login"; }}>Sign out</button>
+        </div>
+      </AuthShell>
+    );
+  }
   return (
     <AuthShell>
       <h1>{mode === 'login' ? 'Welcome back' : mode === 'register' ? 'Create your account' : 'Reset password'}</h1>

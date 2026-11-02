@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from './context/Auth.jsx';
-import { AuthShell, AuthTabs, SignIn, Register } from './AuthForms.jsx';
+import { AuthShell, AuthTabs, SignIn, Register, ForgotPassword } from './AuthForms.jsx';
 import { Profile } from './AdminPages.jsx';
 import { EXTRAS, OFFERS, REVIEWS, ROOM_TYPES } from './data.js';
 import { MyBookings } from './Bookings.jsx';
 import { roomApi } from './api/roomApi.js';
-import { bookingApi } from './api/bookingApi.js';
+import { PaymentPage, PaymentResult, SandboxGateway } from './Payments.jsx';
+import { api } from './api/client.js';
 
 const NAV = [
   { label: 'Home', href: '#/' },
@@ -73,7 +74,7 @@ function SiteHeader({ route }) {
                   <span className="avatar" style={{ width: 24, height: 24, fontSize: '.75rem', background: 'var(--gold)', color: '#1a1205' }}>
                     {(user.fullName || user.email || 'U')[0].toUpperCase()}
                   </span>
-                  <span style={{ color: 'var(--gold)', fontWeight: 600 }}>{user.fullName || user.email?.split('@')[0]}</span>
+                  <span style={{ color: 'var(--gold-ink)', fontWeight: 600 }}>{user.fullName || user.email?.split('@')[0]}</span>
                 </a>
                 {staff && <a className="btn ghost-w" href="#/admin" onClick={done}>Staff portal</a>}
                 <button
@@ -280,7 +281,7 @@ function Rooms({ q }) {
     }
   }, [q.in, q.out, q.guests]);
 
-  const guests = +q.guests || 1;
+  const guests = +q.guests || 2;
   const sourceList = apiRooms !== null ? apiRooms : ROOM_TYPES;
   const list = sourceList.filter((r) => r.price <= price && r.guests >= guests && (cat === 'all' || r.cat === cat));
   const carry = q.in ? `?${new URLSearchParams({ in: q.in, out: q.out, guests: q.guests })}` : '';
@@ -455,13 +456,13 @@ function Checkout({ q, user }) {
   const sub = nights * r.price + ex.reduce((s, [, p]) => s + p, 0);
   const total = sub * (1 - (offer?.pct || 0) / 100);
   const [pay, setPay] = useState('deposit');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
-
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
   const confirm = async (e) => {
     e.preventDefault();
-    setIsSubmitting(true);
-    setErrorMsg('');
+
+    setSaving(true);
+    setError('');
 
     const form = e.target;
     const guestName = form.fullName.value;
@@ -487,49 +488,44 @@ function Checkout({ q, user }) {
       ]
     };
 
+
+
+
     try {
-      const res = await bookingApi.createBooking(bookingPayload);
-      const bData = res.data;
-      const savedInfo = {
-        code: bData?.bookingReference || `BK-${Math.floor(1000 + Math.random() * 9000)}`,
-        room: r.name,
-        dates: `${bookingPayload.checkInDate} → ${bookingPayload.checkOutDate}`,
-        total: bData?.totalAmount || total,
-        depositRequired: bData?.depositRequired,
-        status: bData?.status || 'confirmed',
-        guestName,
-        paymentType: pay
-      };
-      sessionStorage.setItem('last_booking', JSON.stringify(savedInfo));
-      location.hash = '#/confirmation';
-    } catch (err) {
-      console.warn('Backend createBooking error, proceeding with local fallback session:', err.message);
-      const fallbackCode = `BK-${Math.floor(1000 + Math.random() * 9000)}`;
-      const savedInfo = {
-        code: fallbackCode,
-        room: r.name,
-        dates: `${bookingPayload.checkInDate} → ${bookingPayload.checkOutDate}`,
-        total,
-        depositRequired: pay === 'deposit' ? Math.round(total * 0.2) : 0,
-        status: 'confirmed',
-        guestName,
-        paymentType: pay
-      };
-      sessionStorage.setItem('last_booking', JSON.stringify(savedInfo));
-      location.hash = '#/confirmation';
-    } finally {
-      setIsSubmitting(false);
-    }
+      let targetRoomTypeId = r._id;
+      if (!targetRoomTypeId || !/^[0-9a-f]{24}$/i.test(targetRoomTypeId)) {
+        const types = await api('/room-types');
+        const list = Array.isArray(types) ? types : (types?.data || []);
+        const matched = list.find((item) => item.name === r.name) || list[0];
+        targetRoomTypeId = matched?._id;
+      }
+      bookingPayload.rooms[0].roomTypeId = targetRoomTypeId;
+      const created = await api('/bookings', { method: 'POST', body: bookingPayload });
+      const bRef = created?.data?.bookingReference || 'confirmed';
+      location.hash = `#/confirmation?${new URLSearchParams({ ref: bRef })}`;
+      return;
+
+
+
+
+
+
+
+    } catch (err) { setError(err.message || 'Unable to create your booking.'); }
+    finally { setSaving(false); }
   };
+
 
   if (checkoutLoading) {
     return <div className="c-wrap c-section"><p>Loading room details…</p></div>;
   }
 
+
+
   return (
     <div className="c-wrap c-section">
       <h1 className="title">Checkout</h1>
-      {errorMsg && <p className="alert bad">{errorMsg}</p>}
+
       <div className="c-layout detail">
         <form className="panel form" onSubmit={confirm} id="co">
           {currentUser && (
@@ -548,9 +544,8 @@ function Checkout({ q, user }) {
               <label className="check" key={v}><input type="radio" name="pay" checked={pay === v} onChange={() => setPay(v)} />{l}</label>
             ))}
           </fieldset>
-          <button className="btn primary" type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Processing reservation...' : 'Confirm booking'}
-          </button>
+          {error && <p className="note bad-note full" role="alert">{error}</p>}
+          <button className="btn primary" type="submit" disabled={saving}>{saving ? 'Creating booking…' : 'Confirm booking'}</button>
         </form>
         <aside className="panel book">
           <img className="thumb" src={r.img} alt="" />
@@ -568,52 +563,41 @@ function Checkout({ q, user }) {
   );
 }
 
-function Confirmation() {
-  const [booking, setBooking] = useState(null);
-
-  useEffect(() => {
-    try {
-      const data = sessionStorage.getItem('last_booking');
-      if (data) setBooking(JSON.parse(data));
-    } catch {}
-  }, []);
-
-  const code = booking?.code || 'BK-1050';
-
-  return (
-    <div className="c-wrap c-section center">
-      <p className="done" aria-hidden="true">✓</p>
-      <h1 className="title">Booking confirmed</h1>
-      <p className="muted">
-        Thank you{booking?.guestName ? `, ${booking.guestName}` : ''}! Your booking reference is <strong>{code}</strong>.
-      </p>
-      {booking && (
-        <div className="panel" style={{ maxWidth: 440, margin: '1.5rem auto', textAlign: 'left' }}>
-          <dl className="sum" style={{ border: 0, padding: 0 }}>
-            <div><dt>Room type</dt><dd><strong>{booking.room}</strong></dd></div>
-            <div><dt>Dates</dt><dd>{booking.dates}</dd></div>
-            <div><dt>Payment</dt><dd style={{ textTransform: 'capitalize' }}>{booking.paymentType}</dd></div>
-            <div className="tot"><dt>Total</dt><dd>{money(booking.total)}</dd></div>
-          </dl>
-        </div>
-      )}
-      <p><a className="btn primary" href="#/my-bookings">View in dashboard</a></p>
-    </div>
-  );
-}
+const Confirmation = ({ q }) => (
+  <div className="c-wrap c-section center">
+    <p className="done" aria-hidden="true">✓</p>
+    <h1 className="title">Booking confirmed</h1>
+    <p className="muted">Your booking code is <strong>{q.ref || 'confirmed'}</strong>. A confirmation email is on its way.</p>
+    <p><a className="btn primary" href="#/my-bookings">View my bookings</a></p>
+  </div>
+);
 
 function Auth({ note }) {
   const [mode, setMode] = useState('login');
+  const [resetSuccess, setResetSuccess] = useState(null);
   const { user } = useAuth();
   const done = () => { location.hash = sessionStorage.getItem('next') || '#/my-bookings'; sessionStorage.removeItem('next'); };
   if (user) { if (user.scope === 'self') done(); else location.hash = '#/admin'; return null; }
   return (
     <AuthShell>
-      <h1>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
-      <p className="muted">{mode === 'login' ? 'Sign in to manage your bookings.' : 'Book faster and keep every stay in one place.'}</p>
-      <AuthTabs mode={mode} onChange={setMode} />
+      <h1>{mode === 'login' ? 'Welcome back' : mode === 'register' ? 'Create your account' : 'Reset password'}</h1>
+      <p className="muted">
+        {mode === 'login' ? 'Sign in to manage your bookings.' : mode === 'register' ? 'Book faster and keep every stay in one place.' : 'Enter your details to reset your password.'}
+      </p>
+      {mode !== 'forgot' && <AuthTabs mode={mode} onChange={(m) => { setMode(m); setResetSuccess(null); }} />}
+      {resetSuccess && <p role="status" className="note ok-note">{resetSuccess}</p>}
       {note && <p className="note">{note}</p>}
-      {mode === 'login' ? <SignIn onDone={done} /> : <Register onDone={done} />}
+      {mode === 'login' && <SignIn onDone={done} onForgot={() => { setMode('forgot'); setResetSuccess(null); }} />}
+      {mode === 'register' && <Register onDone={done} />}
+      {mode === 'forgot' && (
+        <ForgotPassword
+          onDone={() => {
+            setMode('login');
+            setResetSuccess('Password has been reset successfully. Please sign in with your new password.');
+          }}
+          onCancel={() => setMode('login')}
+        />
+      )}
     </AuthShell>
   );
 }
@@ -640,13 +624,17 @@ export default function Customer({ route }) {
 
   let page;
   if (loading) page = <p className="muted c-wrap c-section">Loading…</p>;
-  else if (PROTECTED.includes(path) && !user) { sessionStorage.setItem('next', route); page = <Auth note="Please sign in to continue." />; }
+  else if ((PROTECTED.includes(path) || path.startsWith('#/pay/')) && !user) { sessionStorage.setItem('next', route); page = <Auth note="Please sign in to continue." />; }
   else if (path === '#/profile') page = <div className="c-wrap c-section"><Profile /></div>;
+  else
+  if (path === '#/pay/result') page = <PaymentResult paymentId={q.payment} back={q.r} />;
+  else if (path.startsWith('#/pay/sandbox/')) page = <SandboxGateway orderId={path.split('/')[3]} paymentId={q.payment} />;
+  else if (path.startsWith('#/pay/')) page = <PaymentPage id={path.split('/')[2]} kind={q.kind} />;
   else if (path.startsWith('#/room/')) page = <RoomDetail id={path.split('/')[2]} q={q} />;
   else if (path === '#/rooms') page = <Rooms q={q} />;
   else if (path === '#/offers') page = <Offers />;
   else if (path === '#/checkout') page = <Checkout q={q} user={user} />;
-  else if (path === '#/confirmation') page = <Confirmation />;
+  else if (path === '#/confirmation') page = <Confirmation q={q} />;
   else if (path === '#/my-bookings') page = <MyBookings />;
   else if (path === '#/login') page = <Auth />;
   else page = <Home />;

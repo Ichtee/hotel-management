@@ -6,10 +6,11 @@ import AdminCleaningTasks from './pages/AdminCleaningTasks.jsx';
 import AdminRoomIssues from './pages/AdminRoomIssues.jsx';
 import './admin.css';
 import { useAuth } from './context/Auth.jsx';
-import { Badge, DataTable, LineChart, PageHead, useApi } from './ui.jsx';
-import { AuthShell, SignIn } from './AuthForms.jsx';
+import { Badge, DataTable, Field, LineChart, Modal, Notice, PageHead, useApi } from './ui.jsx';
+import { AuthShell, SignIn, ForgotPassword } from './AuthForms.jsx';
 import { Coupons, DepositPolicy, Occupancy, Profile, Revenue, Roles, Users } from './AdminPages.jsx';
-import { money } from './api/client.js';
+import { Cancellations, Refunds } from './Cancellations.jsx';
+import { api, money } from './api/client.js';
 
 const ICONS = {
   grid: 'M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z',
@@ -29,7 +30,7 @@ const Icon = ({ n, size = 18 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={ICONS[n]} /></svg>
 );
 
-const allowed = (item, perms) => !item[3] || item[3].some((p) => perms.includes(p));
+const allowed = (item, perms, role) => !item[3] || (item[3].includes('manager.only') ? role === 'manager' : item[3].some((p) => perms.includes(p)));
 
 function Sidebar({ route, open, onClose }) {
   const { user } = useAuth();
@@ -45,7 +46,7 @@ function Sidebar({ route, open, onClose }) {
         <a className="brand" href="#/admin">Grand<span>Stay</span><small>Management</small></a>
         <div className="snav" role="navigation" aria-label="Sections">
           {link('#/admin', 'Dashboard', 'grid')}
-          {MENU.filter((m) => m.items).map((m) => ({ ...m, items: m.items.filter((i) => allowed(i, user.permissions)) })).filter((m) => m.items.length).map((m) => (
+          {MENU.filter((m) => m.items).map((m) => ({ ...m, items: m.items.filter((i) => allowed(i, user.permissions, user.role)) })).filter((m) => m.items.length).map((m) => (
             <div className="grp" key={m.label}>
               <p>{m.label}</p>
               {m.items.map(([h, l]) => link(h, l, null))}
@@ -203,29 +204,31 @@ function Dashboard() {
 }
 
 function Bookings() {
+  const { user } = useAuth();
   const [f, setF] = useState('all');
   const [search, setSearch] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [cancelling, setCancelling] = useState(null);
+  const [checkingIn, setCheckingIn] = useState(null);
+  const [changingRoom, setChangingRoom] = useState(null);
+  const [addingService, setAddingService] = useState(null);
+  const [checkingOut, setCheckingOut] = useState(null);
+
   const statusParam = f !== 'all' ? `&status=${f}` : '';
   const searchParam = search ? `&reference=${encodeURIComponent(search)}` : '';
-  const list = useApi(`/bookings/search?limit=50${statusParam}${searchParam}`);
-
-  const liveRows = list.data?.map((b) => [
-    b.bookingReference || b._id.slice(-8).toUpperCase(),
-    b.guestName || 'Guest',
-    b.rooms?.[0]?.roomId?.roomNumber ? `Room ${b.rooms[0].roomId.roomNumber}` : 'Unassigned',
-    b.rooms?.[0]?.roomTypeId?.name || 'Standard',
-    b.checkInDate ? b.checkInDate.slice(0, 10) : '—',
-    b.checkOutDate ? b.checkOutDate.slice(0, 10) : '—',
-    money(b.totalAmount),
-    b.status
-  ]);
-
-  const fallbackRows = BOOKINGS.filter((b) => f === 'all' || b.status === f).map((b) => [b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status]);
-  const rows = liveRows && liveRows.length > 0 ? liveRows : fallbackRows;
+  const live = useApi(`/bookings/search?limit=100${statusParam}${searchParam}`);
+  const fallbackRows = (BOOKINGS || []).filter((b) => f === 'all' || b.status === f);
+  const bookingsList = live.data || fallbackRows;
 
   return (
     <>
-      <PageHead title="Bookings" sub="All reservations with real-time status and search" />
+      <PageHead
+        title="Bookings"
+        sub="All reservations with real-time status and search (UC39)"
+        action={user.role === 'receptionist' || user.role === 'admin' ? 'New booking' : null}
+        onAction={() => setCreating(true)}
+      />
       <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap' }}>
         <div className="chips" role="group" aria-label="Filter by status" style={{ margin: 0 }}>
           {['all', 'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled'].map((s) => (
@@ -237,12 +240,156 @@ function Bookings() {
           placeholder="Search booking code or reference…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ padding: '0.45rem 0.8rem', borderRadius: '4px', border: '1px solid #ccc', minWidth: '220px' }}
+          style={{ padding: '0.45rem 0.8rem', borderRadius: '8px', border: '1px solid var(--line)', minWidth: '240px' }}
         />
       </div>
-      <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status']} rows={rows} />
+      <Notice error={live.error} />
+      <DataTable
+        cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status', 'Actions']}
+        rows={bookingsList.map((b) => b._id ? [
+          b.bookingReference || b._id.slice(-8).toUpperCase(),
+          b.guestName || '—',
+          b.rooms?.[0]?.roomId?.roomNumber ? `Room ${b.rooms[0].roomId.roomNumber}` : 'Assigned at check-in',
+          b.rooms?.[0]?.roomTypeId?.name || 'Room',
+          b.checkInDate?.slice(0, 10),
+          b.checkOutDate?.slice(0, 10),
+          money(b.totalAmount),
+          b.status,
+          <span className="row-actions" key={b._id}>
+            <button className="btn sm" onClick={() => setEditing(b)}>Edit</button>
+            {b.status === 'confirmed' && <button className="btn sm" onClick={() => setCheckingIn(b)}>Check in</button>}
+            {b.status === 'checked_in' && (
+              <>
+                <button className="btn sm" onClick={() => setChangingRoom(b)}>Change room</button>
+                <button className="btn sm" onClick={() => setAddingService(b)}>Add service</button>
+                <button className="btn sm" onClick={() => setCheckingOut(b)}>Check out</button>
+              </>
+            )}
+            {['pending', 'confirmed'].includes(b.status) && <button className="btn sm" onClick={() => setCancelling(b)}>Cancel</button>}
+          </span>
+        ] : [
+          b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status, ''
+        ])}
+      />
+      {creating && <WalkInBooking onClose={() => { setCreating(false); live.reload(); }} />}
+      {editing && <EditBooking booking={editing} onClose={() => { setEditing(null); live.reload(); }} />}
+      {cancelling && <CancelBooking booking={cancelling} onClose={() => { setCancelling(null); live.reload(); }} />}
+      {checkingIn && <CheckInBooking booking={checkingIn} onClose={() => { setCheckingIn(null); live.reload(); }} />}
+      {changingRoom && <ChangeRoom booking={changingRoom} onClose={() => { setChangingRoom(null); live.reload(); }} />}
+      {addingService && <AddService booking={addingService} onClose={() => { setAddingService(null); live.reload(); }} />}
+      {checkingOut && <CheckOutBooking booking={checkingOut} onClose={() => { setCheckingOut(null); live.reload(); }} />}
     </>
   );
+}
+
+function CustomerAccounts() {
+  const [query, setQuery] = useState(''); const [status, setStatus] = useState(''); const [selected, setSelected] = useState(null);
+  const list = useApi(`/customers?limit=100&q=${encodeURIComponent(query)}${status ? `&status=${status}` : ''}`);
+  return <><PageHead title="Customer accounts" sub="Search customers and manage the blacklist" />
+    <form className="chips" onSubmit={(e) => e.preventDefault()}><input aria-label="Search customers" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Name, username or email" /><select aria-label="Customer status" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="suspended">Blacklisted</option></select></form>
+    <Notice error={list.error} />
+    <DataTable cols={['Name', 'Username', 'Email', 'Phone', 'Status', '']} rows={(list.data || []).map((u) => [u.customerProfile?.fullName || '—', u.username, u.email, u.phone || '—', u.status, <button key={u._id} className="btn sm" onClick={() => setSelected(u)}>{u.status === 'active' ? 'Blacklist' : 'Restore'}</button>])} />
+    {selected && <CustomerStatus customer={selected} onClose={() => { setSelected(null); list.reload(); }} />}
+  </>;
+}
+
+function CustomerStatus({ customer, onClose }) {
+  const [reason, setReason] = useState(''); const [error, setError] = useState(null); const [saving, setSaving] = useState(false); const blacklisting = customer.status === 'active';
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); try { await api(`/customers/${customer._id}/blacklist`, { method: 'PATCH', body: { action: blacklisting ? 'blacklist' : 'restore', reason } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  return <Modal title={blacklisting ? 'Blacklist customer' : 'Restore customer'} onClose={onClose}><form className="form" onSubmit={submit}><p className="full muted">{customer.customerProfile?.fullName || customer.username}</p><Field label="Reason"><input value={reason} onChange={(e) => setReason(e.target.value)} required /></Field><div className="full"><Notice error={error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : blacklisting ? 'Blacklist customer' : 'Restore customer'}</button></div></form></Modal>;
+}
+
+function CheckOutBooking({ booking, onClose }) {
+  const detail = useApi(`/bookings/${booking._id}`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  if (detail.loading) return <Modal title="Check out customer" onClose={onClose}><p className="muted">Loading final bill…</p></Modal>;
+  const b = detail.data || booking; const paid = b.paidAmount || 0; const balance = Math.max(0, b.totalAmount - paid);
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${b._id}/check-out`, { method: 'POST', body: { inspectionConfirmed: true, paymentMethod: f.paymentMethod, transactionRef: f.transactionRef || undefined } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  return <Modal title={`Check out · ${b.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
+    <p className="full muted">Room {money(b.roomAmount)} · Services {money(b.serviceAmount)} · Total {money(b.totalAmount)} · Paid {money(paid)}</p>
+    <p className="full"><strong>Balance due: {money(balance)}</strong></p>
+    {balance > 0 && <><Field label="Payment method"><select name="paymentMethod" defaultValue="cash"><option value="cash">Cash</option><option value="credit_card">Credit card / POS</option><option value="bank_transfer">Bank transfer</option></select></Field><Field label="Transaction reference"><input name="transactionRef" /></Field></>}
+    <label className="check full"><input type="checkbox" required /> Room inspection completed or explicitly skipped</label>
+    <div className="full"><Notice error={detail.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving}>{saving ? 'Checking out…' : 'Collect payment & check out'}</button></div>
+  </form></Modal>;
+}
+
+function AddService({ booking, onClose }) {
+  const services = useApi('/front-desk/services'); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${booking._id}/services`, { method: 'POST', body: { ...f, quantity: Number(f.quantity) } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  return <Modal title={`Add service · ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
+    <Field label="Service"><select name="serviceId" required disabled={services.loading}><option value="">Select a service</option>{services.data?.map((s) => <option key={s._id} value={s._id}>{s.name} · {money(s.unitPrice)}</option>)}</select></Field>
+    <Field label="Quantity"><input name="quantity" type="number" min="1" max="100" defaultValue="1" required /></Field>
+    <div className="full"><Notice error={services.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || services.loading}>{saving ? 'Adding…' : 'Add service'}</button></div>
+  </form></Modal>;
+}
+
+function ChangeRoom({ booking, onClose }) {
+  const options = useApi(`/front-desk/bookings/${booking._id}/change-room-options`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${booking._id}/change-room`, { method: 'POST', body: f }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  return <Modal title={`Change room · ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
+    <Field label="Available room"><select name="newRoomId" required disabled={options.loading}><option value="">Select a room</option>{options.data?.map((r) => <option key={r._id} value={r._id}>Room {r.roomNumber} · {r.roomType?.name} · {money(r.roomType?.basePrice)}</option>)}</select></Field>
+    <Field label="Reason"><select name="cause" defaultValue="hotel"><option value="hotel">Hotel relocation / free upgrade</option><option value="guest">Guest-requested upgrade</option></select></Field>
+    <div className="full"><Notice error={options.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || options.loading || !options.data?.length}>{saving ? 'Changing…' : 'Confirm room change'}</button></div>
+  </form></Modal>;
+}
+
+function CheckInBooking({ booking, onClose }) {
+  const rooms = useApi(`/front-desk/bookings/${booking._id}/available-rooms`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${booking._id}/check-in`, { method: 'POST', body: { ...f, guestCount: Number(f.guestCount) } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  return <Modal title={`Check in ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
+    <Field label="Available room"><select name="roomId" required disabled={rooms.loading}><option value="">Select a room</option>{rooms.data?.map((r) => <option key={r._id} value={r._id}>Room {r.roomNumber} · Floor {r.floor}</option>)}</select></Field>
+    <Field label="Number of guests"><input name="guestCount" type="number" min="1" defaultValue={booking.rooms?.[0]?.guestCount || 1} required /></Field><Field label="ID / passport number"><input name="idDocumentNo" required /></Field>
+    <div className="full"><Notice error={rooms.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || rooms.loading || !rooms.data?.length}>{saving ? 'Checking in…' : 'Confirm check-in'}</button></div>
+  </form></Modal>;
+}
+
+function CancelBooking({ booking, onClose }) {
+  const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${booking._id}/cancel`, { method: 'POST', body: { ...f, verificationMethod: 'front_desk_id' } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  return <Modal title={`Cancel ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
+    <p className="full muted">Verify the guest's ID document at the front desk before confirming cancellation.</p>
+    <Field label="Cancellation reason"><input name="reason" required /></Field>
+    <Field label="Refund bank (if deposit was paid)"><input name="bank" /></Field><Field label="Refund account number"><input name="accountNumber" /></Field><Field label="Account holder name"><input name="accountHolderName" /></Field>
+    <div className="full"><Notice error={error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving}>{saving ? 'Cancelling…' : 'Confirm cancellation'}</button></div>
+  </form></Modal>;
+}
+
+function EditBooking({ booking, onClose }) {
+  const detail = useApi(`/bookings/${booking._id}`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  if (detail.loading) return <Modal title="Modify booking" onClose={onClose}><p className="muted">Loading booking…</p></Modal>;
+  const b = detail.data || booking; const checkedOut = b.status === 'checked_out';
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${b._id}`, { method: 'PATCH', body: { fullName: f.fullName, phone: f.phone, idDocumentNo: f.idDocumentNo, ...(checkedOut ? {} : { checkInDate: f.checkInDate, checkOutDate: f.checkOutDate, guestCount: Number(f.guestCount) }) } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  return <Modal title="Modify booking" onClose={onClose}><form className="form" onSubmit={submit}>
+    <Field label="Guest full name"><input name="fullName" defaultValue={b.guestName} required /></Field><Field label="Phone"><input name="phone" defaultValue={b.guestPhone} required /></Field><Field label="ID / passport number"><input name="idDocumentNo" defaultValue={b.guestIdDocumentNo} required /></Field>
+    {!checkedOut && <><Field label="Check-in"><input name="checkInDate" type="date" defaultValue={b.checkInDate?.slice(0, 10)} required disabled={b.status === 'checked_in'} /></Field><Field label="Check-out"><input name="checkOutDate" type="date" defaultValue={b.checkOutDate?.slice(0, 10)} required /></Field><Field label="Guests"><input name="guestCount" type="number" min="1" defaultValue={b.rooms?.[0]?.guestCount || 1} required /></Field></>}
+    <div className="full"><Notice error={detail.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
+  </form></Modal>;
+}
+
+function WalkInBooking({ onClose }) {
+  const types = useApi('/room-types');
+  const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault(); setSaving(true); setError(null);
+    const f = Object.fromEntries(new FormData(e.target));
+    try { await api('/front-desk/bookings', { method: 'POST', body: { ...f, guestCount: Number(f.guestCount) } }); onClose(); }
+    catch (x) { setError(x); } finally { setSaving(false); }
+  };
+  return <Modal title="Create walk-in booking" onClose={onClose}>
+    <form className="form" onSubmit={submit}>
+      <p className="full muted">Walk-in booking · no deposit required</p>
+      <Field label="Check-in"><input name="checkInDate" type="date" required /></Field>
+      <Field label="Check-out"><input name="checkOutDate" type="date" required /></Field>
+      <Field label="Room type"><select name="roomTypeId" required disabled={types.loading}><option value="">Select a room type</option>{types.data?.map((t) => <option key={t._id} value={t._id}>{t.name} · {money(t.basePrice)} / night</option>)}</select></Field>
+      <Field label="Guests"><input name="guestCount" type="number" min="1" max="20" defaultValue="1" required /></Field>
+      <Field label="Guest full name"><input name="fullName" required /></Field>
+      <Field label="Phone"><input name="phone" inputMode="numeric" required /></Field>
+      <Field label="Email"><input name="email" type="email" required /></Field>
+      <Field label="ID / passport number"><input name="idDocumentNo" required /></Field>
+      <div className="full"><Notice error={types.error || error} /></div>
+      <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || types.loading}>{saving ? 'Creating…' : 'Create booking'}</button></div>
+    </form>
+  </Modal>;
 }
 
 function FrontDesk() {
@@ -300,19 +447,37 @@ function Hotel() {
 
 function Login() {
   const { user, signOut } = useAuth();
+  const [forgot, setForgot] = useState(false);
+  const [msg, setMsg] = useState(null);
   if (user && user.scope !== 'self') { location.hash = '#/admin'; return null; }
   return (
     <AuthShell staff>
-      <h1>Staff sign in</h1>
-      <p className="muted">Use your hotel account to continue.</p>
+      <h1>{forgot ? 'Reset staff password' : 'Staff sign in'}</h1>
+      <p className="muted">{forgot ? 'Enter your details to reset your password.' : 'Use your hotel account to continue.'}</p>
+      {msg && <p role="status" className="note ok-note">{msg}</p>}
       {user && <p className="note bad-note">You are signed in as a customer ({user.email}). <button className="linklike" onClick={signOut}>Sign out</button> to use a staff account.</p>}
-      <SignIn onDone={() => { location.hash = '#/admin'; }} hint={<a className="more" href="#/">← Back to website</a>} />
+      {forgot ? (
+        <ForgotPassword
+          onDone={() => {
+            setForgot(false);
+            setMsg('Password reset successfully. Sign in with your new password.');
+          }}
+          onCancel={() => setForgot(false)}
+        />
+      ) : (
+        <SignIn
+          onDone={() => { location.hash = '#/admin'; }}
+          onForgot={() => { setForgot(true); setMsg(null); }}
+          hint={<a className="more" href="#/">← Back to website</a>}
+        />
+      )}
     </AuthShell>
   );
 }
 
 const PAGES = {
   '#/admin': Dashboard,
+  '#/admin/customers': CustomerAccounts,
   '#/admin/users': Users,
   '#/admin/staff': Users,
   '#/admin/roles': Roles,
@@ -327,7 +492,9 @@ const PAGES = {
   '#/admin/cleaning': AdminCleaningTasks,
   '#/admin/issues': AdminRoomIssues,
   '#/admin/hotel': Hotel,
-  '#/admin/policy': DepositPolicy
+  '#/admin/policy': DepositPolicy,
+  '#/admin/cancellations': Cancellations,
+  '#/admin/refunds': Refunds
 };
 
 const Forbidden = () => <><PageHead title="No access" sub="Your role does not include this area." /><a className="btn" href="#/admin">Back to dashboard</a></>;
@@ -339,7 +506,9 @@ const NEEDS = {
   '#/admin/coupons': 'promotions.manage',
   '#/admin/revenue': 'revenue.read',
   '#/admin/occupancy': 'revenue.read',
-  '#/admin/policy': 'policies.manage'
+  '#/admin/policy': 'policies.manage',
+  '#/admin/cancellations': 'cancellations.review',
+  '#/admin/refunds': 'refunds.handle'
 };
 
 export default function Admin({ route }) {
@@ -348,7 +517,7 @@ export default function Admin({ route }) {
   if (loading) return <p className="muted center-msg">Loading…</p>;
   if (route === '#/admin/login') return <Login />;
   if (!user || user.scope === 'self') { if (location.hash !== '#/admin/login') location.hash = '#/admin/login'; return null; }
-  const denied = NEEDS[route] && !user.permissions.includes(NEEDS[route]);
+  const denied = (route === '#/admin/customers' && user.role !== 'manager') || (NEEDS[route] && !user.permissions.includes(NEEDS[route]));
   const id = route.slice(8);
   const Page = denied ? Forbidden : PAGES[route] || (TABLES[id] ? () => <TablePage id={id} /> : Dashboard);
   return (

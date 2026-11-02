@@ -26,7 +26,7 @@ export function DepositPolicy() {
   const fieldError = err?.fields?.percentage;
   return (
     <>
-      <PageHead title="Deposit policy" sub="Share of the booking total paid online to confirm a reservation" />
+      <PageHead title="Deposit & cancellation policy" sub="Deposit, cancellation / refund tiers, stay rules and hotel information (UC27)" />
       <div className="policy-grid">
         <section className="panel policy-now" aria-labelledby="pol-now">
           <h2 id="pol-now">In force now</h2>
@@ -55,10 +55,84 @@ export function DepositPolicy() {
       </div>
       <h2 className="mt">History</h2>
       {s.loading || s.error ? <Loading s={s} /> : <DataTable cols={['Policy', 'Deposit', 'From', 'To', 'Status']} rows={s.data.map((p) => [p.name, `${p.deposit.value}%`, dateLabel(p.effectiveFrom), p.effectiveTo ? dateLabel(p.effectiveTo) : '—', p.isActive ? 'active' : <Badge v="retired" />])} />}
+      <CancellationPolicy />
+      <HotelInfo />
     </>
   );
 }
-const Loading = ({ s }) => s.loading ? <p className="muted">Loading…</p> : s.error ? <Notice error={s.error} /> : null;
+
+const DEFAULT_TIERS = [{ minHoursBeforeCheckIn: 48, refundPercent: 100 }, { minHoursBeforeCheckIn: 0, refundPercent: 0 }];
+// UC27: cancellation / refund tiers (100% or 0%, no gap from 0 h) with the stay rules; each save is a new version (BR-35).
+function CancellationPolicy() {
+  const s = useApi('/policies/cancellation?limit=5');
+  const cur = s.meta?.current;
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState(null);
+  const [ok, setOk] = useState(null);
+  const tiers = rows || cur?.cancellationTiers || DEFAULT_TIERS;
+  const edit = (i, k, val) => { setOk(null); setRows(tiers.map((t, j) => (j === i ? { ...t, [k]: val } : t))); };
+  const submit = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    const body = {
+      tiers: tiers.map((t) => ({ minHoursBeforeCheckIn: Number(t.minHoursBeforeCheckIn), refundPercent: Number(t.refundPercent) })),
+      checkInTime: f.checkInTime, checkOutTime: f.checkOutTime, earlyCheckInFee: Number(f.earlyCheckInFee), lateCheckOutFee: Number(f.lateCheckOutFee),
+    };
+    try { await api('/policies/cancellation', { method: 'POST', body }); setErr(null); setRows(null); setOk('Saved. New bookings use these tiers; existing bookings keep theirs.'); s.reload(); } catch (x) { setErr(x); }
+  };
+  if (s.loading || s.error) return <Loading s={s} />;
+  return (
+    <form className="panel policy-form mt" onSubmit={submit} key={cur?._id || 'new'}>
+      <h2>Cancellation &amp; stay rules</h2>
+      <p className="muted">{cur ? `In force since ${dateLabel(cur.effectiveFrom)}.` : 'No cancellation policy yet: until one is saved, every cancellation is refunded in full.'} The time is counted from the request to the check-in time of the check-in date.</p>
+      {tiers.map((t, i) => (
+        <div className="tier-row" key={i}>
+          <label>Hours before check-in (at least)<input type="number" min="0" max="8760" step="1" value={t.minHoursBeforeCheckIn} onChange={(e) => edit(i, 'minHoursBeforeCheckIn', e.target.value)} required /></label>
+          <label>Refund<select value={t.refundPercent} onChange={(e) => edit(i, 'refundPercent', e.target.value)}><option value="100">Full deposit (100%)</option><option value="0">None (0%)</option></select></label>
+          {tiers.length > 1 && <button type="button" className="btn sm" aria-label={`Remove tier ${i + 1}`} onClick={() => setRows(tiers.filter((_, j) => j !== i))}>Remove</button>}
+        </div>
+      ))}
+      <button type="button" className="btn sm" onClick={() => setRows([...tiers, { minHoursBeforeCheckIn: 0, refundPercent: 0 }])}>+ Add tier</button>
+      {err?.fields?.tiers && <p className="err" role="alert">{err.fields.tiers}</p>}
+      <div className="tier-row">
+        <Field label="Check-in time" error={err?.fields?.checkInTime}><input name="checkInTime" type="time" defaultValue={cur?.checkInTime || '14:00'} required /></Field>
+        <Field label="Check-out time" error={err?.fields?.checkOutTime}><input name="checkOutTime" type="time" defaultValue={cur?.checkOutTime || '12:00'} required /></Field>
+        <Field label="Early check-in fee (VND)" error={err?.fields?.earlyCheckInFee}><input name="earlyCheckInFee" type="number" min="0" step="1000" defaultValue={cur?.earlyCheckInFee ?? 0} required /></Field>
+        <Field label="Late check-out fee (VND)" error={err?.fields?.lateCheckOutFee}><input name="lateCheckOutFee" type="number" min="0" step="1000" defaultValue={cur?.lateCheckOutFee ?? 0} required /></Field>
+      </div>
+      <button className="btn primary">Save cancellation policy</button>
+      <Notice error={err && !err.fields ? err : null} ok={ok} />
+    </form>
+  );
+}
+
+// UC27: general hotel information shown on Hotel & Room Information.
+function HotelInfo() {
+  const s = useApi('/hotel-info');
+  const [err, setErr] = useState(null);
+  const [ok, setOk] = useState(null);
+  const submit = async (e) => {
+    e.preventDefault();
+    const f = Object.fromEntries(new FormData(e.target));
+    try { await api('/hotel-info', { method: 'PUT', body: f }); setErr(null); setOk('Hotel information saved.'); s.reload(); } catch (x) { setErr(x); setOk(null); }
+  };
+  if (s.loading || s.error) return <Loading s={s} />;
+  const h = s.data || {};
+  const fe = (k) => err?.fields?.[k];
+  return (
+    <form className="panel form one mt" onSubmit={submit} key={h.updatedAt || 'new'}>
+      <h2>Hotel information</h2>
+      <Field label="Hotel name" error={fe('name')}><input name="name" defaultValue={h.name} required /></Field>
+      <Field label="Address" error={fe('address')}><input name="address" defaultValue={h.address} /></Field>
+      <Field label="Phone" error={fe('phone')}><input name="phone" inputMode="tel" defaultValue={h.phone} /></Field>
+      <Field label="E-mail" error={fe('email')}><input name="email" type="email" defaultValue={h.email} /></Field>
+      <Field label="Description" error={fe('description')}><textarea name="description" rows="3" defaultValue={h.description} /></Field>
+      <button className="btn primary">Save hotel information</button>
+      <Notice error={err && !err.fields ? err : null} ok={ok} />
+    </form>
+  );
+}
+const Loading =({ s }) => s.loading ? <p className="muted">Loading…</p> : s.error ? <Notice error={s.error} /> : null;
 
 function Filters({ onApply, statuses, extra }) {
   return (
@@ -101,7 +175,7 @@ export function Users() {
           </span>
         ])} />
       )}
-      {list.data?.length === 0 && <p className="muted">No accounts match.</p>}
+      {list.data?.length === 0 && <p className="empty muted">No accounts match.</p>}
       {edit && <UserForm user={edit} isStaff={!isAdmin} base={base} options={options.data} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); list.reload(); }} />}
     </>
   );
@@ -238,7 +312,7 @@ export function Coupons() {
           </span>
         ])} />
       )}
-      {list.data?.length === 0 && <p className="muted">No coupons yet.</p>}
+      {list.data?.length === 0 && <p className="empty muted">No coupons yet.</p>}
       {edit && <CouponForm coupon={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); list.reload(); }} />}
     </>
   );

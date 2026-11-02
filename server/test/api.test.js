@@ -1,7 +1,7 @@
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const mongoose = require("mongoose");
-const { MongoMemoryServer } = require("mongodb-memory-server");
+const { MongoMemoryReplSet } = require("mongodb-memory-server");
 const request = require("supertest");
 const { createApp } = require("../src/app");
 const { seedRoles } = require("../src/services/roles");
@@ -15,6 +15,8 @@ const Booking = require("../src/models/Booking");
 const Payment = require("../src/models/Payment");
 const Refund = require("../src/models/Refund");
 const { validateCoupon } = require("../src/services/promotions");
+// scripts/setup loads server/.env; never let a local PAYMENT_PROVIDER=sepay switch the gateway under the tests.
+process.env.PAYMENT_PROVIDER = "sandbox";
 const origin = "http://localhost:5173";
 const password = "StrongPass123!";
 let db,
@@ -32,12 +34,13 @@ async function login(email) {
   return agent;
 }
 before(async () => {
-  db = await MongoMemoryServer.create();
+  db = await MongoMemoryReplSet.create({ replSet: { count: 1, storageEngine: "wiredTiger" } });
   await mongoose.connect(db.getUri());
   const { bootstrap } = require("../scripts/setup");
   await bootstrap({ ADMIN_USERNAME: "admin", ADMIN_EMAIL: "admin@example.com", ADMIN_NAME: "Administrator", ADMIN_PASSWORD: password });
   await seedRoles();
   await Promise.all([User.init(), Coupon.init(), CouponUsage.init()]);
+  await Promise.all(Object.values(mongoose.models).map((model) => model.init()));
   const passwordHash = await hashPassword(password);
   for (const [username, role] of [
     ["manager", "manager"],
@@ -81,7 +84,7 @@ test("inactive roles do not prevent account and staff deactivation", async () =>
       status: "suspended",
       role: "customer",
     }).expect(200);
-    await send(manager, "delete", `/api/staff/${employee.id}`).expect(200);
+    await send(manager, "delete", `/api/staff/${employee.id}`, { reason: "Staff is on leave." }).expect(200);
     assert.equal((await User.findById(guest.id)).status, "suspended");
     assert.equal((await User.findById(employee.id)).status, "suspended");
     await send(admin, "post", "/api/users", {
@@ -136,13 +139,32 @@ test("registration validates fields, hashes credentials, ignores no privileged i
     email: "new@example.com",
     fullName: "New Guest",
     password,
+    phone: "0912345678",
     role: "admin",
+  }).expect(400);
+  // Missing phone is rejected
+  await send(request(app), "post", "/api/auth/register", {
+    username: "newguest",
+    email: "new@example.com",
+    fullName: "New Guest",
+    password,
+  }).expect(400);
+  // Password and confirmPassword mismatch is rejected
+  await send(request(app), "post", "/api/auth/register", {
+    username: "newguest",
+    email: "new@example.com",
+    fullName: "New Guest",
+    password,
+    confirmPassword: "WrongPassword123!",
+    phone: "0912345678",
   }).expect(400);
   const result = await send(request(app), "post", "/api/auth/register", {
     username: "newguest",
     email: "NEW@example.com",
     fullName: "New Guest",
     password,
+    confirmPassword: password,
+    phone: "0912345678",
   }).expect(201);
   assert.equal(result.body.data.role, "customer");
   assert.equal(result.body.data.passwordHash, undefined);
@@ -155,6 +177,7 @@ test("registration validates fields, hashes credentials, ignores no privileged i
     email: "new@example.com",
     fullName: "New Guest",
     password,
+    phone: "0912345678",
   }).expect(409);
   await send(request(app), "post", "/api/auth/register", {
     username: "bad",
@@ -183,6 +206,46 @@ test("authentication rejects bad passwords, missing sessions and foreign origins
   const agent = await login("customer@example.com");
   await send(agent, "post", "/api/auth/logout").expect(200);
   await agent.get("/api/auth/me").expect(401);
+});
+test("BR-42: 5 consecutive failed logins lock the account for 15 minutes and are audited", async () => {
+  const AuditLog = require("../src/models/AuditLog");
+  const user = await User.create({ username: "lockme", email: "lockme@example.com", passwordHash: await hashPassword(password), roleId: await roleId("customer") });
+  const attempt = (pw) => send(request(app), "post", "/api/auth/login", { email: "lockme@example.com", password: pw });
+  for (let i = 0; i < 4; i++) await attempt("wrong").expect(401);
+  const locked = await attempt("wrong").expect(423);
+  assert.match(locked.body.error.message, /locked for 15 minutes/);
+  await attempt(password).expect(423); // the right password is refused while locked
+  assert.equal(await AuditLog.countDocuments({ targetId: user._id, action: "login_failed" }), 4);
+  assert.equal(await AuditLog.countDocuments({ targetId: user._id, action: "account_locked" }), 1);
+  await User.updateOne({ _id: user._id }, { $set: { lockedUntil: new Date(Date.now() - 1000) } });
+  await attempt(password).expect(200);
+  // a successful login resets the counter
+  for (let i = 0; i < 4; i++) await attempt("wrong").expect(401);
+  await attempt(password).expect(200);
+});
+test("SRS 4.2.4: sessions expire after 15 min idle for staff and 30 min for customers, renewed on activity", async () => {
+  // express-session sends Expires, not Max-Age: round the remaining lifetime to minutes.
+  const maxAge = (res) => Math.round((Date.parse(/Expires=([^;]+)/.exec(res.headers["set-cookie"][0])[1]) - Date.now()) / 60000) * 60;
+  const staffLogin = await send(request(app), "post", "/api/auth/login", { email: "staff@example.com", password }).expect(200);
+  assert.equal(maxAge(staffLogin), 15 * 60);
+  const customerLogin = await send(request(app), "post", "/api/auth/login", { email: "customer@example.com", password }).expect(200);
+  assert.equal(maxAge(customerLogin), 30 * 60);
+  const renewed = await staff.get("/api/auth/me").expect(200);
+  assert.equal(maxAge(renewed), 15 * 60);
+});
+test("front-desk routes follow role permissions: customers cannot read guest data or run front-desk actions", async () => {
+  await customer.get("/api/front-desk/customers").expect(403);
+  await send(customer, "patch", `/api/front-desk/customers/${new mongoose.Types.ObjectId()}`, { phone: "0900000000" }).expect(403);
+  await send(customer, "post", `/api/front-desk/bookings/${new mongoose.Types.ObjectId()}/check-in`).expect(403);
+  await staff.get("/api/front-desk/customers").expect(200);
+  // UC33: removing a permission from the Receptionist role takes it away from the role's users
+  const role = await Role.findOne({ key: "receptionist" });
+  await Role.updateOne({ _id: role._id }, { $pull: { permissions: "stays.check_in" } });
+  try {
+    await send(staff, "post", `/api/front-desk/bookings/${new mongoose.Types.ObjectId()}/check-in`).expect(403);
+  } finally {
+    await Role.updateOne({ _id: role._id }, { $set: { permissions: role.permissions } });
+  }
 });
 test("profile updates only self and password change revokes other sessions", async () => {
   const a = await login("new@example.com");
@@ -219,6 +282,7 @@ test("password whitespace is preserved at login and password change", async () =
     email: "spaced@example.com",
     fullName: "Spaced Password",
     password: spaced,
+    phone: "0912345678",
   }).expect(201);
   await send(agent, "post", "/api/auth/login", {
     email: "spaced@example.com",
@@ -254,7 +318,7 @@ test("admin manages accounts, cannot demote admin; deactivation takes effect on 
   assert.equal(listing.body.data[0].passwordHash, undefined);
   await admin.get("/api/users?page=-1").expect(400);
 });
-test("role administration validates privilege scope, protects admin and applies changed permissions immediately", async () => {
+test("legacy role administration validates scope and cannot mutate fixed system roles", async () => {
   await manager.get("/api/roles").expect(403);
   await send(admin, "post", "/api/roles", {
     key: "auditor",
@@ -270,18 +334,15 @@ test("role administration validates privilege scope, protects admin and applies 
   }).expect(400);
   const r = await Role.findOne({ key: "admin" });
   await send(admin, "patch", `/api/roles/${r.id}`, { permissions: [] }).expect(
-    409,
+    403,
   );
   const managerRole = await Role.findOne({ key: "manager" });
   await send(admin, "patch", `/api/roles/${managerRole.id}`, {
     permissions: ["staff.manage", "promotions.manage"],
-  }).expect(200);
+  }).expect(403);
   await manager
     .get("/api/reports/revenue?from=2026-01-01&to=2026-01-31")
-    .expect(403);
-  await send(admin, "patch", `/api/roles/${managerRole.id}`, {
-    permissions: ["staff.manage", "promotions.manage", "revenue.read", "policies.manage"],
-  }).expect(200);
+    .expect(200);
   await send(admin, "delete", `/api/roles/${managerRole.id}`).expect(409);
   const custom = await Role.findOne({ key: "auditor" });
   await send(admin, "delete", `/api/roles/${custom.id}`).expect(200);
@@ -321,7 +382,7 @@ test("staff CRUD validates SRS contact data and blocks manager privilege escalat
     fullName: "Edited Staff",
     role: "receptionist",
   }).expect(200);
-  await send(manager, "delete", `/api/staff/${id}`).expect(200);
+  await send(manager, "delete", `/api/staff/${id}`, { reason: "Contract ended." }).expect(200);
   assert.equal((await User.findById(id)).status, "suspended");
 });
 test("promotions validate bounds, minimum spend, expiry and usage; used coupons cannot be deleted", async () => {
@@ -549,4 +610,531 @@ test("deposit policy: manager versions a percentage rule, old versions are retir
   assert.equal(list.body.meta.current._id, second.body.data._id);
   assert.equal((await currentDepositPolicy(new Date(Date.now() - 86400000))), null);
   assert.equal(list.body.data.filter((p) => p.isActive).length, 1);
+});
+
+// ---- M3 payments: UC12 deposit, UC13 final payment, UC38 gateway callback ----
+const gw = require("../src/services/gateway");
+const callbackBody = (orderId, status, amount, transactionRef = `T-${orderId}`) => {
+  const p = { orderId, transactionRef, status, amount };
+  return { ...p, signature: gw.sign(p) };
+};
+// The gateway is not a browser: no Origin header, no session.
+const hook = (body) => request(app).post("/api/payments/gateway/callback").send(body);
+async function payBooking(extra = {}) {
+  const RoomType = require("../src/models/RoomType");
+  const guest = await User.findOne({ email: "customer@example.com" });
+  const type = (await RoomType.findOne({ name: "Pay Suite" })) || (await RoomType.create({ name: "Pay Suite", basePrice: 1000, maxOccupancy: 2 }));
+  return Booking.create({
+    customerId: guest._id, createdBy: guest._id, checkInDate: "2027-05-01", checkOutDate: "2027-05-03",
+    rooms: [{ roomTypeId: type._id, priceAtBooking: 1000 }], roomAmount: 2000, totalAmount: 2000,
+    depositRequired: 600, status: "pending", holdExpiresAt: new Date(Date.now() + 15 * 60000), ...extra,
+  });
+}
+test("deposit payment: verified callback confirms the booking; forged, mismatched and repeated callbacks change nothing", async () => {
+  const Notification = require("../src/models/Notification");
+  const booking = await payBooking();
+  const url = `/api/bookings/${booking.id}/payments/deposit`;
+  await send(customer, "post", url, { method: "cash" }).expect(400);
+  await send(customer, "post", url, { method: "e_wallet", amount: 1 }).expect(400);
+  await send(manager, "post", url, { method: "e_wallet" }).expect(404);
+  const first = (await send(customer, "post", url, { method: "e_wallet" }).expect(201)).body.data;
+  assert.equal(first.amount, 600);
+  assert.match(first.payUrl, /^#\/pay\/sandbox\/ORD/);
+  assert.equal((await send(customer, "post", url, { method: "bank_transfer" }).expect(201)).body.data.orderId, first.orderId);
+
+  await hook({ ...callbackBody(first.orderId, "success", 600), signature: "00" }).expect(401);
+  await hook(callbackBody("ORDNOPE", "success", 600)).expect(404);
+  await hook(callbackBody(first.orderId, "success", 1)).expect(400);
+  assert.equal((await Booking.findById(booking.id)).status, "pending");
+  assert.equal((await Payment.findById(first.paymentId)).status, "pending");
+
+  assert.equal((await hook(callbackBody(first.orderId, "success", 600)).expect(200)).body.data.status, "success");
+  const confirmed = await Booking.findById(booking.id);
+  assert.equal(confirmed.status, "confirmed");
+  assert.equal(confirmed.holdExpiresAt, undefined);
+  assert.equal((await hook(callbackBody(first.orderId, "success", 600)).expect(200)).body.data.duplicate, true);
+  assert.equal(await Notification.countDocuments({ bookingId: booking._id, type: "booking_confirmed" }), 1);
+  assert.equal(await Notification.countDocuments({ bookingId: booking._id, type: "payment_result" }), 1);
+  await send(customer, "post", url, { method: "e_wallet" }).expect(409);
+  assert.equal((await customer.get(`/api/payments/${first.paymentId}`).expect(200)).body.data.status, "success");
+  await manager.get(`/api/payments/${first.paymentId}`).expect(404);
+});
+test("deposit payment: a declined payment can be retried; a deposit confirmed after the hold expired becomes a refund case", async () => {
+  const booking = await payBooking();
+  const start = () => send(customer, "post", `/api/bookings/${booking.id}/payments/deposit`, { method: "credit_card" });
+  const a = (await start().expect(201)).body.data;
+  assert.equal((await hook(callbackBody(a.orderId, "failed", 600)).expect(200)).body.data.status, "failed");
+  assert.equal((await Booking.findById(booking.id)).status, "pending");
+  const b = (await start().expect(201)).body.data;
+  assert.notEqual(b.orderId, a.orderId);
+
+  // Beyond the 15-minute grace a pending result gets after the hold ends (BR-29).
+  await Booking.updateOne({ _id: booking._id }, { holdExpiresAt: new Date(Date.now() - 16 * 60000) });
+  await start().expect(409);
+  await hook(callbackBody(b.orderId, "success", 600)).expect(200);
+  assert.equal((await Payment.findById(b.paymentId)).status, "success");
+  assert.notEqual((await Booking.findById(booking.id)).status, "confirmed");
+  const refund = await Refund.findOne({ bookingId: booking._id });
+  assert.equal(refund.status, "requested");
+  assert.equal(refund.amount, 600);
+});
+test("BR-14: the balance is paid only at the front desk, never online; the receptionist records it", async () => {
+  const booking = await payBooking({ status: "confirmed", holdExpiresAt: undefined });
+  await Payment.create({ bookingId: booking._id, kind: "deposit", amount: 600, method: "e_wallet", status: "success", paidAt: new Date() });
+  // there is no online final payment for the customer, and the desk route rejects them and online methods
+  await send(customer, "post", `/api/bookings/${booking.id}/payments/final`, { method: "e_wallet" }).expect(404);
+  const desk = `/api/frontdesk/bookings/${booking.id}/payments`;
+  await send(customer, "post", desk, { method: "cash" }).expect(403);
+  await send(staff, "post", desk, { method: "e_wallet" }).expect(400);
+  assert.equal(await Payment.countDocuments({ bookingId: booking._id, kind: "final" }), 0);
+
+  const cash = (await send(staff, "post", desk, { method: "cash" }).expect(201)).body.data;
+  assert.equal(cash.status, "success");
+  assert.equal(cash.amount, 1400);
+  assert.equal(cash.remaining, 0);
+  assert.equal(String((await Payment.findById(cash.paymentId)).recordedBy), String((await User.findOne({ email: "staff@example.com" }))._id));
+  const detail = (await customer.get(`/api/bookings/${booking.id}`).expect(200)).body.data;
+  assert.equal(detail.paymentStatus, "paid");
+  assert.equal(detail.paidAmount, 2000);
+  await send(staff, "post", desk, { method: "cash" }).expect(409); // nothing is left to pay
+});
+
+// ---- SePay gateway adapter (PAYMENT_PROVIDER=sepay); SePay itself is mocked ----
+const { createHmac } = require("node:crypto");
+const sepay = require("../src/services/sepay");
+async function withSepay(fn) {
+  const keys = ["PAYMENT_PROVIDER", "SEPAY_MERCHANT_ID", "SEPAY_SECRET_KEY", "PUBLIC_URL", "SEPAY_METHODS"];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  const realFetch = global.fetch;
+  const realError = console.error;
+  console.error = () => {}; // the lookup-failure tests log on purpose
+  Object.assign(process.env, { PAYMENT_PROVIDER: "sepay", SEPAY_MERCHANT_ID: "MERCH1", SEPAY_SECRET_KEY: "sekret", PUBLIC_URL: "https://shop.example" });
+  delete process.env.SEPAY_METHODS;
+  try {
+    await fn();
+  } finally {
+    for (const k of keys) saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k]);
+    global.fetch = realFetch;
+    console.error = realError;
+  }
+}
+// Fakes the SePay order lookup; returns the recorded calls.
+function mockOrder(status, amount) {
+  const calls = [];
+  global.fetch = async (url, opts) => {
+    calls.push({ url, auth: opts.headers.Authorization });
+    return { ok: true, status: 200, json: async () => ({ data: { order_status: status, order_amount: `${amount}.00`, transactions: [{ transaction_id: "TXR" }] } }) };
+  };
+  return calls;
+}
+const ipnBody = (invoice, amount, extra = {}) => ({
+  timestamp: 1757058220, notification_type: "ORDER_PAID",
+  order: { order_invoice_number: invoice, order_amount: `${amount}.00`, order_status: "CAPTURED" },
+  transaction: { transaction_id: `TX-${invoice}`, transaction_status: "APPROVED" }, ...extra,
+});
+const ipn = (body, key = "sekret") => request(app).post("/api/payments/sepay/ipn").set("X-Secret-Key", key).send(body);
+async function sepayDeposit(booking, method = "bank_transfer") {
+  return (await send(customer, "post", `/api/bookings/${booking.id}/payments/deposit`, { method }).expect(201)).body.data;
+}
+
+test("sepay: the signature follows the SePay field order and skips empty fields", () => {
+  const fields = { merchant: "M", order_amount: "1000", currency: "VND", operation: "PURCHASE", order_description: "d", order_invoice_number: "ORD1", customer_id: "", payment_method: "BANK_TRANSFER", success_url: "s" };
+  const signed = "order_amount=1000,merchant=M,currency=VND,operation=PURCHASE,order_description=d,order_invoice_number=ORD1,payment_method=BANK_TRANSFER,success_url=s";
+  assert.equal(sepay.signature(fields, "k"), createHmac("sha256", "k").update(signed).digest("base64"));
+});
+test("sepay: every attempt gets a fresh signed checkout and retires the previous order", async () => {
+  await withSepay(async () => {
+    const booking = await payBooking();
+    const url = `/api/bookings/${booking.id}/payments/deposit`;
+    assert.deepEqual((await customer.get("/api/payments/methods").expect(200)).body.data, { provider: "sepay", methods: ["bank_transfer"] });
+    await send(customer, "post", url, { method: "credit_card" }).expect(400);
+    const first = await sepayDeposit(booking);
+    assert.equal(first.payUrl, undefined);
+    const { action, fields } = first.checkout;
+    assert.equal(action, "https://pay-sandbox.sepay.vn/v1/checkout/init");
+    assert.equal(fields.order_invoice_number, first.orderId);
+    assert.equal(fields.order_amount, "600");
+    assert.equal(fields.payment_method, "BANK_TRANSFER");
+    assert.equal(fields.merchant, "MERCH1");
+    const { signature, ...rest } = fields;
+    assert.equal(signature, sepay.signature(rest, "sekret"));
+    assert.match(fields.cancel_url, /^https:\/\/shop\.example\/api\/payments\/return\?payment=[0-9a-f]{24}&r=cancel$/);
+    assert.equal(JSON.stringify(first).includes("sekret"), false);
+    const second = await sepayDeposit(booking);
+    assert.notEqual(second.orderId, first.orderId);
+    assert.equal((await Payment.findById(first.paymentId)).status, "cancelled");
+  });
+});
+test("sepay: the IPN is authenticated, checked against SePay and applied once", async () => {
+  const Notification = require("../src/models/Notification");
+  await ipn({}).expect(404); // sandbox provider: the endpoint is off
+  await withSepay(async () => {
+    const booking = await payBooking();
+    const o = await sepayDeposit(booking);
+    await ipn(ipnBody(o.orderId, 600), "wrong").expect(401);
+    await request(app).post("/api/payments/sepay/ipn").send(ipnBody(o.orderId, 600)).expect(401);
+    await ipn(ipnBody("ORDNOPE", 600)).expect(404);
+    await ipn(ipnBody(o.orderId, 1)).expect(400);
+    assert.deepEqual((await ipn({ notification_type: "TRANSACTION_VOID" }).expect(200)).body, { success: true });
+    mockOrder("AUTHENTICATION_NOT_NEEDED", 600); // SePay says: not paid yet
+    await ipn(ipnBody(o.orderId, 600)).expect(400);
+    assert.equal((await Payment.findById(o.paymentId)).status, "pending");
+    assert.equal((await Booking.findById(booking.id)).status, "pending");
+
+    const calls = mockOrder("CAPTURED", 600);
+    assert.deepEqual((await ipn(ipnBody(o.orderId, 600)).expect(200)).body, { success: true });
+    assert.equal(calls[0].url, `https://pgapi-sandbox.sepay.vn/v1/order/detail/${o.orderId}`);
+    assert.equal(calls[0].auth, `Basic ${Buffer.from("MERCH1:sekret").toString("base64")}`);
+    const paid = await Payment.findById(o.paymentId);
+    assert.equal(paid.status, "success");
+    assert.equal(paid.transactionRef, `TX-${o.orderId}`);
+    assert.equal((await Booking.findById(booking.id)).status, "confirmed");
+    await ipn(ipnBody(o.orderId, 600)).expect(200); // a retried IPN changes nothing
+    assert.equal(await Notification.countDocuments({ bookingId: booking._id, type: "booking_confirmed" }), 1);
+
+    // SePay unreachable: the key-authenticated IPN is still accepted.
+    const other = await payBooking();
+    const o2 = await sepayDeposit(other);
+    global.fetch = async () => { throw new Error("network down"); };
+    await ipn(ipnBody(o2.orderId, 600)).expect(200);
+    assert.equal((await Booking.findById(other.id)).status, "confirmed");
+
+    // A customer who kept an old QR open can still pay a retired order: the money is recorded.
+    const third = await payBooking();
+    const old = await sepayDeposit(third);
+    await sepayDeposit(third);
+    assert.equal((await Payment.findById(old.paymentId)).status, "cancelled");
+    mockOrder("CAPTURED", 600);
+    await ipn(ipnBody(old.orderId, 600)).expect(200);
+    assert.equal((await Payment.findById(old.paymentId)).status, "success");
+    assert.equal((await Booking.findById(third.id)).status, "confirmed");
+  });
+});
+test("sepay: the result screen asks SePay when no IPN arrived and stays pending if SePay is unreachable", async () => {
+  await withSepay(async () => {
+    const stale = (id) => Payment.collection.updateOne({ _id: new mongoose.Types.ObjectId(id) }, { $set: { createdAt: new Date(Date.now() - 60000) } });
+    const booking = await payBooking();
+    const o = await sepayDeposit(booking);
+    const calls = mockOrder("CAPTURED", 600);
+    assert.equal((await customer.get(`/api/payments/${o.paymentId}`).expect(200)).body.data.status, "pending");
+    assert.equal(calls.length, 0); // too fresh: give the IPN a chance first
+    await stale(o.paymentId);
+    global.fetch = async () => { throw new Error("network down"); };
+    assert.equal((await customer.get(`/api/payments/${o.paymentId}`).expect(200)).body.data.status, "pending");
+    mockOrder("CAPTURED", 600);
+    assert.equal((await customer.get(`/api/payments/${o.paymentId}`).expect(200)).body.data.status, "success");
+    assert.equal((await Booking.findById(booking.id)).status, "confirmed");
+
+    const abandoned = await payBooking();
+    const o2 = await sepayDeposit(abandoned);
+    await stale(o2.paymentId);
+    mockOrder("CANCELLED", 600);
+    const shown = (await customer.get(`/api/payments/${o2.paymentId}`).expect(200)).body.data;
+    assert.equal(shown.status, "failed");
+    assert.match(shown.failureReason, /Cancelled at the payment gateway/);
+    assert.equal(shown.gatewayOrderId, undefined);
+  });
+});
+test("sepay: the return route only opens the result screen", async () => {
+  await withSepay(async () => {
+    const id = new mongoose.Types.ObjectId().toString();
+    assert.equal((await request(app).get(`/api/payments/return?payment=${id}&r=cancel`).expect(302)).headers.location, `https://shop.example/#/pay/result?payment=${id}&r=cancel`);
+    assert.equal((await request(app).get(`/api/payments/return?payment=${id}&r=evil`).expect(302)).headers.location, `https://shop.example/#/pay/result?payment=${id}`);
+    assert.equal((await request(app).get("/api/payments/return?payment=not-an-id").expect(302)).headers.location, "https://shop.example/#/my-bookings");
+  });
+});
+
+// ---- M3 cancellation & refund: UC08, UC16, UC35, UC21, UC27, T19, T20; UC10 / UC11 / T17 additions ----
+const AuditLog = require("../src/models/AuditLog");
+const Notification = require("../src/models/Notification");
+async function paidBooking(extra = {}) {
+  const booking = await payBooking({ status: "confirmed", holdExpiresAt: undefined, ...extra });
+  await Payment.create({ bookingId: booking._id, kind: "deposit", amount: 600, method: "e_wallet", status: "success", paidAt: new Date(), transactionRef: `DEP-${booking.id}` });
+  return booking;
+}
+const tiers = (...pairs) => pairs.map(([minHoursBeforeCheckIn, refundPercent]) => ({ minHoursBeforeCheckIn, refundPercent }));
+
+test("UC27: the manager saves cancellation tiers and stay rules; bad tiers are refused (MSG-63); hotel info is public", async () => {
+  const url = "/api/policies/cancellation";
+  await send(staff, "post", url, { tiers: tiers([0, 0]) }).expect(403);
+  for (const bad of [
+    [],
+    tiers([48, 100]), // gap below 48 h
+    tiers([48, 100], [48, 0], [0, 0]), // overlap
+    tiers([48, 50], [0, 0]), // partial refund
+    tiers([48, 0], [0, 100]), // more refund closer to check-in
+  ])
+    await send(manager, "post", url, { tiers: bad }).expect(400);
+  await send(manager, "post", url, { tiers: tiers([0, 0]), checkInTime: "25:00" }).expect(400);
+  const saved = (await send(manager, "post", url, { tiers: tiers([0, 0], [48, 100]), checkInTime: "14:00", checkOutTime: "12:00", earlyCheckInFee: 200000, lateCheckOutFee: 300000 }).expect(201)).body.data;
+  assert.deepEqual(saved.cancellationTiers.map((t) => t.minHoursBeforeCheckIn), [48, 0]);
+  assert.equal(saved.lateCheckOutFee, 300000);
+  assert.equal((await manager.get(url).expect(200)).body.meta.current._id, saved._id);
+
+  await send(manager, "put", "/api/hotel-info", { name: "Hotel Sunrise", phone: "abc" }).expect(400);
+  await send(staff, "put", "/api/hotel-info", { name: "Hotel Sunrise" }).expect(403);
+  await send(manager, "put", "/api/hotel-info", { name: "Hotel Sunrise", address: "1 Le Loi", email: "hi@sunrise.vn" }).expect(200);
+  assert.equal((await request(app).get("/api/hotel-info").expect(200)).body.data.name, "Hotel Sunrise");
+});
+
+test("UC08: the customer requests a cancellation with a locked refund, withdraws it, and abandons a pending payment", async () => {
+  const booking = await paidBooking();
+  const est = (await customer.get(`/api/bookings/${booking.id}/refund-estimate`).expect(200)).body.data;
+  assert.deepEqual([est.depositPaid, est.refundPercent, est.refundableAmount], [600, 100, 600]);
+  await manager.get(`/api/bookings/${booking.id}/refund-estimate`).expect(404);
+  await send(customer, "post", `/api/bookings/${booking.id}/cancel`, { reason: 123 }).expect(400);
+  const r = (await send(customer, "post", `/api/bookings/${booking.id}/cancel`, { reason: "Plans changed" }).expect(200)).body;
+  assert.equal(r.data.status, "cancellation_requested");
+  assert.equal(r.data.refundableAmount, 600);
+  assert.match(r.message, /sent to the front desk/);
+  await send(customer, "post", `/api/bookings/${booking.id}/cancel`).expect(409);
+  assert.ok(await Notification.exists({ type: "cancellation_requested", bookingId: booking._id }));
+  assert.equal((await send(customer, "delete", `/api/bookings/${booking.id}/cancel`).expect(200)).body.data.status, "confirmed");
+  assert.equal((await Booking.findById(booking.id)).cancellation?.requestedAt, undefined);
+  await send(customer, "delete", `/api/bookings/${booking.id}/cancel`).expect(409);
+
+  // A 0% tier is still reviewed, with nothing to refund (UC08 3a).
+  const late = await paidBooking({ policySnapshot: { cancellationTiers: tiers([999999, 100], [0, 0]) } });
+  assert.equal((await send(customer, "post", `/api/bookings/${late.id}/cancel`).expect(200)).body.data.refundableAmount, 0);
+
+  // No paid deposit: cancelled at once and the coupon use is given back (BR-16, BR-09).
+  const free = await payBooking({ status: "confirmed", holdExpiresAt: undefined, depositRequired: 0 });
+  const coupon = await Coupon.create({ code: "BACK10", discountValue: 10, usageLimit: 5, usageCount: 1 });
+  await CouponUsage.create({ couponId: coupon._id, bookingId: free._id, customerId: free.customerId });
+  const f = (await send(customer, "post", `/api/bookings/${free.id}/cancel`).expect(200)).body;
+  assert.equal(f.data.status, "cancelled");
+  assert.match(f.message, /cancelled successfully/);
+  assert.equal((await Coupon.findById(coupon._id)).usageCount, 0);
+  assert.equal(await CouponUsage.exists({ bookingId: free._id }), null);
+  await send(customer, "post", `/api/bookings/${free.id}/cancel`).expect(409);
+
+  // Pending Payment: only "Cancel payment"; a result that still arrives becomes a late-deposit refund case.
+  const pending = await payBooking();
+  await send(customer, "post", `/api/bookings/${pending.id}/cancel`).expect(409);
+  const o = (await send(customer, "post", `/api/bookings/${pending.id}/payments/deposit`, { method: "e_wallet" }).expect(201)).body.data;
+  assert.equal((await send(customer, "post", `/api/bookings/${pending.id}/cancel-payment`).expect(200)).body.data.status, "expired");
+  assert.equal((await Payment.findById(o.paymentId)).status, "cancelled");
+  await hook(callbackBody(o.orderId, "success", 600)).expect(200);
+  assert.equal((await Booking.findById(pending.id)).status, "expired");
+  assert.equal((await Payment.findById(o.paymentId)).isLateDeposit, true);
+  assert.ok(await Refund.exists({ paymentId: o.paymentId, status: "requested" }));
+  await send(customer, "post", `/api/bookings/${pending.id}/cancel-payment`).expect(409);
+});
+
+test("UC35 / T20: the receptionist approves a request and a refund case opens; undecided requests are approved automatically", async () => {
+  const booking = await paidBooking();
+  await send(customer, "post", `/api/bookings/${booking.id}/cancel`, { reason: "Sick" }).expect(200);
+  await customer.get("/api/frontdesk/cancellations").expect(403);
+  const row = (await staff.get("/api/frontdesk/cancellations").expect(200)).body.data.find((b) => b._id === booking.id);
+  assert.equal(row.depositPaid, 600);
+  assert.equal(row.cancellation.refundableAmount, 600);
+  assert.equal(row.cancellation.reason, "Sick");
+  assert.equal(row.booker.email, "customer@example.com");
+  await send(customer, "post", `/api/frontdesk/cancellations/${booking.id}/approve`).expect(403);
+  const a = (await send(staff, "post", `/api/frontdesk/cancellations/${booking.id}/approve`).expect(200)).body;
+  assert.equal(a.data.status, "cancelled");
+  assert.match(a.message, /waiting for refund/);
+  await send(staff, "post", `/api/frontdesk/cancellations/${booking.id}/approve`).expect(409);
+  const refund = await Refund.findOne({ bookingId: booking._id });
+  assert.deepEqual([refund.amount, refund.status], [600, "requested"]);
+  assert.match((await Notification.findOne({ type: "cancellation_approved", bookingId: booking._id })).message, /contact you/);
+  const detail = (await customer.get(`/api/bookings/${booking.id}`).expect(200)).body.data;
+  assert.equal(detail.refunds[0].status, "requested");
+  assert.equal(detail.cancellationOtp, undefined);
+
+  const old = await paidBooking();
+  const fresh = await paidBooking();
+  const arriving = await paidBooking({ checkInDate: new Date(Date.now() - 864e5), checkOutDate: new Date(Date.now() + 864e5) });
+  for (const b of [old, fresh, arriving]) await send(customer, "post", `/api/bookings/${b.id}/cancel`).expect(200);
+  await Booking.updateOne({ _id: old._id }, { "cancellation.requestedAt": new Date(Date.now() - 25 * 3600000) });
+  const { autoApprove } = require("../src/services/cancellations");
+  assert.equal((await autoApprove(new Date())).approved, 2);
+  assert.equal((await Booking.findById(old.id)).status, "cancelled");
+  assert.equal((await Booking.findById(old.id)).cancellation.autoApproved, true);
+  assert.equal((await Booking.findById(arriving.id)).status, "cancelled"); // check-in time passed
+  assert.equal((await Booking.findById(fresh.id)).status, "cancellation_requested");
+  assert.ok(await AuditLog.exists({ action: "cancellation.approved_automatically", targetId: old._id }));
+  assert.equal((await autoApprove(new Date())).approved, 0);
+});
+
+test("jobs endpoint: off without JOB_SECRET, then needs the secret", async () => {
+  const saved = process.env.JOB_SECRET;
+  delete process.env.JOB_SECRET;
+  try {
+    await request(app).post("/api/jobs/cancellation-auto-approval").expect(404);
+    process.env.JOB_SECRET = "job-secret-value";
+    await request(app).post("/api/jobs/cancellation-auto-approval").set("X-Job-Secret", "wrong").expect(401);
+    await request(app).post("/api/jobs/toString").set("X-Job-Secret", "job-secret-value").expect(404);
+    const ok = await request(app).post("/api/jobs/cancellation-auto-approval").set("X-Job-Secret", "job-secret-value").expect(200);
+    assert.equal(typeof ok.body.data.approved, "number");
+  } finally {
+    saved === undefined ? delete process.env.JOB_SECRET : (process.env.JOB_SECRET = saved);
+  }
+});
+
+test("UC16 / T19: the front desk records a cancellation after the ID check or a phone OTP; a hotel-caused one is refunded in full at once", async () => {
+  const { setTransport } = require("../src/services/notifications");
+  const mails = [];
+  setTransport({ sendMail: async (m) => mails.push(m) });
+  const codeOf = () => mails.at(-1).text.match(/is (\d{6})\./)[1];
+  try {
+    const booking = await paidBooking({ bookingReference: "FD1001" });
+    const found = (await staff.get("/api/frontdesk/cancellations/lookup?q=fd1001").expect(200)).body.data;
+    assert.equal(found.length, 1);
+    assert.equal(found[0].estimate.refundableAmount, 600);
+    assert.equal(found[0].booker.name, "customer");
+    await customer.get("/api/frontdesk/cancellations/lookup?q=fd1001").expect(403);
+    const url = "/api/frontdesk/cancellations";
+    const body = (extra) => ({ bookingId: booking.id, reason: "Guest called", ...extra });
+    await send(staff, "post", url, body({ reason: " ", verifyMethod: "id_document" })).expect(400); // MSG-04
+    await send(staff, "post", url, body({})).expect(400); // no verification
+    await send(staff, "post", url, body({ verifyMethod: "otp", otp: "123456" })).expect(400); // no code sent yet
+    await send(staff, "post", `/api/frontdesk/bookings/${booking.id}/cancel-otp`).expect(200);
+    assert.equal(mails.at(-1).to, "customer@example.com");
+    const first = codeOf();
+    const wrong = first === "000000" ? "111111" : "000000";
+    for (let i = 0; i < 5; i++) await send(staff, "post", url, body({ verifyMethod: "otp", otp: wrong })).expect(400);
+    await send(staff, "post", url, body({ verifyMethod: "otp", otp: first })).expect(400); // locked after 5 wrong entries
+    await send(staff, "post", `/api/frontdesk/bookings/${booking.id}/cancel-otp`).expect(200);
+    assert.equal((await send(staff, "post", url, body({ verifyMethod: "otp", otp: codeOf() })).expect(201)).body.data.status, "cancellation_requested");
+    const saved = await Booking.findById(booking.id);
+    assert.deepEqual([saved.cancellation.verifyMethod, saved.cancellation.channel], ["otp", "front_desk"]);
+    assert.ok(await AuditLog.exists({ action: "cancellation.requested", targetId: booking._id }));
+    await send(staff, "post", url, body({ verifyMethod: "id_document" })).expect(409); // already waiting for review
+
+    const walkIn = await payBooking({ status: "confirmed", holdExpiresAt: undefined, depositRequired: 0, bookingSource: "front_desk" });
+    await send(staff, "post", `/api/frontdesk/bookings/${walkIn.id}/cancel-otp`).expect(400);
+    assert.equal((await send(staff, "post", url, { bookingId: walkIn.id, reason: "Left", verifyMethod: "id_document" }).expect(201)).body.data.status, "cancelled");
+
+    const hotel = await paidBooking({ policySnapshot: { cancellationTiers: tiers([0, 0]) } });
+    const h = (await send(staff, "post", url, { bookingId: hotel.id, hotelCaused: true }).expect(201)).body.data;
+    assert.deepEqual([h.status, h.refundableAmount], ["cancelled", 600]);
+    const hb = await Booking.findById(hotel.id);
+    assert.equal(hb.cancellationReason, "Hotel cannot provide the room");
+    assert.equal(String(hb.cancellation.approvedBy), String((await User.findOne({ username: "staff" }))._id));
+    assert.equal((await Refund.findOne({ bookingId: hotel._id })).amount, 600);
+  } finally {
+    setTransport(null);
+  }
+});
+
+test("UC21: the receptionist enters the customer's bank account, notes contact attempts and records the transfer once", async () => {
+  const booking = await paidBooking();
+  await send(customer, "post", `/api/bookings/${booking.id}/cancel`).expect(200);
+  await send(staff, "post", `/api/frontdesk/cancellations/${booking.id}/approve`).expect(200);
+  const r = (await staff.get("/api/frontdesk/refunds").expect(200)).body.data.find((x) => x.booking._id === booking.id);
+  assert.deepEqual([r.amount, r.booker.phone, r.account], [600, "0912345678", null]);
+  await customer.get("/api/frontdesk/refunds").expect(403);
+  const url = `/api/frontdesk/refunds/${r._id}`;
+  await send(staff, "post", url, { bankTransactionCode: "FT123" }).expect(409); // account first
+  await send(staff, "post", `${url}/contacts`, { note: "No answer" }).expect(201);
+  await send(staff, "put", `${url}/account`, { bank: "VCB", accountNumber: "0123456789", holderName: "Someone Else" }).expect(400); // MSG-84
+  await send(staff, "put", `${url}/account`, { bank: "VCB", accountNumber: "12ab34", holderName: "customer" }).expect(400);
+  const acc = (await send(staff, "put", `${url}/account`, { bank: "Vietcombank", accountNumber: "0123456789", holderName: "Customer" }).expect(200)).body.data;
+  assert.deepEqual([acc.account.accountNumber, acc.account.holderName, acc.contacts[0].note], ["0123456789", "CUSTOMER", "No answer"]);
+  const stored = await Refund.findById(r._id);
+  assert.equal(stored.bankAccount.accountNumber.includes("0123456789"), false); // encrypted at rest
+  const done = (await send(staff, "post", url, { bankTransactionCode: "FT26110100001", note: "Sent" }).expect(200)).body;
+  assert.equal(done.data.status, "completed");
+  assert.match(done.message, /Refund recorded/);
+  assert.equal((await Payment.findById(stored.paymentId)).refundedAmount, 600);
+  await send(staff, "post", url, { bankTransactionCode: "FT2" }).expect(409);
+  assert.match((await Notification.findOne({ type: "refund_completed", bookingId: booking._id })).message, /FT26110100001/);
+  assert.ok((await staff.get("/api/frontdesk/refunds?status=completed").expect(200)).body.data.some((x) => x._id === r._id));
+  assert.equal((await customer.get(`/api/bookings/${booking.id}`).expect(200)).body.data.refunds[0].bankTransactionCode, "FT26110100001");
+
+  // A deposit is refunded only once (MSG-42).
+  const dup = await Refund.create({ paymentId: stored.paymentId, bookingId: booking._id, amount: 600, status: "requested", bankAccount: stored.bankAccount });
+  await send(staff, "post", `/api/frontdesk/refunds/${dup.id}`, { bankTransactionCode: "FT3" }).expect(409);
+  assert.equal((await Refund.findById(dup.id)).status, "requested");
+});
+
+test("UC11: the receptionist splits the balance over cash, POS and transfer until it is 0", async () => {
+  const booking = await paidBooking({ status: "checked_in" });
+  const url = `/api/frontdesk/bookings/${booking.id}/payments`;
+  await send(customer, "post", url, { method: "cash" }).expect(403);
+  await send(customer, "post", `/api/bookings/${booking.id}/payments/final`, { method: "e_wallet", amount: 100 }).expect(404);
+  await send(staff, "post", url, { method: "cash", amount: 1401 }).expect(400);
+  await send(staff, "post", url, { method: "pos", amount: 400 }).expect(400); // slip reference required
+  assert.equal((await send(staff, "post", url, { method: "cash", amount: 400 }).expect(201)).body.data.remaining, 1000);
+  assert.equal((await send(staff, "post", url, { method: "pos", amount: 600, transactionRef: "POS-778" }).expect(201)).body.data.remaining, 400);
+  const last = (await send(staff, "post", url, { method: "bank_transfer", transactionRef: "FT-99" }).expect(201)).body.data;
+  assert.deepEqual([last.amount, last.remaining], [400, 0]);
+  await send(staff, "post", url, { method: "cash" }).expect(409);
+  assert.equal(await AuditLog.countDocuments({ action: "payment.recorded", "detail.bookingId": booking._id }), 3);
+});
+
+test("UC10: a deposit already pending at the gateway when the hold ends still confirms within 15 more minutes", async () => {
+  const booking = await payBooking();
+  const o = (await send(customer, "post", `/api/bookings/${booking.id}/payments/deposit`, { method: "e_wallet" }).expect(201)).body.data;
+  await Payment.collection.updateOne({ _id: new mongoose.Types.ObjectId(o.paymentId) }, { $set: { createdAt: new Date(Date.now() - 10 * 60000) } });
+  await Booking.updateOne({ _id: booking._id }, { holdExpiresAt: new Date(Date.now() - 5 * 60000) });
+  await hook(callbackBody(o.orderId, "success", 600)).expect(200);
+  assert.equal((await Booking.findById(booking.id)).status, "confirmed");
+  assert.equal(await Refund.exists({ bookingId: booking._id }), null);
+});
+
+test("T17: the daily reconciliation settles SePay orders whose IPN never arrived", async () => {
+  const { reconcileDaily } = require("../src/services/payments");
+  assert.deepEqual(await reconcileDaily(new Date()), { checked: 0, settled: 0 }); // sandbox: nothing to ask
+  await withSepay(async () => {
+    const booking = await payBooking();
+    const o = await sepayDeposit(booking);
+    // Every order is captured, each with its own transaction id.
+    global.fetch = async (url) => ({ ok: true, status: 200, json: async () => ({ data: { order_status: "CAPTURED", order_amount: "600.00", transactions: [{ transaction_id: `TX-${url.split("/").pop()}` }] } }) });
+    const first = await reconcileDaily(new Date());
+    assert.ok(first.checked >= 1 && first.settled >= 1, JSON.stringify(first));
+    assert.equal((await Payment.findById(o.paymentId)).status, "success");
+    assert.equal((await Booking.findById(booking.id)).status, "confirmed");
+    assert.equal((await reconcileDaily(new Date())).settled, 0);
+  });
+});
+
+// Runs last: it changes the customer password, which ends the shared customer session.
+test("forgot password generates token, rejects invalid/expired token, resets password and updates authVersion", async () => {
+  await send(request(app), "post", "/api/auth/forgot-password", {
+    email: "nonexistent@example.com",
+  }).expect(200);
+
+  const res = await send(request(app), "post", "/api/auth/forgot-password", {
+    email: "customer@example.com",
+  }).expect(200);
+  assert.ok(res.body.data.resetToken);
+  const token = res.body.data.resetToken;
+
+  await send(request(app), "post", "/api/auth/reset-password", {
+    email: "customer@example.com",
+    token: "WRONGTOKEN",
+    newPassword: "BrandNewPass123!",
+  }).expect(400);
+
+  await send(request(app), "post", "/api/auth/reset-password", {
+    email: "customer@example.com",
+    token,
+    newPassword: "BrandNewPass123!",
+    confirmPassword: "DifferentPass123!",
+  }).expect(400);
+
+  await send(request(app), "post", "/api/auth/reset-password", {
+    email: "customer@example.com",
+    token,
+    newPassword: "BrandNewPass123!",
+    confirmPassword: "BrandNewPass123!",
+  }).expect(200);
+
+  await send(request(app), "post", "/api/auth/reset-password", {
+    email: "customer@example.com",
+    token,
+    newPassword: "AnotherPass123!",
+  }).expect(400);
+
+  await send(request(app), "post", "/api/auth/login", {
+    email: "customer@example.com",
+    password,
+  }).expect(401);
+
+  await send(request(app), "post", "/api/auth/login", {
+    email: "customer@example.com",
+    password: "BrandNewPass123!",
+  }).expect(200);
 });

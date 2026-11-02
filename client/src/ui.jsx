@@ -44,14 +44,15 @@ export function useApi(path, enabled = true) {
 }
 
 export function DataTable({ cols, rows }) {
-  const words = /^(confirmed|checked_in|checked_out|cancelled|pending|active|inactive|paid|done|in_progress|open|resolved|high|medium|low|published|suspended|deleted)$/;
+  const words = /^(confirmed|cancellation_requested|checked_in|checked_out|cancelled|pending|active|inactive|paid|done|in_progress|open|resolved|high|medium|low|published|suspended|deleted)$/;
+  const figures = /^[\d\s.,:/₫$%+\-–→]+$/; // dates, times and amounts must not wrap
   return (
     <div className="table-wrap">
       <table>
         <thead><tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i}>{r.map((c, j) => <td key={j}>{typeof c === 'string' && words.test(c) ? <Badge v={c} /> : c}</td>)}</tr>
+            <tr key={i}>{r.map((c, j) => <td key={j} className={typeof c === 'string' && figures.test(c) ? 'nw' : undefined}>{typeof c === 'string' && words.test(c) ? <Badge v={c} /> : c}</td>)}</tr>
           ))}
         </tbody>
       </table>

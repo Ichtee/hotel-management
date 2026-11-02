@@ -18,7 +18,15 @@ const schema = new Schema({
   gatewayRefundId: String,
   idempotencyKey: { type: String, unique: true, sparse: true },
   failureReason: String,
-  processedAt: Date
+  processedAt: Date,
+  // UC21: obtained by the Receptionist from the customer; accountNumber is encrypted at rest.
+  bankAccount: {
+    bank: String, accountNumber: String, holderName: String,
+    enteredBy: { type: Schema.Types.ObjectId, ref: 'User' }, enteredAt: Date
+  },
+  contacts: [{ note: String, by: { type: Schema.Types.ObjectId, ref: 'User' }, at: { type: Date, default: Date.now } }],
+  bankTransactionCode: String,
+  note: String
 }, { timestamps: true });
 
 schema.index({ gateway: 1, gatewayRefundId: 1 }, {

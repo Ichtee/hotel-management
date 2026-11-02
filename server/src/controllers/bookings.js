@@ -12,7 +12,7 @@ function paymentStatus(booking, payments) {
   return { paidAmount: paid, paymentStatus: status };
 }
 // BR-26: a customer reaches only their own bookings.
-const mine = (req, id) => ({ ...(id ? { _id: v.id(id) } : {}), customerId: req.user._id });
+const mine = (req, id) => req.role.key === "receptionist" ? { ...(id ? { _id: v.id(id) } : {}) } : { ...(id ? { _id: v.id(id) } : {}), customerId: req.user._id };
 // UC10 View Booking History.
 async function listing(req, res) {
   const filter = mine(req);
@@ -21,7 +21,7 @@ async function listing(req, res) {
   const { page, limit } = v.pagination(req.query);
   const [rows, total] = await Promise.all([
     Booking.find(filter)
-      .select("bookingReference status checkInDate checkOutDate rooms roomAmount totalAmount depositRequired currency createdAt")
+      .select("bookingReference guestName guestPhone status checkInDate checkOutDate rooms roomAmount totalAmount depositRequired holdExpiresAt currency createdAt")
       .populate("rooms.roomTypeId", "name images")
       .sort({ createdAt: -1, _id: -1 })
       .skip((page - 1) * limit)
@@ -39,14 +39,14 @@ async function listing(req, res) {
 // UC11 View Booking Details: staff-only audit fields stay hidden.
 async function detail(req, res) {
   const booking = await Booking.findOne(mine(req, req.params.id))
-    .select("-events -createdBy -checkedInBy -checkedOutBy")
+    .select(req.role.key === "receptionist" ? "+guestIdDocumentNo -events -createdBy -checkedInBy -checkedOutBy" : "-events -createdBy -checkedInBy -checkedOutBy")
     .populate("rooms.roomTypeId", "name images")
     .populate("rooms.roomId", "roomNumber floor")
     .lean();
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   const [payments, refunds] = await Promise.all([
     Payment.find({ bookingId: booking._id }).select("kind amount currency method status paidAt createdAt").sort({ createdAt: 1 }).lean(),
-    Refund.find({ bookingId: booking._id }).select("amount currency status reason processedAt createdAt").sort({ createdAt: 1 }).lean(),
+    Refund.find({ bookingId: booking._id }).select("amount currency status reason bankTransactionCode processedAt createdAt").sort({ createdAt: 1 }).lean(),
   ]);
   res.json({ data: { ...booking, ...paymentStatus(booking, payments), payments, refunds } });
 }

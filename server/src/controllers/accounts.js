@@ -2,16 +2,19 @@ const User = require("../models/User");
 const Role = require("../models/Role");
 const v = require("../utils/validation");
 const { hashPassword } = require("../utils/password");
-// Users store roleId; the API keeps exposing the role key (e.g. "manager").
+// Lọc dữ liệu xác thực và giữ tên vai trò trong phản hồi.
 const safe = (user, role) => {
   const data = { ...user.toObject(), role: role.key };
   delete data.passwordHash;
   delete data.authVersion;
+  delete data.passwordReset;
   if (data.customerProfile) delete data.customerProfile.idDocumentNo;
   return data;
 };
 const staffRoles = ["receptionist", "housekeeping"];
+// Lấy mã vai trò theo danh sách tên đã kiểm tra.
 const roleIds = (keys) => Role.find({ key: { $in: keys } }).distinct("_id");
+// Tìm vai trò hợp lệ trước khi gán tài khoản.
 async function roleFor(key, requireActive = true) {
   const role = await Role.findOne({
     key,
@@ -20,6 +23,7 @@ async function roleFor(key, requireActive = true) {
   if (!role) v.fail("Select an active role.", "role");
   return role;
 }
+// Kiểm tra các trường cập nhật của API tài khoản cũ.
 function editable(body, isStaff, creating) {
   const allowed = [
     "fullName",
@@ -57,6 +61,7 @@ function editable(body, isStaff, creating) {
     out.hireDate = body.hireDate ? v.date(body.hireDate, "hireDate") : null;
   return out;
 }
+// Gán các trường đã được kiểm tra vào tài khoản.
 function apply(user, data) {
   for (const key of ["username", "email", "phone", "status"])
     if (data[key] !== undefined) user[key] = data[key];
@@ -65,6 +70,7 @@ function apply(user, data) {
   for (const key of ["position", "shift", "hireDate"])
     if (data[key] !== undefined) user.employeeProfile[key] = data[key];
 }
+// Chặn thông tin nhân sự trên vai trò ngoài khách sạn.
 function checkEmployment(body, role) {
   if (role.scope !== "hotel") {
     for (const field of ["position", "shift", "hireDate"])
@@ -72,6 +78,7 @@ function checkEmployment(body, role) {
         v.fail("Employment details require a hotel role.", field);
   }
 }
+// Liệt kê tài khoản theo phạm vi và bộ lọc cho phép.
 const listing = (isStaff) => async (req, res) => {
   const regex = v.search(req.query);
   const filter = {
@@ -82,12 +89,15 @@ const listing = (isStaff) => async (req, res) => {
     ],
   };
   if (isStaff) filter.roleId = { $in: await roleIds(staffRoles) };
+  else filter.roleId = { $nin: await roleIds(staffRoles) };
   if (req.query.status)
     filter.status = v.choice(req.query.status, "status", [
       "active",
       "suspended",
       "deleted",
     ]);
+  if (!isStaff && staffRoles.includes(req.query.role))
+    throw new v.HttpError(403, "Staff accounts use the Hotel Manager API.");
   if (req.query.role)
     filter.roleId = {
       $in: await roleIds([
@@ -103,9 +113,12 @@ const listing = (isStaff) => async (req, res) => {
   for (const u of result.data) u.role = keys.get(String(u.roleId));
   res.json(result);
 };
+// Tạo tài khoản và chặn đường vòng quản lý nhân viên qua API cũ.
 const create = (isStaff) => async (req, res) => {
   const data = editable(req.body, isStaff, true);
   const role = await roleFor(data.role || "customer");
+  if (!isStaff && staffRoles.includes(role.key))
+    throw new v.HttpError(403, "Staff accounts must be managed by the Hotel Manager through /api/staff.");
   checkEmployment(req.body, role);
   if (isStaff) v.choice(role.key, "role", staffRoles);
   if (role.scope === "hotel") data.phone = v.phone(req.body.phone, true);
@@ -117,6 +130,7 @@ const create = (isStaff) => async (req, res) => {
   await user.save();
   res.status(201).json({ data: safe(user, role) });
 };
+// Cập nhật tài khoản và thu hồi phiên khi quyền truy cập thay đổi.
 const update = (isStaff) => async (req, res) => {
   const data = editable(req.body, isStaff, false);
   const filter = { _id: v.id(req.params.id) };
@@ -124,6 +138,8 @@ const update = (isStaff) => async (req, res) => {
   const user = await User.findOne(filter).select("+authVersion");
   if (!user) throw new v.HttpError(404, "Account not found.");
   const currentKey = (await Role.findById(user.roleId).select("key"))?.key;
+  if (!isStaff && (staffRoles.includes(currentKey) || staffRoles.includes(data.role)))
+    throw new v.HttpError(403, "Staff accounts must be managed by the Hotel Manager through /api/staff.");
   if (
     currentKey === "admin" &&
     ((data.role && data.role !== "admin") ||
@@ -151,10 +167,7 @@ const update = (isStaff) => async (req, res) => {
   await user.save();
   res.json({ data: safe(user, role) });
 };
-async function deactivateStaff(req, res) {
-  req.body = { status: "suspended" };
-  return update(true)(req, res);
-}
+// Trả các vai trò phù hợp với tài khoản hiện tại.
 async function options(req, res) {
   const roles = await Role.find({
     isActive: true,
@@ -164,4 +177,4 @@ async function options(req, res) {
     .lean();
   res.json({ data: { roles } });
 }
-module.exports = { listing, create, update, deactivateStaff, options };
+module.exports = { listing, create, update, options };

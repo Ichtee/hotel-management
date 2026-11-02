@@ -1,7 +1,8 @@
 const Role = require("../models/Role");
 const User = require("../models/User");
 const v = require("../utils/validation");
-const { catalog } = require("../services/roles");
+const { catalog, defaults } = require("../services/roles");
+// Kiểm tra cấu hình vai trò theo phạm vi cho phép.
 function validate(body, current) {
   v.keys(
     body,
@@ -44,23 +45,29 @@ function validate(body, current) {
     throw new v.HttpError(409, "Administrator access must remain enabled.");
   return data;
 }
+// Liệt kê cấu hình vai trò cho API quản trị hiện có.
 async function list(req, res) {
   res.json({
     data: await Role.find().sort({ isSystem: -1, name: 1 }).lean(),
     meta: { permissions: catalog },
   });
 }
+// Tạo vai trò tùy chỉnh, không thay thế vai trò hệ thống.
 async function create(req, res) {
   const role = await Role.create(validate(req.body));
   res.status(201).json({ data: role });
 }
+// Chặn sửa vai trò hệ thống qua API quản trị cũ.
 async function update(req, res) {
   const role = await Role.findById(v.id(req.params.id));
   if (!role) throw new v.HttpError(404, "Role not found.");
+  if (defaults.some((r) => r.key === role.key))
+    throw new v.HttpError(403, "System roles are fixed. Staff permissions use the Hotel Manager API.");
   Object.assign(role, validate(req.body, role));
   await role.save();
   res.json({ data: role });
 }
+// Chỉ xóa vai trò tùy chỉnh chưa được sử dụng.
 async function remove(req, res) {
   const role = await Role.findById(v.id(req.params.id));
   if (!role) throw new v.HttpError(404, "Role not found.");

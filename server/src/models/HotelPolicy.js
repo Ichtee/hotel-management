@@ -15,6 +15,11 @@ const schema = new Schema({
     value: { type: Number, min: 0 }
   },
   cancellationTiers: [cancellationTierSchema],
+  // Stay rules saved with the cancellation policy (UC27, CR-19).
+  checkInTime: { type: String, match: /^([01]\d|2[0-3]):[0-5]\d$/ },
+  checkOutTime: { type: String, match: /^([01]\d|2[0-3]):[0-5]\d$/ },
+  earlyCheckInFee: { type: Number, min: 0 },
+  lateCheckOutFee: { type: Number, min: 0 },
   effectiveFrom: { type: Date, required: true },
   effectiveTo: Date,
   isActive: { type: Boolean, default: true }

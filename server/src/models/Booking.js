@@ -32,7 +32,7 @@ const bookingEventSchema = new Schema({
 
 const schema = new Schema({
   bookingReference: { type: String, unique: true, sparse: true, uppercase: true, trim: true },
-  customerId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
+  customerId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
   createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   checkInDate: { type: Date, required: true },
   checkOutDate: { type: Date, required: true },
@@ -43,25 +43,39 @@ const schema = new Schema({
   holdExpiresAt: Date, // BR-29: pending online bookings hold the room for 15 minutes
   cancelledAt: Date,
   cancellationReason: String,
+
+  // BR-32 / BR-36 / BR-37: cancellation request, locked refundable amount and approval
+  cancellation: {
+    requestedAt: Date,
+    requestedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    channel: { type: String, enum: ['online', 'front_desk'] },
+    verifyMethod: { type: String, enum: ['login', 'otp', 'id_document', 'hotel'] },
+    reason: String,
+    refundableAmount: { type: Number, default: 0, min: 0 },
+    hotelCaused: Boolean,
+    approvedAt: Date,
+    approvedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    autoApproved: { type: Boolean, default: false }
+  },
+
+  // BR-42: one-time code of a cancellation requested by phone.
+  cancellationOtp: { type: new Schema({ hash: String, expiresAt: Date, attempts: Number }, { _id: false }), select: false },
+  // Front-desk walk-in cancellation fields
+  cancellationRequestedAt: Date,
+  cancellationVerification: { type: String, enum: ['front_desk_id', 'phone_otp'] },
+  refundableAmount: { type: Number, default: 0, min: 0 },
   refundAccount: {
     bank: { type: String, trim: true },
     accountNumber: { type: String, trim: true },
     holderName: { type: String, trim: true },
+    accountHolderName: { type: String, trim: true },
     status: { type: String, enum: ['declared', 'needs_correction'], default: 'declared' },
     reason: String
   },
-  cancellation: {
-    requestedAt: Date,
-    reason: String,
-    requestedBy: { type: Schema.Types.ObjectId, ref: 'User' },
-    refundableAmount: { type: Number, default: 0, min: 0 },
-    autoApproved: { type: Boolean, default: false },
-    approvedAt: Date,
-    approvedBy: { type: Schema.Types.ObjectId, ref: 'User' }
-  },
+
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled', 'expired', 'cancellation_requested'],
+    enum: ['pending', 'confirmed', 'cancellation_requested', 'checked_in', 'checked_out', 'cancelled', 'expired'],
     default: 'pending', index: true
   },
   rooms: {
@@ -84,6 +98,8 @@ const schema = new Schema({
   events: [bookingEventSchema],
   guestName: { type: String, trim: true },
   guestPhone: String,
+  guestEmail: String,
+  guestIdDocumentNo: { type: String, select: false },
   couponCode: { type: String, uppercase: true, trim: true },
   discountAmount: { type: Number, default: 0, min: 0 },
   roomAmount: { type: Number, required: true, min: 0 },
@@ -112,6 +128,7 @@ schema.path('checkOutDate').validate(function (value) {
 schema.index({ status: 1, checkInDate: 1, checkOutDate: 1 });
 schema.index({ status: 1, holdExpiresAt: 1 });
 schema.index({ 'rooms.roomId': 1, status: 1, checkInDate: 1, checkOutDate: 1 });
+schema.index({ 'rooms.roomTypeId': 1, status: 1, checkOutDate: 1 });
 schema.index({ customerId: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Booking', schema);

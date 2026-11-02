@@ -6,6 +6,7 @@ const schema = new Schema({
   name: { type: String, required: true, trim: true },
   scope: { type: String, enum: ['self', 'hotel', 'system'], default: 'self' },
   permissions: { type: [String], default: [] },
+  authVersion: { type: Number, default: 0 },
   isSystem: { type: Boolean, default: false },
   isActive: { type: Boolean, default: true }
 }, { timestamps: true });

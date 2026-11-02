@@ -184,7 +184,7 @@ class RoomService {
 
       // Find conflicting bookings
       const conflictingBookings = await Booking.find({
-        status: { $in: ['pending', 'confirmed', 'checked_in'] },
+        status: { $in: ['pending', 'confirmed', 'cancellation_requested', 'checked_in'] },
         checkInDate: { $lt: outDate },
         checkOutDate: { $gt: inDate }
       }).select('rooms.roomId');
@@ -226,7 +226,7 @@ class RoomService {
     const outDate = new Date(checkOutDate);
 
     const query = {
-      status: { $in: ['pending', 'confirmed', 'checked_in'] },
+      status: { $in: ['pending', 'confirmed', 'cancellation_requested', 'checked_in'] },
       'rooms.roomId': room._id,
       checkInDate: { $lt: outDate },
       checkOutDate: { $gt: inDate }
@@ -261,7 +261,7 @@ class RoomService {
 
     // Find conflicting bookings for these candidate rooms
     const bookingQuery = {
-      status: { $in: ['pending', 'confirmed', 'checked_in'] },
+      status: { $in: ['pending', 'confirmed', 'cancellation_requested', 'checked_in'] },
       'rooms.roomId': { $in: candidateIds },
       checkInDate: { $lt: outDate },
       checkOutDate: { $gt: inDate }

@@ -7,9 +7,16 @@ const userSchema = new Schema({
   roleId: { type: Schema.Types.ObjectId, ref: 'Role', required: true, index: true },
   phone: String,
   status: { type: String, enum: ['active', 'suspended', 'deleted'], default: 'active' },
+  blacklistReason: String,
+  blacklistedAt: Date,
   lastLogin: Date,
-  passwordReset: { tokenHash: { type: String, select: false }, expiresAt: Date }, // Forgot Password (UC02)
+  passwordReset: { tokenHash: { type: String, select: false }, expiresAt: Date },
   authVersion: { type: Number, default: 0, select: false },
+  // BR-42: 5 consecutive failed logins lock the account for 15 minutes.
+  failedLogins: { type: Number, default: 0, select: false },
+  lockedUntil: { type: Date, select: false },
+  mustChangePassword: { type: Boolean, default: false },
+  statusReason: { type: String, trim: true, maxlength: 500 },
   customerProfile: { fullName: String, address: String, dateOfBirth: Date, loyaltyPoints: { type: Number, default: 0, min: 0 }, idDocumentNo: { type: String, select: false } },
   employeeProfile: { position: String, hireDate: Date, shift: String }
 }, { timestamps: true });

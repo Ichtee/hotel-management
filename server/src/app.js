@@ -25,6 +25,7 @@ const { revenue } = require("./controllers/revenue");
 const { occupancy } = require("./controllers/occupancy");
 const roomIssues = require("./controllers/roomIssues");
 const stayRequests = require("./controllers/stayRequests");
+const invoices = require("./controllers/invoices");
 const housekeepingTasks = require("./controllers/housekeepingTasks");
 const { HttpError } = require("./utils/validation");
 
@@ -238,6 +239,8 @@ function createApp({
   // SRS 2.4.3 permissions (UC33 lets the manager change them).
   const settle = permit("payments.settle"), cancel = permit("bookings.managed.cancel"), review = permit("cancellations.review"), refund = permit("refunds.handle");
   app.post("/api/frontdesk/bookings/:id/payments", settle, payments.finalPayment);
+  app.get("/api/frontdesk/invoices", permit("invoices.print"), invoices.listing);
+  app.get("/api/frontdesk/invoices/:id", permit("invoices.print"), invoices.detail);
   app.get("/api/frontdesk/requests", permit("stay_requests.manage"), stayRequests.listing);
   app.patch("/api/frontdesk/requests/:id", permit("stay_requests.manage"), stayRequests.handle);
   app.post("/api/frontdesk/bookings/:id/cancel-otp", cancel, cancellations.sendOtp);

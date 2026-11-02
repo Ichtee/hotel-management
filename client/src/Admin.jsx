@@ -8,6 +8,7 @@ import Occupancy from './Occupancy.jsx';
 import RoomIssues from './RoomIssues.jsx';
 import AdHocCleaningRequest from './AdHocCleaningRequest.jsx';
 import StayRequests from './StayRequests.jsx';
+import Invoices from './Invoices.jsx';
 import './admin.css';
 import { useAuth } from './context/Auth.jsx';
 import { Badge, DataTable, Field, LineChart, Modal, Notice, PageHead, useApi } from './ui.jsx';
@@ -451,6 +452,7 @@ const PAGES = {
   '#/admin/issues': RoomIssues,
   '#/admin/cleaning-request': AdHocCleaningRequest,
   '#/admin/stay-requests': StayRequests,
+  '#/admin/invoices': Invoices,
   '#/admin/roomtypes': AdminRoomTypes,
   '#/admin/hotel': Hotel,
   '#/admin/policy': DepositPolicy,
@@ -460,7 +462,7 @@ const PAGES = {
 
 const Forbidden = () => <><PageHead title="No access" sub="Your role does not include this area." /><a className="btn" href="#/admin">Back to dashboard</a></>;
 
-const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/roles': 'roles.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read', '#/admin/occupancy': 'revenue.read', '#/admin/policy': 'policies.manage', '#/admin/cancellations': 'cancellations.review', '#/admin/refunds': 'refunds.handle', '#/admin/cleaning': 'cleaning_tasks.own.read', '#/admin/cleaning-request': 'cleaning_tasks.ad_hoc.create', '#/admin/issues': 'room_issues.report', '#/admin/stay-requests': 'stay_requests.manage' };
+const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/roles': 'roles.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read', '#/admin/occupancy': 'revenue.read', '#/admin/policy': 'policies.manage', '#/admin/cancellations': 'cancellations.review', '#/admin/refunds': 'refunds.handle', '#/admin/invoices': 'invoices.print', '#/admin/cleaning': 'cleaning_tasks.own.read', '#/admin/cleaning-request': 'cleaning_tasks.ad_hoc.create', '#/admin/issues': 'room_issues.report', '#/admin/stay-requests': 'stay_requests.manage' };
 
 export default function Admin({ route }) {
   const { user, loading } = useAuth();

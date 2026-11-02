@@ -146,6 +146,7 @@ function createApp({
   app.post("/api/auth/reset-password", authLimit, auth.resetPassword);
   app.post("/api/auth/verify-email", auth.verifyEmail);
   app.post("/api/auth/resend-verification", authLimit, auth.resendVerification);
+  app.get("/api/auth/captcha-config", auth.captchaConfig);
 
   // --- Authenticated Routes ---
   app.post(GATEWAY_CALLBACK, payments.callback);
@@ -290,6 +291,12 @@ function createApp({
     res
       .status(status)
       .json({
+        success: false,
+        message: status >= 500 ? "Something went wrong. Please try again." : error.message,
+        ...(typeof error.code === "string" ? { code: error.code } : {}),
+        ...(error.remainingAttempts !== undefined ? { remainingAttempts: error.remainingAttempts } : {}),
+        ...(error.locked !== undefined ? { locked: error.locked } : {}),
+        ...(error.remainingTime !== undefined ? { remainingTime: error.remainingTime } : {}),
         error: {
           message:
             status >= 500
@@ -298,6 +305,9 @@ function createApp({
           fields: error.fields,
           ...(typeof error.code === "string" ? { code: error.code } : {}),
           ...(error.details && status < 500 ? { details: error.details } : {}),
+          ...(error.remainingAttempts !== undefined ? { remainingAttempts: error.remainingAttempts } : {}),
+          ...(error.locked !== undefined ? { locked: error.locked } : {}),
+          ...(error.remainingTime !== undefined ? { remainingTime: error.remainingTime } : {}),
         },
       });
   });

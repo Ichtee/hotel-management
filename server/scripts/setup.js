@@ -27,6 +27,7 @@ async function bootstrap(env) {
     email,
     roleId: adminRole._id,
     status: "active",
+    isVerified: true,
     passwordHash: await hashPassword(env.ADMIN_PASSWORD),
     customerProfile: { fullName },
   });

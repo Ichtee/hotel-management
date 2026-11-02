@@ -11,6 +11,12 @@ const userSchema = new Schema({
   blacklistedAt: Date,
   lastLogin: Date,
   passwordReset: { tokenHash: { type: String, select: false }, expiresAt: Date },
+  isVerified: { type: Boolean, default: false },
+  emailVerification: {
+    tokenHash: { type: String, select: false },
+    expiresAt: { type: Date, select: false },
+    lastSentAt: { type: Date, select: false }
+  },
   authVersion: { type: Number, default: 0, select: false },
   // BR-42: 5 consecutive failed logins lock the account for 15 minutes.
   failedLogins: { type: Number, default: 0, select: false },

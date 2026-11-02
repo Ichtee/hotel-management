@@ -144,6 +144,8 @@ function createApp({
   });
   app.post("/api/auth/forgot-password", authLimit, auth.forgotPassword);
   app.post("/api/auth/reset-password", authLimit, auth.resetPassword);
+  app.post("/api/auth/verify-email", auth.verifyEmail);
+  app.post("/api/auth/resend-verification", authLimit, auth.resendVerification);
 
   // --- Authenticated Routes ---
   app.post(GATEWAY_CALLBACK, payments.callback);

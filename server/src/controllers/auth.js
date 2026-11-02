@@ -4,6 +4,7 @@ const Role = require("../models/Role");
 const v = require("../utils/validation");
 const { hashPassword, verifyPassword } = require("../utils/password");
 const { publicUser } = require("../middleware/auth");
+const { sendVerificationEmail } = require("../services/resendService");
 const AuditLog = require("../models/AuditLog");
 const MAX_FAILED_LOGINS = 5;
 const LOCK_MS = 15 * 60 * 1000;
@@ -46,12 +47,36 @@ async function register(req, res) {
   const role = await Role.findOne({ key: "customer", isActive: true });
   if (!role)
     throw new v.HttpError(409, "Registration is currently unavailable.");
+  const rawToken = randomBytes(32).toString("hex");
+  const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+
   const user = await User.create({
     ...data,
     passwordHash: await hashPassword(body.password),
     roleId: role._id,
+    isVerified: false,
+    emailVerification: {
+      tokenHash,
+      expiresAt,
+      lastSentAt: new Date(),
+    },
   });
-  res.status(201).json({ data: publicUser(user, role) });
+
+  try {
+    await sendVerificationEmail({
+      email: user.email,
+      fullName: user.customerProfile?.fullName || user.username,
+      token: rawToken,
+    });
+  } catch (emailErr) {
+    console.error("[Register] Failed to send verification email:", emailErr.message);
+  }
+
+  res.status(201).json({
+    data: publicUser(user, role),
+    message: "Registration successful. Please check your email to verify your account.",
+  });
 }
 // Xác minh mật khẩu và ghi nhận phiên bản tài khoản, quyền hiện tại.
 async function login(req, res) {
@@ -76,6 +101,15 @@ async function login(req, res) {
       401,
       "Email or password is incorrect, or your account is inactive.",
     );
+  if (user.isVerified === false) {
+    const err = new v.HttpError(
+      403,
+      "Your email address has not been verified. Please check your inbox or request a new verification email."
+    );
+    err.code = "EMAIL_NOT_VERIFIED";
+    err.details = { email: user.email, isVerified: false };
+    throw err;
+  }
   await regenerate(req);
   req.session.userId = user.id;
   req.session.authVersion = user.authVersion || 0;
@@ -244,6 +278,113 @@ async function resetPassword(req, res) {
     data: { message: "Password reset successful. You can now sign in." },
   });
 }
+
+async function verifyEmail(req, res) {
+  v.keys(req.body, ["token", "email"]);
+  const token = v.text(req.body.token, "token", 1, 128).trim();
+  const email = req.body.email ? v.email(req.body.email) : undefined;
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+
+  const query = email ? { email } : { "emailVerification.tokenHash": tokenHash };
+  const user = await User.findOne(query).select(
+    "+emailVerification.tokenHash +emailVerification.expiresAt"
+  );
+
+  if (!user) {
+    throw new v.HttpError(400, "Invalid verification link or account not found.");
+  }
+
+  if (user.isVerified) {
+    return res.json({
+      data: { message: "Your email has already been verified. You can now sign in." },
+    });
+  }
+
+  if (
+    !user.emailVerification?.tokenHash ||
+    user.emailVerification.tokenHash !== tokenHash
+  ) {
+    throw new v.HttpError(400, "Invalid verification token.");
+  }
+
+  if (
+    !user.emailVerification?.expiresAt ||
+    new Date() > user.emailVerification.expiresAt
+  ) {
+    const err = new v.HttpError(
+      400,
+      "Verification link has expired. Please request a new verification email."
+    );
+    err.code = "TOKEN_EXPIRED";
+    throw err;
+  }
+
+  user.isVerified = true;
+  user.set("emailVerification", undefined);
+  await user.save();
+
+  res.json({
+    data: { message: "Email verified successfully! You can now sign in to your account." },
+  });
+}
+
+async function resendVerification(req, res) {
+  v.keys(req.body, ["email"]);
+  const email = v.email(req.body.email);
+  const user = await User.findOne({ email }).select(
+    "+emailVerification.tokenHash +emailVerification.expiresAt +emailVerification.lastSentAt"
+  );
+
+  if (!user) {
+    return res.json({
+      data: {
+        message: "If an unverified account with this email exists, a verification link has been sent.",
+      },
+    });
+  }
+
+  if (user.isVerified) {
+    return res.json({
+      data: { message: "This email address is already verified. You can sign in directly." },
+    });
+  }
+
+  // Anti-spam cooldown (1 minute)
+  if (user.emailVerification?.lastSentAt) {
+    const elapsed = Date.now() - new Date(user.emailVerification.lastSentAt).getTime();
+    if (elapsed < 60 * 1000) {
+      const waitSec = Math.ceil((60000 - elapsed) / 1000);
+      throw new v.HttpError(
+        429,
+        `Please wait ${waitSec} seconds before requesting another verification email.`
+      );
+    }
+  }
+
+  const rawToken = randomBytes(32).toString("hex");
+  const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+  user.emailVerification = {
+    tokenHash,
+    expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    lastSentAt: new Date(),
+  };
+  await user.save();
+
+  try {
+    await sendVerificationEmail({
+      email: user.email,
+      fullName: user.customerProfile?.fullName || user.username,
+      token: rawToken,
+    });
+  } catch (emailErr) {
+    console.error("[ResendVerification] Failed to send email:", emailErr.message);
+  }
+
+  res.json({
+    data: { message: "Verification email sent. Please check your inbox." },
+  });
+}
+
 module.exports = {
   register,
   login,
@@ -253,4 +394,6 @@ module.exports = {
   changePassword,
   forgotPassword,
   resetPassword,
+  verifyEmail,
+  resendVerification,
 };

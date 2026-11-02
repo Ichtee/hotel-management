@@ -29,6 +29,7 @@ async function seedDemo() {
       roleId: (await Role.findOne({ key: role }))._id,
       email: `${username}@demo.hotel`,
       passwordHash,
+      isVerified: true,
       phone: "0912345678",
       customerProfile: { fullName, address: "Hanoi" },
       employeeProfile: ["manager", "receptionist", "housekeeping"].includes(

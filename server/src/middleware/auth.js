@@ -7,6 +7,7 @@ function publicUser(user, role) {
   delete data.passwordHash;
   delete data.authVersion;
   delete data.passwordReset;
+  delete data.emailVerification;
   if (data.customerProfile) delete data.customerProfile.idDocumentNo;
   return {
     ...data,

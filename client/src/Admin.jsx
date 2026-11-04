@@ -31,7 +31,7 @@ const Icon = ({ n, size = 18 }) => (
 const allowed = (item, perms, role) => !item[3] || (item[3].includes('manager.only') ? role === 'manager' : item[3].some((p) => perms.includes(p)));
 
 function Sidebar({ route, open, onClose }) {
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const link = (href, label, icon) => (
     <a key={href} href={href} className={route === href ? 'on' : ''} aria-current={route === href ? 'page' : undefined} onClick={onClose}>
       {icon && <Icon n={icon} />}<span>{label}</span>
@@ -52,6 +52,7 @@ function Sidebar({ route, open, onClose }) {
           ))}
         </div>
         <a className="site-link" href="#/"><Icon n="globe" /> View website</a>
+        <button type="button" className="site-link" style={{ background: "none", border: "none", width: "100%", textAlign: "left", cursor: "pointer", color: "#ff6b6b" }} onClick={async () => { await signOut(); location.hash = "#/admin/login"; }}><Icon n="lock" /> Sign out</button>
       </aside>
     </>
   );

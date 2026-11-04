@@ -54,6 +54,7 @@ before(async () => {
       roleId: await roleId(role),
       phone: "0912345678",
       customerProfile: { fullName: username },
+      isVerified: true,
     });
   }
   ({ app, store } = createApp({
@@ -209,7 +210,7 @@ test("authentication rejects bad passwords, missing sessions and foreign origins
 });
 test("BR-42: 5 consecutive failed logins lock the account for 15 minutes and are audited", async () => {
   const AuditLog = require("../src/models/AuditLog");
-  const user = await User.create({ username: "lockme", email: "lockme@example.com", passwordHash: await hashPassword(password), roleId: await roleId("customer") });
+  const user = await User.create({ username: "lockme", email: "lockme@example.com", passwordHash: await hashPassword(password), roleId: await roleId("customer"), isVerified: true });
   const attempt = (pw) => send(request(app), "post", "/api/auth/login", { email: "lockme@example.com", password: pw });
   for (let i = 0; i < 4; i++) await attempt("wrong").expect(401);
   const locked = await attempt("wrong").expect(423);
@@ -248,6 +249,7 @@ test("front-desk routes follow role permissions: customers cannot read guest dat
   }
 });
 test("profile updates only self and password change revokes other sessions", async () => {
+  await User.updateOne({ email: "new@example.com" }, { isVerified: true }); // verify new@example.com
   const a = await login("new@example.com");
   const b = await login("new@example.com");
   await send(a, "patch", "/api/profile", {
@@ -284,6 +286,7 @@ test("password whitespace is preserved at login and password change", async () =
     password: spaced,
     phone: "0912345678",
   }).expect(201);
+  await User.updateOne({ email: "spaced@example.com" }, { isVerified: true });
   await send(agent, "post", "/api/auth/login", {
     email: "spaced@example.com",
     password: spaced,

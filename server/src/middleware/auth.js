@@ -9,6 +9,7 @@ function publicUser(user, role) {
   delete data.passwordReset;
   delete data.failedLogins;
   delete data.lockedUntil;
+  delete data.emailVerification;
   if (data.customerProfile) delete data.customerProfile.idDocumentNo;
   return {
     ...data,

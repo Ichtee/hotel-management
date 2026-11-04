@@ -41,6 +41,7 @@ async function seedDefaultsIfNeeded() {
         roleId: roleMap['admin']._id,
         phone: '+84 236 3888 000',
         status: 'active',
+        isVerified: true,
         employeeProfile: {
           position: 'System Administrator',
           hireDate: new Date('2025-01-01')

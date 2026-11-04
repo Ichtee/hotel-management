@@ -9,7 +9,7 @@
     "start": "node src/index.js",
     "db:init": "node scripts/initDatabase.js",
     "db:watch": "node scripts/watchDatabase.js",
-    "test": "node test/models.test.js && node --test test/api.test.js test/staff.test.js test/managerOperations.test.js",
+    "test": "node test/models.test.js && node --test test/api.test.js test/staff.test.js test/managerOperations.test.js test/emailVerification.test.js test/loginSecurity.test.js",
     "test:member2": "node test/member2.test.js"
   },
   "dependencies": {
@@ -22,7 +22,8 @@
     "helmet": "^8.3.0",
     "hotel-booking-system": "file:..",
     "mongoose": "^8.14.1",
-    "nodemailer": "^10.1.2"
+    "nodemailer": "^10.1.2",
+    "resend": "^6.37.0"
   },
   "devDependencies": {
     "mongodb-memory-server": "^11.3.0",

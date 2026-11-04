@@ -54,7 +54,7 @@ async function setup() {
   const passwordHash = await hashPassword(password);
   for (const key of ["manager", "admin", "customer"])
     await User.create({ username: key, email: `${key}@example.com`, roleId: roles[key]._id, passwordHash,
-      phone: "0912345678", customerProfile: { fullName: key } });
+      phone: "0912345678", customerProfile: { fullName: key }, isVerified: true });
   ({ app, store } = createApp({ mongoUri: db.getUri("staff_api_tests"), sessionSecret: "temporary-tests-secret-at-least-32-characters" }));
   manager = await login("manager@example.com");
   admin = await login("admin@example.com");
@@ -74,7 +74,7 @@ test("UC22/UC33 deny non-manager access including custom roles with staff.manage
   const staff = await employee();
   const role = await Role.create({ key: "fake_manager", name: "Custom", scope: "hotel", permissions: ["staff.manage", "roles.manage"] });
   await User.create({ username: "fake", email: "fake@example.com", roleId: role._id,
-    passwordHash: await hashPassword(password), customerProfile: { fullName: "Fake" } });
+    passwordHash: await hashPassword(password), customerProfile: { fullName: "Fake" }, isVerified: true });
   const fake = await login("fake@example.com");
   for (const agent of [admin, customer, staff.agent, fake]) {
     await agent.get("/api/staff").expect(403);

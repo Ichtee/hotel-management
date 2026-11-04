@@ -75,7 +75,7 @@ async function createStaff(req, data, passwordHash) {
     const [user] = await User.create([{
       username: data.username, email: data.email, phone: data.phone,
       passwordHash, roleId: role._id, status: data.status || "active",
-      statusReason: data.reason, mustChangePassword: true,
+      statusReason: data.reason, mustChangePassword: true, isVerified: true,
       customerProfile: { fullName: data.fullName },
       employeeProfile: { position: data.position, shift: data.shift, hireDate: data.hireDate },
     }], { session });

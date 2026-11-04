@@ -23,6 +23,7 @@ const refunds = require("./controllers/refunds");
 const jobs = require("./controllers/jobs");
 const { revenue } = require("./controllers/revenue");
 const { HttpError } = require("./utils/validation");
+const RoomType = require("./models/RoomType");
 
 // Member 2 Routes & Controllers
 const roomTypeRoutes = require("./routes/roomTypeRoutes");
@@ -133,8 +134,19 @@ function createApp({
   app.post("/api/auth/login", authLimit, auth.login);
   app.post("/api/auth/logout", auth.logout);
   app.get("/api/public/room-types/:id/reviews", roomTypes.reviews);
+  app.get("/api/public/room-types", async (req, res, next) => {
+    try {
+      const data = await RoomType.find({ isActive: true }).lean();
+      res.json({ success: true, count: data.length, data });
+    } catch (err) {
+      next(err);
+    }
+  });
   app.post("/api/auth/forgot-password", authLimit, auth.forgotPassword);
   app.post("/api/auth/reset-password", authLimit, auth.resetPassword);
+  app.post("/api/auth/verify-email", auth.verifyEmail);
+  app.post("/api/auth/resend-verification", authLimit, auth.resendVerification);
+  app.get("/api/auth/captcha-config", auth.captchaConfig);
 
   // --- Authenticated Routes ---
   app.post(GATEWAY_CALLBACK, payments.callback);
@@ -279,6 +291,12 @@ function createApp({
     res
       .status(status)
       .json({
+        success: false,
+        message: status >= 500 ? "Something went wrong. Please try again." : error.message,
+        ...(typeof error.code === "string" ? { code: error.code } : {}),
+        ...(error.remainingAttempts !== undefined ? { remainingAttempts: error.remainingAttempts } : {}),
+        ...(error.locked !== undefined ? { locked: error.locked } : {}),
+        ...(error.remainingTime !== undefined ? { remainingTime: error.remainingTime } : {}),
         error: {
           message:
             status >= 500
@@ -287,6 +305,9 @@ function createApp({
           fields: error.fields,
           ...(typeof error.code === "string" ? { code: error.code } : {}),
           ...(error.details && status < 500 ? { details: error.details } : {}),
+          ...(error.remainingAttempts !== undefined ? { remainingAttempts: error.remainingAttempts } : {}),
+          ...(error.locked !== undefined ? { locked: error.locked } : {}),
+          ...(error.remainingTime !== undefined ? { remainingTime: error.remainingTime } : {}),
         },
       });
   });

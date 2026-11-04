@@ -38,7 +38,7 @@ async function setup() {
   for (const key of ["manager", "admin", "customer", "housekeeping"]) {
     const role = await Role.findOne({ key });
     const user = await User.create({ username: key, email: `${key}@example.com`, roleId: role._id,
-      passwordHash, phone: "0912345678", customerProfile: { fullName: key } });
+      passwordHash, phone: "0912345678", customerProfile: { fullName: key }, isVerified: true });
     if (key === "manager") actor = user;
     if (key === "housekeeping") housekeeping = user;
     const agent = request.agent(app);

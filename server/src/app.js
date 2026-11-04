@@ -109,15 +109,49 @@ function createApp({
   app.use("/api/rooms", roomRoutes);
   app.use("/api/housekeeping", housekeepingRoutes);
 
+
+  // --- Member 2 Booking Endpoints (UC07 Make Reservation & Cancellation) ---
+  app.post("/api/bookings", (req, res, next) => {
+    bookingController.create(req, res, next);
+  });
+  app.post("/api/bookings/:id/cancel", (req, res, next) => {
+    bookingController.cancel(req, res, next);
+  });
+  // BR-29: Abandon payment and release pending hold immediately
+  app.post("/api/bookings/:id/cancel-payment", (req, res, next) => {
+    bookingController.cancelPayment(req, res, next);
+  });
+  // BR-36: Withdraw cancellation request — restore to confirmed
+  app.post("/api/bookings/:id/withdraw-cancellation", (req, res, next) => {
+    bookingController.withdrawCancellation(req, res, next);
+  });
+  app.post("/api/bookings/:id/modify", (req, res, next) => {
+    bookingController.modify(req, res, next);
+  });
+  app.patch("/api/bookings/:id/modify", (req, res, next) => {
+    bookingController.modify(req, res, next);
+  });
+  app.patch("/api/bookings/:id", (req, res, next) => {
+    bookingController.modify(req, res, next);
+  });
+
   // --- Member 2 Booking Endpoints ---
-  // Creation (UC07) is session-authenticated: see bookingCreation.create below.
-  // Cancellation (UC08) is M3's and needs a session: see /api/bookings/:id/cancel below.
+
+
+
   app.get("/api/bookings/ref/:reference", (req, res, next) => {
     bookingController.getByReference(req, res, next);
   });
   app.get("/api/bookings/my", (req, res, next) => {
     bookingController.getMyBookings(req, res, next);
   });
+  app.get("/api/bookings/search", (req, res, next) => {
+    bookingController.search(req, res, next);
+  });
+  app.get("/api/reports/occupancy", (req, res, next) => {
+    bookingController.occupancyReport(req, res, next);
+  });
+
 
   // --- Auth Rate Limiter & Public Auth Routes ---
   const authLimit = rateLimit({
@@ -161,6 +195,9 @@ function createApp({
   app.put("/api/profile/password", authLimit, auth.changePassword);
   app.use("/api", requirePasswordChanged);
   app.patch("/api/profile", auth.updateProfile);
+  // UC12 Submit Review (Customer session)
+  app.post("/api/reviews", roomTypes.submitReview);
+  app.get("/api/reviews/my", roomTypes.customerReviews);
   app.get("/api/options", accounts.options);
   app.get("/api/customers", customers.list);
   app.patch("/api/customers/:id/blacklist", customers.blacklist);

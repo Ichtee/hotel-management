@@ -22,7 +22,7 @@ const bookingEventSchema = new Schema({
   actorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   type: {
     type: String, required: true,
-    enum: ['created', 'modified', 'cancelled', 'checked_in', 'room_changed', 'service_added', 'checked_out']
+    enum: ['created', 'modified', 'cancelled', 'checked_in', 'room_changed', 'service_added', 'checked_out', 'cancellation_requested', 'cancellation_withdrawn']
   },
   note: String,
   oldValue: Schema.Types.Mixed,
@@ -43,26 +43,36 @@ const schema = new Schema({
   holdExpiresAt: Date, // BR-29: pending online bookings hold the room for 15 minutes
   cancelledAt: Date,
   cancellationReason: String,
-  // BR-32 / BR-36 / BR-37: the request, its locked refundable amount and its approval.
+
+  // BR-32 / BR-36 / BR-37: cancellation request, locked refundable amount and approval
   cancellation: {
     requestedAt: Date,
     requestedBy: { type: Schema.Types.ObjectId, ref: 'User' },
     channel: { type: String, enum: ['online', 'front_desk'] },
     verifyMethod: { type: String, enum: ['login', 'otp', 'id_document', 'hotel'] },
     reason: String,
-    refundableAmount: { type: Number, min: 0 },
+    refundableAmount: { type: Number, default: 0, min: 0 },
     hotelCaused: Boolean,
     approvedAt: Date,
-    approvedBy: { type: Schema.Types.ObjectId, ref: 'User' }, // empty when approved by the system
-    autoApproved: Boolean
+    approvedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+    autoApproved: { type: Boolean, default: false }
   },
+
   // BR-42: one-time code of a cancellation requested by phone.
   cancellationOtp: { type: new Schema({ hash: String, expiresAt: Date, attempts: Number }, { _id: false }), select: false },
-  // Front-desk walk-in cancellation fields (theanh).
+  // Front-desk walk-in cancellation fields
   cancellationRequestedAt: Date,
   cancellationVerification: { type: String, enum: ['front_desk_id', 'phone_otp'] },
   refundableAmount: { type: Number, default: 0, min: 0 },
-  refundAccount: { bank: String, accountNumber: String, accountHolderName: String },
+  refundAccount: {
+    bank: { type: String, trim: true },
+    accountNumber: { type: String, trim: true },
+    holderName: { type: String, trim: true },
+    accountHolderName: { type: String, trim: true },
+    status: { type: String, enum: ['declared', 'needs_correction'], default: 'declared' },
+    reason: String
+  },
+
   status: {
     type: String,
     enum: ['pending', 'confirmed', 'cancellation_requested', 'checked_in', 'checked_out', 'cancelled', 'expired'],

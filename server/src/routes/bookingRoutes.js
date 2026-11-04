@@ -10,7 +10,19 @@ router.get('/', bookingController.getMyBookings);
 router.get('/my', bookingController.getMyBookings);
 router.get('/ref/:reference', bookingController.getByReference);
 
-// Cancel reservation
+// Cancel reservation & abandon hold (BR-29, BR-36)
+router.post('/:id/cancel-payment', bookingController.cancelPayment);
 router.post('/:id/cancel', bookingController.cancel);
+router.delete('/:id/cancel', bookingController.withdrawCancellation);
+router.post('/:id/withdraw-cancellation', bookingController.withdrawCancellation);
+
+// UC07: Modify reservation
+router.post('/:id/modify', bookingController.modify);
+router.patch('/:id/modify', bookingController.modify);
+router.patch('/:id', bookingController.modify);
+
+// Search reservations (shared filters)
+router.get('/search', bookingController.search);
 
 module.exports = router;
+

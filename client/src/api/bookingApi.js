@@ -49,12 +49,57 @@ export const bookingApi = {
   },
 
   /**
-   * Cancel an existing reservation
+   * Cancel an existing reservation (UC08 / BR-16, BR-32)
    */
-  async cancelBooking(bookingId, reason = 'Cancelled by customer') {
+  async cancelBooking(bookingId, { reason = 'Cancelled by customer', refundAccount } = {}) {
     return request(`/bookings/${bookingId}/cancel`, {
       method: 'POST',
-      body: JSON.stringify({ reason })
+      body: JSON.stringify({ reason, refundAccount })
     });
+  },
+
+  /**
+   * Abandon payment / cancel hold (BR-29)
+   */
+  async cancelPayment(bookingId) {
+    return request(`/bookings/${bookingId}/cancel-payment`, {
+      method: 'POST'
+    });
+  },
+
+  /**
+   * Withdraw pending cancellation request (BR-36)
+   */
+  async withdrawCancellation(bookingId) {
+    return request(`/bookings/${bookingId}/cancel`, {
+      method: 'DELETE'
+    });
+  },
+
+  /**
+   * UC12: Modify an existing reservation (change dates, guests, requests)
+   */
+  async modifyBooking(bookingId, payload) {
+    return request(`/bookings/${bookingId}/modify`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+  },
+
+  /**
+   * UC37: Get Occupancy Report
+   */
+  async getOccupancyReport(params = {}) {
+    const q = new URLSearchParams(params).toString();
+    return request(`/reports/occupancy${q ? '?' + q : ''}`);
+  },
+
+  /**
+   * Search Bookings (Shared filter register)
+   */
+  async searchBookings(params = {}) {
+    const q = new URLSearchParams(params).toString();
+    return request(`/bookings/search${q ? '?' + q : ''}`);
   }
 };
+

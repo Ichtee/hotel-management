@@ -1,9 +1,29 @@
-import { useState } from 'react';
-import { ROOM_TYPES as INITIAL_TYPES } from '../data.js';
+import { useEffect, useState } from 'react';
 import { roomApi } from '../api/roomApi.js';
 
+// Helper: map MongoDB room-type document to the shape used by the UI
+function mapRoomType(rt) {
+  return {
+    id: rt._id || rt.id,
+    _id: rt._id || rt.id,
+    name: rt.name,
+    bed: rt.bedType || 'King bed',
+    size: rt.roomSizeSqm || 30,
+    guests: rt.maxOccupancy || 2,
+    price: rt.basePrice || rt.price || 80,
+    rating: rt.rating || 5.0,
+    desc: rt.description || '',
+    amenities: rt.amenities || ['Free WiFi', 'Air conditioning'],
+    img: rt.images?.[0] || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=70',
+    seasonalPricing: rt.seasonalPricing || []
+  };
+}
+
 export default function AdminRoomTypes() {
-  const [types, setTypes] = useState(INITIAL_TYPES);
+  const [types, setTypes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState('');
+
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingSeasonal, setEditingSeasonal] = useState(null);
   const [toastMessage, setToastMessage] = useState('');
@@ -21,49 +41,71 @@ export default function AdminRoomTypes() {
   const [seasonStart, setSeasonStart] = useState('');
   const [seasonEnd, setSeasonEnd] = useState('');
   const [seasonPrice, setSeasonPrice] = useState('');
+  const [seasonSaving, setSeasonSaving] = useState(false);
 
   const showToast = (msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3000);
   };
 
-  const handleCreate = (e) => {
+  // Load room types from MongoDB on mount
+  const loadTypes = () => {
+    setLoading(true);
+    setErrorMsg('');
+    roomApi.getRoomTypes()
+      .then((data) => {
+        // API may return { data: [...] } or directly an array
+        const list = Array.isArray(data) ? data : (data?.data || data?.roomTypes || []);
+        setTypes(list.map(mapRoomType));
+      })
+      .catch((err) => {
+        setErrorMsg(`Không thể tải danh sách loại phòng: ${err.message}`);
+      })
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { loadTypes(); }, []);
+
+  const handleCreate = async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
 
-    const newType = {
-      id: Date.now(),
+    const payload = {
       name: name.trim(),
-      bed,
-      size: parseInt(size, 10) || 30,
-      guests: parseInt(guests, 10) || 2,
-      price: parseFloat(price) || 80,
-      rating: 5.0,
-      desc: desc.trim() || 'A comfortable modern guest room.',
+      bedType: bed,
+      roomSizeSqm: parseInt(size, 10) || 30,
+      maxOccupancy: parseInt(guests, 10) || 2,
+      basePrice: parseFloat(price) || 80,
+      description: desc.trim() || 'A comfortable modern guest room.',
       amenities: ['Free WiFi', 'Air conditioning'],
-      img: 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=70',
+      images: ['https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=70'],
       seasonalPricing: []
     };
 
-    setTypes(prev => [newType, ...prev]);
-    setShowAddModal(false);
-    setName('');
-    setDesc('');
-    showToast(`Hạng phòng "${newType.name}" đã được tạo thành công!`);
-
-    // Best-effort backend call
-    roomApi.createRoomType(newType).catch(() => {});
-  };
-
-  const handleDelete = (id, typeName) => {
-    if (confirm(`Bạn có chắc muốn xóa hạng phòng "${typeName}"?`)) {
-      setTypes(prev => prev.filter(t => t.id !== id));
-      showToast(`Đã xóa hạng phòng "${typeName}"`);
-      roomApi.deleteRoomType(id).catch(() => {});
+    try {
+      await roomApi.createRoomType(payload);
+      showToast(`Hạng phòng "${payload.name}" đã được tạo thành công!`);
+      setShowAddModal(false);
+      setName('');
+      setDesc('');
+      loadTypes(); // Reload from DB
+    } catch (err) {
+      alert(`Lỗi khi tạo hạng phòng: ${err.message}`);
     }
   };
 
-  const handleAddSeason = (e) => {
+  const handleDelete = async (id, typeName) => {
+    if (!window.confirm(`Bạn có chắc muốn xóa hạng phòng "${typeName}"?`)) return;
+    try {
+      await roomApi.deleteRoomType(id);
+      showToast(`Đã xóa hạng phòng "${typeName}"`);
+      loadTypes(); // Reload from DB
+    } catch (err) {
+      alert(`Lỗi khi xóa: ${err.message}`);
+    }
+  };
+
+  const handleAddSeason = async (e) => {
     e.preventDefault();
     if (!seasonName || !seasonStart || !seasonEnd || !seasonPrice) return;
 
@@ -79,19 +121,32 @@ export default function AdminRoomTypes() {
       price: parseFloat(seasonPrice)
     };
 
-    setTypes(prev => prev.map(t => {
-      if (t.id === editingSeasonal.id) {
-        const seasons = t.seasonalPricing ? [...t.seasonalPricing, newSeason] : [newSeason];
-        return { ...t, seasonalPricing: seasons };
-      }
-      return t;
-    }));
+    const currentSeasons = editingSeasonal.seasonalPricing || [];
+    const updatedSeasons = [...currentSeasons, newSeason];
 
-    showToast(`Đã thêm giá mùa "${seasonName}" cho ${editingSeasonal.name}!`);
-    setSeasonName('');
-    setSeasonStart('');
-    setSeasonEnd('');
-    setSeasonPrice('');
+    setSeasonSaving(true);
+    try {
+      await roomApi.updatePricing(editingSeasonal._id || editingSeasonal.id, { seasonalPricing: updatedSeasons });
+      showToast(`Đã thêm giá mùa "${seasonName}" cho ${editingSeasonal.name}!`);
+      setSeasonName('');
+      setSeasonStart('');
+      setSeasonEnd('');
+      setSeasonPrice('');
+      // Reload and re-open the season modal with updated data
+      await roomApi.getRoomTypes()
+        .then((data) => {
+          const list = Array.isArray(data) ? data : (data?.data || data?.roomTypes || []);
+          const mapped = list.map(mapRoomType);
+          setTypes(mapped);
+          // Refresh the editingSeasonal reference so new seasons appear immediately
+          const updated = mapped.find((t) => (t._id || t.id) === (editingSeasonal._id || editingSeasonal.id));
+          if (updated) setEditingSeasonal(updated);
+        });
+    } catch (err) {
+      alert(`Lỗi khi lưu giá mùa: ${err.message}`);
+    } finally {
+      setSeasonSaving(false);
+    }
   };
 
   return (
@@ -108,13 +163,20 @@ export default function AdminRoomTypes() {
 
       <div className="page-head">
         <div>
-          <h1>Quản lý Loại Phòng & Giá (Room Types)</h1>
+          <h1>Quản lý Loại Phòng &amp; Giá (Room Types)</h1>
           <p>Thiết lập danh mục hạng phòng, sức chứa, tiện nghi và giá mùa cao điểm (UC31, UC32)</p>
         </div>
         <div className="head-actions">
           <button className="btn primary" onClick={() => setShowAddModal(true)}>+ Thêm Hạng Phòng</button>
         </div>
       </div>
+
+      {/* Error banner */}
+      {errorMsg && (
+        <div style={{ background: '#fef2f2', color: '#b91c1c', padding: '0.75rem 1rem', borderRadius: '8px', marginBottom: '1rem', border: '1px solid #fca5a5' }}>
+          {errorMsg} — <button className="btn" style={{ padding: '2px 10px', fontSize: '0.8rem' }} onClick={loadTypes}>Thử lại</button>
+        </div>
+      )}
 
       {/* Room Types Cards & Table */}
       <div className="table-wrap" style={{ background: '#fff', borderRadius: '14px', border: '1px solid var(--line)', overflow: 'hidden' }}>
@@ -132,7 +194,11 @@ export default function AdminRoomTypes() {
             </tr>
           </thead>
           <tbody>
-            {types.map(t => (
+            {loading ? (
+              <tr><td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)' }}>Đang tải dữ liệu…</td></tr>
+            ) : types.length === 0 ? (
+              <tr><td colSpan={8} style={{ textAlign: 'center', padding: '2rem', color: 'var(--muted)' }}>Chưa có hạng phòng nào. Bấm "+ Thêm Hạng Phòng" để tạo mới.</td></tr>
+            ) : types.map(t => (
               <tr key={t.id}>
                 <td>
                   <img src={t.img} alt={t.name} style={{ width: '64px', height: '44px', objectFit: 'cover', borderRadius: '6px' }} />
@@ -169,7 +235,7 @@ export default function AdminRoomTypes() {
                     <button
                       className="btn"
                       style={{ padding: '6px 10px', fontSize: '0.8rem', color: 'var(--red)', borderColor: 'var(--red)' }}
-                      onClick={() => handleDelete(t.id, t.name)}
+                      onClick={() => handleDelete(t._id || t.id, t.name)}
                     >
                       Xóa
                     </button>
@@ -345,7 +411,9 @@ export default function AdminRoomTypes() {
                   <input type="number" min="0" placeholder="120" value={seasonPrice} onChange={e => setSeasonPrice(e.target.value)} required />
                 </label>
               </div>
-              <button type="submit" className="btn primary" style={{ width: '100%' }}>Áp Dụng Đợt Giá Này</button>
+              <button type="submit" className="btn primary" style={{ width: '100%' }} disabled={seasonSaving}>
+                {seasonSaving ? 'Đang lưu…' : 'Áp Dụng Đợt Giá Này'}
+              </button>
             </form>
           </div>
         </div>

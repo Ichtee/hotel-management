@@ -312,7 +312,43 @@ function Rooms({ q }) {
 }
 
 function RoomDetail({ id, q }) {
-  const r = ROOM_TYPES.find((x) => String(x.id) === String(id)) || ROOM_TYPES[0];
+  // Support both MongoDB ObjectId (24 hex chars) and local data.js numeric IDs
+  const isMongoId = /^[0-9a-f]{24}$/i.test(id);
+  const staticRoom = ROOM_TYPES.find((x) => String(x.id) === String(id)) || (isMongoId ? null : ROOM_TYPES[0]);
+
+  const [apiRoom, setApiRoom] = useState(null);
+  const [roomLoading, setRoomLoading] = useState(isMongoId);
+
+  useEffect(() => {
+    if (!isMongoId) return;
+    setRoomLoading(true);
+    roomApi.getRoomTypeById(id)
+      .then((rt) => {
+        // Map MongoDB fields to the same shape used by data.js ROOM_TYPES
+        setApiRoom({
+          id: rt._id || rt.id,
+          _id: rt._id || rt.id,
+          name: rt.name,
+          price: rt.basePrice || rt.price || 80,
+          guests: rt.maxOccupancy || 2,
+          bed: rt.bedType || 'King bed',
+          size: rt.roomSizeSqm || 32,
+          rating: rt.rating || 5,
+          amenities: rt.amenities?.length ? rt.amenities : ['WiFi', 'Air conditioning', 'Smart TV'],
+          img: rt.images?.[0] || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=80',
+          desc: rt.description || 'Spacious and well-appointed luxury room.',
+          seasonalPricing: rt.seasonalPricing || []
+        });
+      })
+      .catch(() => {
+        // On fetch failure fall back to first static room
+        setApiRoom(ROOM_TYPES[0]);
+      })
+      .finally(() => setRoomLoading(false));
+  }, [id, isMongoId]);
+
+  const r = apiRoom || staticRoom || ROOM_TYPES[0];
+
   const [d, setD] = useState({ in: q.in || day(7), out: q.out || day(10), guests: +q.guests || 2, coupon: '' });
   const [extras, setExtras] = useState([]);
   const nights = nightsBetween(d.in, d.out);
@@ -323,8 +359,14 @@ function RoomDetail({ id, q }) {
 
   const go = (e) => {
     e.preventDefault();
-    location.hash = `#/checkout?${new URLSearchParams({ room: r.id, in: d.in, out: d.out, guests: d.guests, coupon: offer?.code || '', extras: extras.join(',') })}`;
+    // Use MongoDB _id when available so Checkout can send correct roomTypeId to backend
+    const roomKey = r._id || r.id;
+    location.hash = `#/checkout?${new URLSearchParams({ room: roomKey, in: d.in, out: d.out, guests: d.guests, coupon: offer?.code || '', extras: extras.join(',') })}`;
   };
+
+  if (roomLoading) {
+    return <div className="c-wrap c-section"><p>Loading room details…</p></div>;
+  }
 
   return (
     <div className="c-wrap c-section">
@@ -376,7 +418,37 @@ function Checkout({ q, user }) {
   const { user: authUser } = useAuth();
   const currentUser = user || authUser;
 
-  const r = ROOM_TYPES.find((x) => String(x.id) === String(q.room)) || ROOM_TYPES[0];
+  // q.room may be a MongoDB ObjectId (24 hex) passed from RoomDetail, or a numeric data.js id
+  const isMongoId = /^[0-9a-f]{24}$/i.test(q.room);
+  const staticRoom = ROOM_TYPES.find((x) => String(x.id) === String(q.room)) || (isMongoId ? null : ROOM_TYPES[0]);
+  const [apiRoom, setApiRoom] = useState(null);
+  const [checkoutLoading, setCheckoutLoading] = useState(isMongoId && !staticRoom);
+
+  useEffect(() => {
+    if (!isMongoId || staticRoom) return;
+    setCheckoutLoading(true);
+    roomApi.getRoomTypeById(q.room)
+      .then((rt) => {
+        setApiRoom({
+          id: rt._id || rt.id,
+          _id: rt._id || rt.id,
+          name: rt.name,
+          price: rt.basePrice || rt.price || 80,
+          guests: rt.maxOccupancy || 2,
+          bed: rt.bedType || 'King bed',
+          size: rt.roomSizeSqm || 32,
+          rating: rt.rating || 5,
+          amenities: rt.amenities?.length ? rt.amenities : ['WiFi', 'Air conditioning'],
+          img: rt.images?.[0] || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=80',
+          desc: rt.description || ''
+        });
+      })
+      .catch(() => setApiRoom(ROOM_TYPES[0]))
+      .finally(() => setCheckoutLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q.room]);
+
+  const r = apiRoom || staticRoom || ROOM_TYPES[0];
   const nights = nightsBetween(q.in, q.out);
   const ex = (q.extras ? q.extras.split(',') : []).map((i) => EXTRAS[+i]);
   const offer = OFFERS.find((o) => o.code === q.coupon);
@@ -386,7 +458,37 @@ function Checkout({ q, user }) {
   const [error, setError] = useState('');
   const confirm = async (e) => {
     e.preventDefault();
-    setSaving(true); setError('');
+
+    setSaving(true);
+    setError('');
+
+    const form = e.target;
+    const guestName = form.fullName.value;
+    const guestEmail = form.email.value;
+    const guestPhone = form.phone.value;
+    const specialRequests = form.specialRequests?.value || '';
+
+    const bookingPayload = {
+      customerId: currentUser?._id || currentUser?.id,
+      checkInDate: q.in || day(7),
+      checkOutDate: q.out || day(10),
+      guestName,
+      guestEmail,
+      guestPhone,
+      specialRequests,
+      paymentType: pay,
+      couponCode: q.coupon || undefined,
+      rooms: [
+        {
+          roomTypeId: r._id || r.id?.toString() || undefined,
+          guestCount: +q.guests || 2
+        }
+      ]
+    };
+
+
+
+
     try {
       const types = await api('/public/room-types').catch(() => api('/room-types'));
       const type = types.data.find((item) => item.name === r.name);
@@ -400,6 +502,14 @@ function Checkout({ q, user }) {
     } catch (err) { setError(err.message || 'Unable to create your booking.'); }
     finally { setSaving(false); }
   };
+
+
+  if (checkoutLoading) {
+    return <div className="c-wrap c-section"><p>Loading room details…</p></div>;
+  }
+
+
+
   return (
     <div className="c-wrap c-section">
       <h1 className="title">Checkout</h1>

@@ -4,7 +4,7 @@ export const MENU = [
   { label: 'Front desk', items: [['#/admin/bookings', 'Bookings', 'All reservations'], ['#/admin/frontdesk', 'Check-in / Check-out', 'Today’s arrivals & departures'], ['#/admin/cancellations', 'Cancellations', 'Requests to review', ['cancellations.review']]] },
   { label: 'Rooms', items: [['#/admin/rooms', 'Room map', 'Live room status'], ['#/admin/roomtypes', 'Room types', 'Pricing & amenities'], ['#/admin/services', 'Services', 'Extras & add-ons']] },
   { label: 'Housekeeping', items: [['#/admin/cleaning', 'Cleaning tasks', 'Assigned to staff'], ['#/admin/issues', 'Room issues', 'Maintenance reports']] },
-  { label: 'Billing', items: [['#/admin/invoices', 'Invoices', ''], ['#/admin/payments', 'Payments', ''], ['#/admin/refunds', 'Refunds', '', ['refunds.handle']], ['#/admin/revenue', 'Revenue', '', ['revenue.read']], ['#/admin/coupons', 'Coupons', '', ['promotions.manage']]] },
+  { label: 'Billing', items: [['#/admin/invoices', 'Invoices', ''], ['#/admin/payments', 'Payments', ''], ['#/admin/refunds', 'Refunds', '', ['refunds.handle']], ['#/admin/revenue', 'Revenue', '', ['revenue.read']], ['#/admin/occupancy', 'Occupancy', '', ['revenue.read']], ['#/admin/coupons', 'Coupons', '', ['promotions.manage']]] },
   { label: 'Guests & staff', items: [['#/admin/customers', 'Customer accounts', '', ['manager.only']], ['#/admin/users', 'Users', '', ['users.manage']], ['#/admin/staff', 'Staff', '', ['staff.manage']], ['#/admin/roles', 'Roles', '', ['roles.manage']], ['#/admin/reviews', 'Reviews', '']] },
   { label: 'Settings', items: [['#/admin/hotel', 'Hotel & policies', ''], ['#/admin/policy', 'Deposit & cancellation', '', ['policies.manage']]] }
 ];
@@ -60,6 +60,11 @@ export const TABLES = {
     title: 'Payments', sub: 'Deposits and settlements', action: 'Record payment',
     cols: ['Ref', 'Booking', 'Method', 'Amount', 'Status'],
     rows: [['PAY-881', 'BK-1042', 'Card', '$75', 'paid'], ['PAY-882', 'BK-1031', 'Cash', '$340', 'paid'], ['PAY-883', 'BK-1044', 'Bank transfer', '$20', 'pending']]
+  },
+  refunds: {
+    title: 'Refunds', sub: 'Cancellation refunds', action: 'New refund',
+    cols: ['Refund', 'Booking', 'Reason', 'Amount', 'Status'],
+    rows: [['RF-31', 'BK-1029', 'Guest cancelled', '$70', 'pending'], ['RF-30', 'BK-1012', 'Overbooked', '$120', 'paid']]
   },
   reviews: {
     title: 'Reviews', sub: 'Guest feedback', action: '',

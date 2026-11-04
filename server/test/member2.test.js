@@ -170,10 +170,185 @@ async function testMember2Logic() {
   const ref = await bookingService.generateBookingReference();
   assert.match(ref, /^BK-\d+$/, 'Booking reference should match BK-XXXX format');
 
-  console.log('✅ [Test Member 2] All Member 2 models, schema validations, pricing, T06 availability, and UC07 core tests passed successfully!');
+  // 7. UC07: Modify Reservation validation (BR-46)
+  console.log('[Test Member 2] Testing UC07: Modify Reservation & BR-46 rules...');
+  const fakeBookingId = id();
+  const mockBooking = {
+    _id: fakeBookingId,
+    customerId: id(),
+    hotelId,
+    status: 'confirmed',
+    checkInDate: new Date('2026-11-05T14:00:00Z'), // > 48h away
+    checkOutDate: new Date('2026-11-09T12:00:00Z'),
+    rooms: [
+      { roomId: roomId1, roomTypeId: id(), priceAtBooking: 500000, guestCount: 1 }
+    ],
+    roomAmount: 2000000,
+    totalAmount: 2000000,
+    depositRequired: 400000,
+    policySnapshot: {
+      cancellationTiers: [
+        { minHoursBeforeCheckIn: 48, refundPercent: 100 },
+        { minHoursBeforeCheckIn: 0, refundPercent: 0 }
+      ]
+    },
+    events: [],
+    save: async function() { return this; }
+  };
+
+  const origBookingFindById = Booking.findById;
+  Booking.findById = async (bId) => {
+    if (String(bId) === String(fakeBookingId)) {
+      return {
+        ...mockBooking,
+        populate: function() { return this; }
+      };
+    }
+    return null;
+  };
+
+  // 7a. Non-existent booking throws 404
+  await assert.rejects(
+    async () => {
+      await bookingService.modifyReservation(id(), { checkInDate: '2026-11-06' });
+    },
+    /Booking not found/
+  );
+
+  // 7b. Invalid checkOut <= checkIn rejected
+  await assert.rejects(
+    async () => {
+      await bookingService.modifyReservation(fakeBookingId, {
+        checkInDate: '2026-11-10',
+        checkOutDate: '2026-11-08'
+      });
+    },
+    /checkOutDate must be after checkInDate/
+  );
+
+  // 7c. Cancelled booking cannot be modified
+  const cancelledBooking = { ...mockBooking, status: 'cancelled' };
+  Booking.findById = async () => cancelledBooking;
+  await assert.rejects(
+    async () => {
+      await bookingService.modifyReservation(fakeBookingId, { checkInDate: '2026-11-06' });
+    },
+    /Cannot modify booking with status "cancelled"/
+  );
+
+  // 7d. BR-46: Near check-in date (< 48h, 0% refund tier) blocks date modification
+  const nearCheckinBooking = {
+    ...mockBooking,
+    status: 'confirmed',
+    checkInDate: new Date(Date.now() + 24 * 3600000) // 24h away (< 48h)
+  };
+  Booking.findById = async () => nearCheckinBooking;
+  await assert.rejects(
+    async () => {
+      await bookingService.modifyReservation(fakeBookingId, {
+        checkInDate: new Date(Date.now() + 48 * 3600000)
+      });
+    },
+    /Stay dates cannot be modified because cancellation is no longer eligible for a full refund/
+  );
+
+  // 8. UC08: Cancel Reservation validation (BR-16, BR-17, BR-29, BR-36)
+  console.log('[Test Member 2] Testing UC08: Cancel Reservation & Cancellation Requested...');
+
+  // 8a. Pending reservation: calls abandonPayment and sets status to 'expired' (BR-29)
+  const pendingBooking = {
+    ...mockBooking,
+    status: 'pending',
+    events: [],
+    save: async function() { return this; }
+  };
+  Booking.findById = async () => pendingBooking;
+  const abandonResult = await bookingService.abandonPayment(fakeBookingId);
+  assert.equal(abandonResult.status, 'expired', 'Abandoned pending booking must become expired');
+
+  // 8b. Confirmed reservation > 48h away with refundAccount transitions to 'cancellation_requested' (BR-16, BR-32)
+  const confirmedBooking = {
+    ...mockBooking,
+    status: 'confirmed',
+    checkInDate: new Date('2026-11-15T14:00:00Z'), // > 48h away
+    events: [],
+    save: async function() { return this; }
+  };
+  Booking.findById = async () => confirmedBooking;
+  const cancelReqResult = await bookingService.cancelReservation(fakeBookingId, {
+    reason: 'Schedule changed',
+    refundAccount: {
+      bank: 'Vietcombank',
+      accountNumber: '123456789',
+      holderName: 'Valued Guest'
+    }
+  });
+  assert.equal(cancelReqResult.status, 'cancellation_requested', 'Eligible confirmed booking cancellation must become cancellation_requested');
+  assert.equal(cancelReqResult.cancellation.refundableAmount, 400000, 'Refundable amount must equal 100% of deposit');
+  assert.equal(cancelReqResult.refundAccount.bank, 'Vietcombank');
+
+  // 8c. Withdraw cancellation request restores status to 'confirmed' (BR-36)
+  const cancellationRequestedBooking = {
+    ...cancelReqResult,
+    status: 'cancellation_requested',
+    events: [],
+    save: async function() { return this; }
+  };
+  Booking.findById = async () => cancellationRequestedBooking;
+  const withdrawResult = await bookingService.withdrawCancellation(fakeBookingId);
+  assert.equal(withdrawResult.status, 'confirmed', 'Withdrawn cancellation request must return status to confirmed');
+
+  // 9. UC37: Occupancy Report Calculation
+  console.log('[Test Member 2] Testing UC37: Occupancy Report math & exclusions...');
+  const origRoomFind2 = Room.find;
+  const origBookingFind2 = Booking.find;
+
+  // 10 total physical rooms: 8 available, 2 maintenance
+  const mockPhysicalRooms = Array.from({ length: 10 }, (_, i) => ({
+    _id: id(),
+    roomNumber: `Room-${i + 1}`,
+    status: i < 2 ? 'maintenance' : 'available',
+    roomTypeId: { name: 'Deluxe' }
+  }));
+
+  Room.find = () => ({
+    populate: async () => mockPhysicalRooms
+  });
+
+  // 4 overlapping bookings active during date range
+  Booking.find = async () => [
+    { checkInDate: new Date('2026-11-01'), checkOutDate: new Date('2026-11-04'), rooms: [{ roomId: mockPhysicalRooms[2]._id }] },
+    { checkInDate: new Date('2026-11-01'), checkOutDate: new Date('2026-11-04'), rooms: [{ roomId: mockPhysicalRooms[3]._id }] },
+    { checkInDate: new Date('2026-11-01'), checkOutDate: new Date('2026-11-04'), rooms: [{ roomId: mockPhysicalRooms[4]._id }] },
+    { checkInDate: new Date('2026-11-01'), checkOutDate: new Date('2026-11-04'), rooms: [{ roomId: mockPhysicalRooms[5]._id }] }
+  ];
+
+  const occupancyRep = await bookingService.getOccupancyReport({
+    hotelId,
+    startDate: '2026-11-01',
+    endDate: '2026-11-03'
+  });
+
+  assert.equal(occupancyRep.totals.totalPhysicalRooms, 10, 'Total physical rooms should be 10');
+  // 3 days * 2 maintenance rooms = 6 maintenance nights
+  assert.equal(occupancyRep.totals.totalMaintenanceNights, 6, '3 days * 2 maintenance = 6');
+  // 3 days * 8 sellable rooms = 24 sellable nights
+  assert.equal(occupancyRep.totals.totalSellableNights, 24, '3 days * 8 sellable = 24');
+  // 3 days * 4 occupied rooms = 12 occupied nights
+  assert.equal(occupancyRep.totals.totalOccupiedNights, 12, '3 days * 4 occupied = 12');
+  // Average occupancy = (12 / 24) * 100 = 50%
+  assert.equal(occupancyRep.totals.averageOccupancyRate, 50, 'Occupancy rate should equal 50%');
+
+  // Restore all mocks
+  Booking.findById = origBookingFindById;
+  Room.find = origRoomFind2;
+  Booking.find = origBookingFind2;
+
+  console.log('✅ [Test Member 2] All Member 2 models, schema validations, pricing, T06 availability, UC07 core, UC12 modify, UC13 cancel, and UC37 occupancy report tests passed successfully!');
 }
 
 testMember2Logic().catch(err => {
   console.error('❌ [Test Member 2 Failed]:', err);
   process.exit(1);
 });
+

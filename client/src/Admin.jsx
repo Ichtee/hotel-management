@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { BOOKINGS, MENU, ROOMS, TABLES } from './data.js';
 import AdminRoomMap from './pages/AdminRoomMap.jsx';
 import AdminRoomTypes from './pages/AdminRoomTypes.jsx';
+import AdminCleaningTasks from './pages/AdminCleaningTasks.jsx';
+import AdminRoomIssues from './pages/AdminRoomIssues.jsx';
 import './admin.css';
 import { useAuth } from './context/Auth.jsx';
 import { Badge, DataTable, Field, LineChart, Modal, Notice, PageHead, useApi } from './ui.jsx';
 import { AuthShell, SignIn, ForgotPassword } from './AuthForms.jsx';
-import { Coupons, DepositPolicy, Profile, Revenue, Roles, Users } from './AdminPages.jsx';
+import { Coupons, DepositPolicy, Occupancy, Profile, Revenue, Roles, Users } from './AdminPages.jsx';
 import { Cancellations, Refunds } from './Cancellations.jsx';
 import { api, money } from './api/client.js';
 
@@ -205,6 +207,7 @@ function Dashboard() {
 function Bookings() {
   const { user } = useAuth();
   const [f, setF] = useState('all');
+  const [search, setSearch] = useState('');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState(null);
   const [cancelling, setCancelling] = useState(null);
@@ -212,25 +215,70 @@ function Bookings() {
   const [changingRoom, setChangingRoom] = useState(null);
   const [addingService, setAddingService] = useState(null);
   const [checkingOut, setCheckingOut] = useState(null);
-  const live = useApi('/bookings?limit=100', user.role === 'receptionist');
-  const rows = (live.data || BOOKINGS).filter((b) => f === 'all' || b.status === f);
+
+  const statusParam = f !== 'all' ? `&status=${f}` : '';
+  const searchParam = search ? `&reference=${encodeURIComponent(search)}` : '';
+  const live = useApi(`/bookings/search?limit=100${statusParam}${searchParam}`);
+  const fallbackRows = (BOOKINGS || []).filter((b) => f === 'all' || b.status === f);
+  const bookingsList = live.data || fallbackRows;
+
   return (
     <>
-      <PageHead title="Bookings" sub="All reservations" action={user.role === 'receptionist' ? 'New booking' : null} onAction={() => setCreating(true)} />
-      <div className="chips" role="group" aria-label="Filter by status">
-        {['all', 'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled'].map((s) => (
-          <button key={s} className={f === s ? 'chip on' : 'chip'} aria-pressed={f === s} onClick={() => setF(s)}>{s.replace('_', ' ')}</button>
-        ))}
+      <PageHead
+        title="Bookings"
+        sub="All reservations with real-time status and search (UC39)"
+        action={user.role === 'receptionist' || user.role === 'admin' ? 'New booking' : null}
+        onAction={() => setCreating(true)}
+      />
+      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap' }}>
+        <div className="chips" role="group" aria-label="Filter by status" style={{ margin: 0 }}>
+          {['all', 'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled'].map((s) => (
+            <button key={s} className={f === s ? 'chip on' : 'chip'} aria-pressed={f === s} onClick={() => setF(s)}>{s.replace('_', ' ')}</button>
+          ))}
+        </div>
+        <input
+          type="search"
+          placeholder="Search booking code or reference…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ padding: '0.45rem 0.8rem', borderRadius: '8px', border: '1px solid var(--line)', minWidth: '240px' }}
+        />
       </div>
       <Notice error={live.error} />
-      <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status', '']} rows={rows.map((b) => b._id ? [b.bookingReference, b.guestName || '—', b.rooms[0]?.roomId?.roomNumber || 'Assigned at check-in', b.rooms[0]?.roomTypeId?.name || 'Room', b.checkInDate?.slice(0, 10), b.checkOutDate?.slice(0, 10), money(b.totalAmount), b.status, <span className="row-actions"><button className="btn sm" onClick={() => setEditing(b)}>Edit</button>{b.status === 'confirmed' && <button className="btn sm" onClick={() => setCheckingIn(b)}>Check in</button>}{b.status === 'checked_in' && <><button className="btn sm" onClick={() => setChangingRoom(b)}>Change room</button><button className="btn sm" onClick={() => setAddingService(b)}>Add service</button><button className="btn sm" onClick={() => setCheckingOut(b)}>Check out</button></>}{['pending', 'confirmed'].includes(b.status) && <button className="btn sm" onClick={() => setCancelling(b)}>Cancel</button>}</span>] : [b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status, ''])} />
-      {creating && <WalkInBooking onClose={() => setCreating(false)} />}
-      {editing && <EditBooking booking={editing} onClose={() => setEditing(null)} />}
-      {cancelling && <CancelBooking booking={cancelling} onClose={() => setCancelling(null)} />}
-      {checkingIn && <CheckInBooking booking={checkingIn} onClose={() => setCheckingIn(null)} />}
-      {changingRoom && <ChangeRoom booking={changingRoom} onClose={() => setChangingRoom(null)} />}
-      {addingService && <AddService booking={addingService} onClose={() => setAddingService(null)} />}
-      {checkingOut && <CheckOutBooking booking={checkingOut} onClose={() => setCheckingOut(null)} />}
+      <DataTable
+        cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status', 'Actions']}
+        rows={bookingsList.map((b) => b._id ? [
+          b.bookingReference || b._id.slice(-8).toUpperCase(),
+          b.guestName || '—',
+          b.rooms?.[0]?.roomId?.roomNumber ? `Room ${b.rooms[0].roomId.roomNumber}` : 'Assigned at check-in',
+          b.rooms?.[0]?.roomTypeId?.name || 'Room',
+          b.checkInDate?.slice(0, 10),
+          b.checkOutDate?.slice(0, 10),
+          money(b.totalAmount),
+          b.status,
+          <span className="row-actions" key={b._id}>
+            <button className="btn sm" onClick={() => setEditing(b)}>Edit</button>
+            {b.status === 'confirmed' && <button className="btn sm" onClick={() => setCheckingIn(b)}>Check in</button>}
+            {b.status === 'checked_in' && (
+              <>
+                <button className="btn sm" onClick={() => setChangingRoom(b)}>Change room</button>
+                <button className="btn sm" onClick={() => setAddingService(b)}>Add service</button>
+                <button className="btn sm" onClick={() => setCheckingOut(b)}>Check out</button>
+              </>
+            )}
+            {['pending', 'confirmed'].includes(b.status) && <button className="btn sm" onClick={() => setCancelling(b)}>Cancel</button>}
+          </span>
+        ] : [
+          b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status, ''
+        ])}
+      />
+      {creating && <WalkInBooking onClose={() => { setCreating(false); live.reload(); }} />}
+      {editing && <EditBooking booking={editing} onClose={() => { setEditing(null); live.reload(); }} />}
+      {cancelling && <CancelBooking booking={cancelling} onClose={() => { setCancelling(null); live.reload(); }} />}
+      {checkingIn && <CheckInBooking booking={checkingIn} onClose={() => { setCheckingIn(null); live.reload(); }} />}
+      {changingRoom && <ChangeRoom booking={changingRoom} onClose={() => { setChangingRoom(null); live.reload(); }} />}
+      {addingService && <AddService booking={addingService} onClose={() => { setAddingService(null); live.reload(); }} />}
+      {checkingOut && <CheckOutBooking booking={checkingOut} onClose={() => { setCheckingOut(null); live.reload(); }} />}
     </>
   );
 }
@@ -241,7 +289,7 @@ function CustomerAccounts() {
   return <><PageHead title="Customer accounts" sub="Search customers and manage the blacklist" />
     <form className="chips" onSubmit={(e) => e.preventDefault()}><input aria-label="Search customers" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Name, username or email" /><select aria-label="Customer status" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="suspended">Blacklisted</option></select></form>
     <Notice error={list.error} />
-    <DataTable cols={['Name', 'Username', 'Email', 'Phone', 'Status', '']} rows={(list.data || []).map((u) => [u.customerProfile?.fullName || '—', u.username, u.email, u.phone || '—', u.status, <button className="btn sm" onClick={() => setSelected(u)}>{u.status === 'active' ? 'Blacklist' : 'Restore'}</button>])} />
+    <DataTable cols={['Name', 'Username', 'Email', 'Phone', 'Status', '']} rows={(list.data || []).map((u) => [u.customerProfile?.fullName || '—', u.username, u.email, u.phone || '—', u.status, <button key={u._id} className="btn sm" onClick={() => setSelected(u)}>{u.status === 'active' ? 'Blacklist' : 'Restore'}</button>])} />
     {selected && <CustomerStatus customer={selected} onClose={() => { setSelected(null); list.reload(); }} />}
   </>;
 }
@@ -436,11 +484,14 @@ const PAGES = {
   '#/admin/roles': Roles,
   '#/admin/coupons': Coupons,
   '#/admin/revenue': Revenue,
+  '#/admin/occupancy': Occupancy,
   '#/admin/profile': Profile,
   '#/admin/bookings': Bookings,
   '#/admin/frontdesk': FrontDesk,
   '#/admin/rooms': AdminRoomMap,
   '#/admin/roomtypes': AdminRoomTypes,
+  '#/admin/cleaning': AdminCleaningTasks,
+  '#/admin/issues': AdminRoomIssues,
   '#/admin/hotel': Hotel,
   '#/admin/policy': DepositPolicy,
   '#/admin/cancellations': Cancellations,
@@ -449,7 +500,17 @@ const PAGES = {
 
 const Forbidden = () => <><PageHead title="No access" sub="Your role does not include this area." /><a className="btn" href="#/admin">Back to dashboard</a></>;
 
-const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/roles': 'roles.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read', '#/admin/policy': 'policies.manage', '#/admin/cancellations': 'cancellations.review', '#/admin/refunds': 'refunds.handle' };
+const NEEDS = {
+  '#/admin/users': 'users.manage',
+  '#/admin/staff': 'staff.manage',
+  '#/admin/roles': 'roles.manage',
+  '#/admin/coupons': 'promotions.manage',
+  '#/admin/revenue': 'revenue.read',
+  '#/admin/occupancy': 'revenue.read',
+  '#/admin/policy': 'policies.manage',
+  '#/admin/cancellations': 'cancellations.review',
+  '#/admin/refunds': 'refunds.handle'
+};
 
 export default function Admin({ route }) {
   const { user, loading } = useAuth();

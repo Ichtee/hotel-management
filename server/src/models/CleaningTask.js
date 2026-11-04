@@ -15,8 +15,10 @@ const schema = new Schema({
   checklist: [{ label: String, completed: { type: Boolean, default: false } }],
   requestContent: String,
   routineKey: { type: String },
+  inspectionKey: { type: String },
   unassignedNotifiedKey: String
 }, { timestamps: true });
 schema.index({ assignedTo: 1, status: 1 });
 schema.index({ routineKey: 1 }, { unique: true, sparse: true });
+schema.index({ inspectionKey: 1 }, { unique: true, sparse: true });
 module.exports = mongoose.model('CleaningTask', schema);

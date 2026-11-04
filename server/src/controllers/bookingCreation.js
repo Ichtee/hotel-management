@@ -9,6 +9,7 @@ const Service = require("../models/Service");
 const Invoice = require("../models/Invoice");
 const { validateCoupon } = require("../services/promotions");
 const { currentDepositPolicy } = require("../services/policies");
+const { createCleaningTask } = require("../services/housekeepingTasks");
 const v = require("../utils/validation");
 
 const ACTIVE = ["pending", "confirmed", "checked_in"];
@@ -182,7 +183,8 @@ async function changeRoom(req, res) {
   if (cause === "guest") { booking.roomAmount += extra; booking.totalAmount += extra; }
   booking.events.push({ actorId: req.user._id, type: "room_changed", note: `${cause === "hotel" ? "Hotel" : "Guest"} room change to ${newRoom.roomNumber}`, oldValue: { roomId: oldRoom._id }, newValue: { roomId: newRoom._id, extra } });
   oldRoom.status = "cleaning"; newRoom.status = "occupied"; await Promise.all([oldRoom.save(), newRoom.save(), booking.save()]);
-  res.json({ data: booking, meta: { extraCharge: extra } });
+  const turnover = await createCleaningTask({ roomId: String(oldRoom._id), type: "turnover" });
+  res.json({ data: booking, meta: { extraCharge: extra, turnoverTask: turnover.data } });
 }
 async function services(_req, res) {
   res.json({ data: await Service.find({ isActive: true }).select("name category unitPrice").sort({ name: 1 }).lean() });
@@ -213,11 +215,13 @@ async function checkOut(req, res) {
     const method = v.choice(req.body.paymentMethod, "paymentMethod", ["cash", "credit_card", "bank_transfer"]);
     await Payment.create({ bookingId: booking._id, kind: "final", amount: balance, method, status: "success", transactionRef: req.body.transactionRef ? v.text(req.body.transactionRef, "transactionRef", 2, 100) : undefined, paidAt: new Date(), recordedBy: req.user._id });
   }
-  await Room.updateMany({ _id: { $in: booking.rooms.map((room) => room.roomId) } }, { $set: { status: "cleaning" } });
+  const roomIds = booking.rooms.map((room) => room.roomId);
+  await Room.updateMany({ _id: { $in: roomIds } }, { $set: { status: "cleaning" } });
   booking.status = "checked_out"; booking.actualCheckOutAt = new Date(); booking.checkedOutBy = req.user._id;
   booking.events.push({ actorId: req.user._id, type: "checked_out", note: `Checked out; final payment ${balance}` });
   await booking.save();
   const invoice = await Invoice.findOneAndUpdate({ bookingId: booking._id }, { $setOnInsert: { bookingId: booking._id, invoiceNumber: `INV-${Date.now()}`, issuedBy: req.user._id, issuedAt: new Date() }, $set: { subtotal: booking.roomAmount + booking.serviceAmount, totalAmount: booking.totalAmount, status: "paid" } }, { new: true, upsert: true });
-  res.json({ data: { booking, invoice, paidAmount: paidAmount + balance, balance } });
+  const turnovers = await Promise.all(roomIds.map((roomId) => createCleaningTask({ roomId: String(roomId), bookingId: String(booking._id), type: "turnover" })));
+  res.json({ data: { booking, invoice, paidAmount: paidAmount + balance, balance, turnoverTasks: turnovers.map((item) => item.data) } });
 }
 module.exports = { create, roomTypes, createWalkIn, modifyWalkIn, cancelWalkIn, availableRooms, checkIn, changeRoomOptions, changeRoom, services, addService, checkOut };

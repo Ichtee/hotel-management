@@ -4,6 +4,10 @@ import AdminRoomMap from './pages/AdminRoomMap.jsx';
 import AdminRoomTypes from './pages/AdminRoomTypes.jsx';
 import AdminCleaningTasks from './pages/AdminCleaningTasks.jsx';
 import AdminRoomIssues from './pages/AdminRoomIssues.jsx';
+import HousekeepingTasks from './HousekeepingTasks.jsx';
+import HousekeepingAssignments from './HousekeepingAssignments.jsx';
+import RoomIssues from './RoomIssues.jsx';
+import AdHocCleaningRequest from './AdHocCleaningRequest.jsx';
 import './admin.css';
 import { useAuth } from './context/Auth.jsx';
 import { Badge, DataTable, Field, LineChart, Modal, Notice, PageHead, useApi } from './ui.jsx';
@@ -489,6 +493,8 @@ const PAGES = {
   '#/admin/bookings': Bookings,
   '#/admin/frontdesk': FrontDesk,
   '#/admin/rooms': AdminRoomMap,
+  '#/admin/assignments': HousekeepingAssignments,
+  '#/admin/cleaning-request': AdHocCleaningRequest,
   '#/admin/roomtypes': AdminRoomTypes,
   '#/admin/cleaning': AdminCleaningTasks,
   '#/admin/issues': AdminRoomIssues,
@@ -500,17 +506,7 @@ const PAGES = {
 
 const Forbidden = () => <><PageHead title="No access" sub="Your role does not include this area." /><a className="btn" href="#/admin">Back to dashboard</a></>;
 
-const NEEDS = {
-  '#/admin/users': 'users.manage',
-  '#/admin/staff': 'staff.manage',
-  '#/admin/roles': 'roles.manage',
-  '#/admin/coupons': 'promotions.manage',
-  '#/admin/revenue': 'revenue.read',
-  '#/admin/occupancy': 'revenue.read',
-  '#/admin/policy': 'policies.manage',
-  '#/admin/cancellations': 'cancellations.review',
-  '#/admin/refunds': 'refunds.handle'
-};
+const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/roles': 'roles.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read', '#/admin/occupancy': 'revenue.read', '#/admin/policy': 'policies.manage', '#/admin/cancellations': 'cancellations.review', '#/admin/refunds': 'refunds.handle', '#/admin/cleaning-request': 'cleaning_tasks.ad_hoc.create' };
 
 export default function Admin({ route }) {
   const { user, loading } = useAuth();
@@ -518,7 +514,7 @@ export default function Admin({ route }) {
   if (loading) return <p className="muted center-msg">Loading…</p>;
   if (route === '#/admin/login') return <Login />;
   if (!user || user.scope === 'self') { if (location.hash !== '#/admin/login') location.hash = '#/admin/login'; return null; }
-  const denied = (route === '#/admin/customers' && user.role !== 'manager') || (NEEDS[route] && !user.permissions.includes(NEEDS[route]));
+  const denied = ((route === '#/admin/customers' || route === '#/admin/assignments') && user.role !== 'manager') || (NEEDS[route] && !user.permissions.includes(NEEDS[route]));
   const id = route.slice(8);
   const Page = denied ? Forbidden : PAGES[route] || (TABLES[id] ? () => <TablePage id={id} /> : Dashboard);
   return (

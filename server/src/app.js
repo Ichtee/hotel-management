@@ -22,13 +22,15 @@ const cancellations = require("./controllers/cancellations");
 const refunds = require("./controllers/refunds");
 const jobs = require("./controllers/jobs");
 const { revenue } = require("./controllers/revenue");
+const { occupancy } = require("./controllers/occupancy");
+const roomIssues = require("./controllers/roomIssues");
+const housekeepingTasks = require("./controllers/housekeepingTasks");
 const { HttpError } = require("./utils/validation");
 const RoomType = require("./models/RoomType");
 
 // Member 2 Routes & Controllers
 const roomTypeRoutes = require("./routes/roomTypeRoutes");
 const roomRoutes = require("./routes/roomRoutes");
-const housekeepingRoutes = require("./routes/housekeepingRoutes");
 const bookingController = require("./controllers/bookingController");
 
 // Front-desk routes (theanh)
@@ -104,10 +106,9 @@ function createApp({
 
   app.get("/api/health", (req, res) => res.json({ data: { status: "ok" } }));
 
-  // --- Public Member 2 Routes (Room Search, Types, Housekeeping) ---
+  // --- Public Member 2 Routes (Room Search and Types) ---
   app.use("/api/room-types", roomTypeRoutes);
   app.use("/api/rooms", roomRoutes);
-  app.use("/api/housekeeping", housekeepingRoutes);
 
 
   // --- Member 2 Booking Endpoints (UC07 Make Reservation & Cancellation) ---
@@ -198,6 +199,14 @@ function createApp({
   // UC12 Submit Review (Customer session)
   app.post("/api/reviews", roomTypes.submitReview);
   app.get("/api/reviews/my", roomTypes.customerReviews);
+  app.get("/api/room-issues/options", permit("room_issues.report"), roomIssues.options);
+  app.post("/api/room-issues", permit("room_issues.report"), roomIssues.create);
+  app.get("/api/room-issues", requireManager, roomIssues.listing);
+  // M5 housekeeping workflows are authenticated: a Housekeeping user can only see/update own tasks.
+  app.get("/api/housekeeping/tasks/mine", permit("cleaning_tasks.own.read"), housekeepingTasks.mine);
+  app.patch("/api/housekeeping/tasks/:id/status", permit("cleaning_tasks.status.update"), housekeepingTasks.updateMine);
+  app.get("/api/housekeeping/tasks/ad-hoc/options", permit("cleaning_tasks.ad_hoc.create"), housekeepingTasks.adHocOptions);
+  app.post("/api/housekeeping/tasks/ad-hoc", permit("cleaning_tasks.ad_hoc.create"), housekeepingTasks.createAdHoc);
   app.get("/api/options", accounts.options);
   app.get("/api/customers", customers.list);
   app.patch("/api/customers/:id/blacklist", customers.blacklist);
@@ -299,6 +308,7 @@ function createApp({
   app.use("/api/front-desk", frontDeskRoutes);
 
   app.get("/api/reports/revenue", permit("revenue.read"), revenue);
+  app.get("/api/reports/occupancy", permit("revenue.read"), occupancy);
 
   app.use((req, res) =>
     res.status(404).json({ error: { message: "Endpoint not found." } }),

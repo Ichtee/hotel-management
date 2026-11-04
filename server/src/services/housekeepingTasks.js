@@ -4,6 +4,7 @@ const Task = require("../models/CleaningTask");
 const v = require("../utils/validation");
 const { currentShift, dayDate } = require("../utils/hotelTime");
 const { hotelDay } = require("./roomInventory");
+const { currentCancellationPolicy } = require("./policies");
 const { responsibleStaff } = require("./housekeepingPlans");
 const { hotelTransaction } = require("./hotelOperations");
 const { deliver } = require("./operationNotifications");
@@ -84,6 +85,33 @@ async function createCleaningTask(input, { now = new Date() } = {}) {
   return { data: result.task, notificationStored: await deliver(result.events) };
 }
 
+// UC30: only the Housekeeping employee assigned to a task can progress it.
+// A room becomes Available only after its Turnover task is actually completed.
+async function updateOwnTaskStatus(taskId, actorId, input, { now = new Date() } = {}) {
+  v.keys(input, ["status"]);
+  const status = v.choice(input.status, "status", ["in_progress", "completed", "skipped"]);
+  const result = await hotelTransaction(async (session) => {
+    const task = await Task.findById(taskId).session(session);
+    if (!task) throw new v.HttpError(404, "Cleaning task not found.");
+    if (!task.assignedTo || String(task.assignedTo) !== String(actorId))
+      throw new v.HttpError(403, "You can only update cleaning tasks assigned to you.");
+    if (["completed", "skipped"].includes(task.status))
+      throw new v.HttpError(409, "This cleaning task is already closed.");
+    if (status === "completed" && task.status !== "in_progress")
+      throw new v.HttpError(409, "Start the cleaning task before completing it.");
+
+    task.status = status;
+    if (status === "completed") task.completedAt = now;
+    await task.save({ session });
+
+    if (task.type === "turnover" && status === "completed")
+      await Room.updateOne({ _id: task.roomId, status: "cleaning" }, { $set: { status: "available" } }, { session });
+
+    return task.populate([{ path: "roomId", select: "roomNumber floor status" }, { path: "assignedTo", select: "username customerProfile.fullName" }]);
+  });
+  return { data: result };
+}
+
 // Mỗi ngày tạo tối đa một Routine cho phòng Occupied, trừ phòng trả trong ngày.
 async function createRoutineTasks(session, events, now) {
   const date = hotelDay(now);
@@ -103,16 +131,41 @@ async function createRoutineTasks(session, events, now) {
   return created;
 }
 
-// Chạy mốc 07:00 và giao task Pending, giữ nguyên Assigned khi đổi ca.
+// T18: create one urgent inspection per occupied room in the 30-minute checkout window.
+async function createInspectionTasks(session, events, now) {
+  const policy = await currentCancellationPolicy(now).session(session);
+  const checkOutTime = policy?.checkOutTime || "12:00";
+  const today = hotelDay(now);
+  const [hour, minute] = checkOutTime.split(":").map(Number);
+  const checkOutAt = new Date(`${today}T00:00:00+07:00`);
+  checkOutAt.setTime(checkOutAt.getTime() + (hour * 60 + minute) * 60000);
+  const opensAt = new Date(checkOutAt.getTime() - 30 * 60000);
+  if (now < opensAt || now >= checkOutAt) return 0;
+  const start = dayDate(today), end = new Date(start.getTime() + 86400000);
+  const bookings = await Booking.find({ status: "checked_in", checkOutDate: { $gte: start, $lt: end } }).select("_id rooms").session(session);
+  let created = 0;
+  for (const booking of bookings) for (const line of booking.rooms) {
+    if (!line.roomId) continue;
+    const inspectionKey = `${booking.id}:${line.roomId}`;
+    if (await Task.exists({ inspectionKey }).session(session)) continue;
+    await createTaskInSession({ roomId: line.roomId, bookingId: booking._id, type: "inspection", inspectionKey,
+      requestContent: "Inspect room before scheduled checkout." }, session, events, now);
+    created++;
+  }
+  return created;
+}
+
+// Runs housekeeping schedules and assigns Pending tasks without moving active work between shifts.
 async function runHousekeepingTick(now = new Date()) {
   const local = new Date(now.getTime() + 7 * 3600000);
   const result = await hotelTransaction(async (session) => {
     const events = [];
-    const created = local.getUTCHours() === 7 && local.getUTCMinutes() === 0
+    const routineCreated = local.getUTCHours() === 7 && local.getUTCMinutes() === 0
       ? await createRoutineTasks(session, events, now) : 0;
+    const inspectionCreated = await createInspectionTasks(session, events, now);
     await reconcileTasks(session, events, { now });
-    return { created, events };
+    return { created: routineCreated + inspectionCreated, routineCreated, inspectionCreated, events };
   });
   return { created: result.created, notificationStored: await deliver(result.events) };
 }
-module.exports = { reconcileTasks, createCleaningTask, runHousekeepingTick };
+module.exports = { reconcileTasks, createCleaningTask, updateOwnTaskStatus, runHousekeepingTick };

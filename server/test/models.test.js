@@ -11,7 +11,7 @@ const models = Object.fromEntries(fs.readdirSync(modelsDir)
   }));
 
 async function validateModels() {
-  assert.equal(Object.keys(models).length, 20);
+  assert.equal(Object.keys(models).length, 22);
   assert.equal(models.Hotel, undefined);
   for (const [name, model] of Object.entries(models)) {
     assert.equal(model.modelName, name);

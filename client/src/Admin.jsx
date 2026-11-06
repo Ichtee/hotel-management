@@ -219,6 +219,7 @@ function Bookings() {
   const [changingRoom, setChangingRoom] = useState(null);
   const [addingService, setAddingService] = useState(null);
   const [checkingOut, setCheckingOut] = useState(null);
+  const [penalizing, setPenalizing] = useState(null);
 
   const statusParam = f !== 'all' ? `&status=${f}` : '';
   const searchParam = search ? `&reference=${encodeURIComponent(search)}` : '';
@@ -270,6 +271,7 @@ function Bookings() {
                 <button className="btn sm" onClick={() => setCheckingOut(b)}>Check out</button>
               </>
             )}
+            {['checked_in', 'checked_out'].includes(b.status) && <button className="btn sm" onClick={() => setPenalizing(b)}>Penalties</button>}
             {['pending', 'confirmed'].includes(b.status) && <button className="btn sm" onClick={() => setCancelling(b)}>Cancel</button>}
           </span>
         ] : [
@@ -283,6 +285,7 @@ function Bookings() {
       {changingRoom && <ChangeRoom booking={changingRoom} onClose={() => { setChangingRoom(null); live.reload(); }} />}
       {addingService && <AddService booking={addingService} onClose={() => { setAddingService(null); live.reload(); }} />}
       {checkingOut && <CheckOutBooking booking={checkingOut} onClose={() => { setCheckingOut(null); live.reload(); }} />}
+      {penalizing && <Penalties booking={penalizing} onClose={() => { setPenalizing(null); live.reload(); }} />}
     </>
   );
 }
@@ -310,12 +313,32 @@ function CheckOutBooking({ booking, onClose }) {
   const b = detail.data || booking; const paid = b.paidAmount || 0; const balance = Math.max(0, b.totalAmount - paid);
   const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${b._id}/check-out`, { method: 'POST', body: { inspectionConfirmed: true, paymentMethod: f.paymentMethod, transactionRef: f.transactionRef || undefined } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
   return <Modal title={`Check out · ${b.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
-    <p className="full muted">Room {money(b.roomAmount)} · Services {money(b.serviceAmount)} · Total {money(b.totalAmount)} · Paid {money(paid)}</p>
+    <p className="full muted">Room {money(b.roomAmount)} · Services {money(b.serviceAmount)}{b.penaltyAmount > 0 && <> · Penalties {money(b.penaltyAmount)}</>} · Total {money(b.totalAmount)} · Paid {money(paid)}</p>
     <p className="full"><strong>Balance due: {money(balance)}</strong></p>
     {balance > 0 && <><Field label="Payment method"><select name="paymentMethod" defaultValue="cash"><option value="cash">Cash</option><option value="credit_card">Credit card / POS</option><option value="bank_transfer">Bank transfer</option></select></Field><Field label="Transaction reference"><input name="transactionRef" /></Field></>}
     <label className="check full"><input type="checkbox" required /> Room inspection completed or explicitly skipped</label>
     <div className="full"><Notice error={detail.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving}>{saving ? 'Checking out…' : 'Collect payment & check out'}</button></div>
   </form></Modal>;
+}
+
+// UC38: record a damage / loss item, or confirm (possibly reduced) / waive one proposed by Housekeeping.
+function Penalties({ booking, onClose }) {
+  const list = useApi(`/frontdesk/bookings/${booking._id}/penalties`); const catalog = useApi('/frontdesk/compensation-items'); const [pick, setPick] = useState(''); const [qty, setQty] = useState(1); const [amt, setAmt] = useState(''); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  const act = async (path, method, body) => { setSaving(true); setError(null); try { await api(path, { method, body }); list.reload(); return true; } catch (x) { setError(x); return false; } finally { setSaving(false); } };
+  const submit = async (e) => { e.preventDefault(); const form = e.target; const f = Object.fromEntries(new FormData(form)); if (await act(`/frontdesk/bookings/${booking._id}/penalties`, 'POST', { itemName: pick && pick !== 'other' ? `${(catalog.data || []).find((i) => i._id === pick)?.name}${Number(qty) > 1 ? ` x${qty}` : ''}` : f.itemName, amount: Number(amt), description: f.description || undefined })) form.reset(); setPick(''); setQty(1); setAmt(''); };
+  const confirm = (p) => { const value = window.prompt(`Confirmed amount (at most ${p.proposedAmount})`, p.proposedAmount); if (value !== null) act(`/frontdesk/penalties/${p._id}`, 'PATCH', { action: 'confirm', amount: Number(value) }); };
+  const waive = (p) => { const reason = window.prompt('Reason for waiving this penalty'); if (reason) act(`/frontdesk/penalties/${p._id}`, 'PATCH', { action: 'waive', reason }); };
+  return <Modal title={`Penalties · ${booking.bookingReference}`} onClose={onClose}>
+    {list.loading ? <p className="muted">Loading penalties…</p> : <DataTable cols={['Item', 'Proposed', 'Charged', 'Status', '']} rows={(list.data || []).map((p) => [p.itemName + (p.afterCheckout ? ' (after check-out)' : ''), money(p.proposedAmount), p.amount == null ? '—' : money(p.amount), p.status, ['proposed', 'confirmed'].includes(p.status) ? <span className="row-actions">{p.status === 'proposed' && <button className="btn sm" disabled={saving} onClick={() => confirm(p)}>Confirm</button>}<button className="btn sm" disabled={saving} onClick={() => waive(p)}>Waive</button></span> : p.waivedReason || ''])} />}
+    <form className="form" onSubmit={submit}>
+      <Field label="Damaged / lost item"><select value={pick} required onChange={(e) => { setPick(e.target.value); const it = (catalog.data || []).find((i) => i._id === e.target.value); setAmt(it ? String(it.price * qty) : ''); }}><option value="">Select an item…</option>{(catalog.data || []).map((i) => <option key={i._id} value={i._id}>{i.name} · {money(i.price)}</option>)}<option value="other">Other (describe)</option></select></Field>
+      {pick === 'other' && <Field label="Item description"><input name="itemName" required maxLength={120} /></Field>}
+      {pick && pick !== 'other' && <Field label="Quantity"><input type="number" min="1" step="1" value={qty} onChange={(e) => { setQty(e.target.value); const it = (catalog.data || []).find((i) => i._id === pick); if (it) setAmt(String(it.price * Number(e.target.value || 0))); }} /></Field>}
+      <Field label="Amount (VND)"><input type="number" min="1" step="1" required value={amt} onChange={(e) => setAmt(e.target.value)} /></Field>
+      <Field label="Description"><input name="description" maxLength={500} /></Field>
+      <div className="full"><Notice error={list.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Close</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Record penalty'}</button></div>
+    </form>
+  </Modal>;
 }
 
 function AddService({ booking, onClose }) {

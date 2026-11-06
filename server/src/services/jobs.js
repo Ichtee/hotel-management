@@ -6,18 +6,18 @@ const jobs = {
   "payment-reconciliation": reconcileDaily, // job 07, 04:15 daily
 };
 const run = (name) => jobs[name](new Date()).catch((e) => console.error(`Job ${name} failed:`, e.message));
+// Next hh:mm in Asia/Ho_Chi_Minh (UTC+7, no daylight saving), e.g. 04:15 is 21:15 UTC.
+const untilNext = (hour, minute) => {
+  const t = new Date();
+  t.setUTCHours((hour + 17) % 24, minute, 0, 0);
+  if (t <= Date.now()) t.setUTCDate(t.getUTCDate() + 1);
+  return t - Date.now();
+};
+const daily = (name, hour, minute) => setTimeout(() => run(name).then(() => daily(name, hour, minute)), untilNext(hour, minute)).unref();
 // In-process timers; POST /api/jobs/:name lets an external cron trigger the same jobs when the server sleeps.
 function schedule() {
   setInterval(() => run("cancellation-auto-approval"), 5 * 60000).unref();
   run("cancellation-auto-approval"); // catch up after downtime
-  // 04:15 in Asia/Ho_Chi_Minh (UTC+7, no daylight saving) is 21:15 UTC.
-  const untilNext = () => {
-    const t = new Date();
-    t.setUTCHours(21, 15, 0, 0);
-    if (t <= Date.now()) t.setUTCDate(t.getUTCDate() + 1);
-    return t - Date.now();
-  };
-  const daily = () => setTimeout(() => run("payment-reconciliation").then(daily), untilNext()).unref();
-  daily();
+  daily("payment-reconciliation", 4, 15);
 }
 module.exports = { jobs, schedule };

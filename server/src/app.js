@@ -20,6 +20,7 @@ const policies = require("./controllers/policies");
 const payments = require("./controllers/payments");
 const cancellations = require("./controllers/cancellations");
 const refunds = require("./controllers/refunds");
+const penalties = require("./controllers/penalties");
 const jobs = require("./controllers/jobs");
 const { revenue } = require("./controllers/revenue");
 const { occupancy } = require("./controllers/occupancy");
@@ -111,17 +112,8 @@ function createApp({
   app.use("/api/rooms", roomRoutes);
 
 
-  // --- Member 2 Booking Endpoints (UC07 Make Reservation & Cancellation) ---
-  app.post("/api/bookings", (req, res, next) => {
-    bookingController.create(req, res, next);
-  });
-  app.post("/api/bookings/:id/cancel", (req, res, next) => {
-    bookingController.cancel(req, res, next);
-  });
-  // BR-29: Abandon payment and release pending hold immediately
-  app.post("/api/bookings/:id/cancel-payment", (req, res, next) => {
-    bookingController.cancelPayment(req, res, next);
-  });
+  // Creation (UC06), cancel (UC08) and cancel-payment are session-authenticated and registered below (bookingCreation, cancellations).
+  // --- Member 2 Booking Endpoints (modify / withdraw / search) ---
   // BR-36: Withdraw cancellation request — restore to confirmed
   app.post("/api/bookings/:id/withdraw-cancellation", (req, res, next) => {
     bookingController.withdrawCancellation(req, res, next);
@@ -148,9 +140,6 @@ function createApp({
   });
   app.get("/api/bookings/search", (req, res, next) => {
     bookingController.search(req, res, next);
-  });
-  app.get("/api/reports/occupancy", (req, res, next) => {
-    bookingController.occupancyReport(req, res, next);
   });
 
 
@@ -294,6 +283,12 @@ function createApp({
   app.put("/api/frontdesk/refunds/:id/account", refund, refunds.setAccount);
   app.post("/api/frontdesk/refunds/:id/contacts", refund, refunds.addContact);
   app.post("/api/frontdesk/refunds/:id", refund, refunds.record);
+  // UC38 Record Damage / Loss Penalty
+  const penalize = permit("penalties.record");
+  app.get("/api/frontdesk/compensation-items", penalize, penalties.items);
+  app.get("/api/frontdesk/bookings/:id/penalties", penalize, penalties.listing);
+  app.post("/api/frontdesk/bookings/:id/penalties", penalize, penalties.record);
+  app.patch("/api/frontdesk/penalties/:id", penalize, penalties.review);
 
   // UC27 Deposit & Cancellation Policy, hotel information
   app.use("/api/policies", permit("policies.manage"));

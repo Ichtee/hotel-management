@@ -977,6 +977,46 @@ test("UC35 / T20: the receptionist approves a request and a refund case opens; u
   assert.equal((await autoApprove(new Date())).approved, 0);
 });
 
+test("UC38: penalties join the bill, are confirmed, reduced or waived once, and unpaid post-check-out ones are never waived automatically", async () => {
+  const Penalty = require("../src/models/Penalty");
+  const stay = await payBooking({ status: "checked_in", holdExpiresAt: undefined });
+  const url = `/api/frontdesk/bookings/${stay.id}/penalties`;
+  await send(customer, "post", url, { itemName: "Towel", amount: 100 }).expect(403);
+  const catalog = (await staff.get("/api/frontdesk/compensation-items").expect(200)).body.data;
+  assert.ok(catalog.length >= 5 && catalog.every((i) => i.price > 0)); // dropdown source
+  await customer.get("/api/frontdesk/compensation-items").expect(403);
+  await send(staff, "post", url, { itemName: "Towel", amount: 0 }).expect(400);
+  await send(staff, "post", url, { itemName: "Towel", amount: 100 }).expect(201);
+  // a Housekeeping proposal: reduced on confirm, decided only once
+  const vase = await Penalty.create({ bookingId: stay._id, itemName: "Vase", proposedAmount: 500 });
+  await send(staff, "patch", `/api/frontdesk/penalties/${vase.id}`, { action: "confirm", amount: 600 }).expect(400);
+  await send(staff, "patch", `/api/frontdesk/penalties/${vase.id}`, { action: "confirm", amount: 300 }).expect(200);
+  await send(staff, "patch", `/api/frontdesk/penalties/${vase.id}`, { action: "confirm", amount: 100 }).expect(409);
+  const lamp = await Penalty.create({ bookingId: stay._id, itemName: "Lamp", proposedAmount: 200 });
+  await send(staff, "patch", `/api/frontdesk/penalties/${lamp.id}`, { action: "waive" }).expect(400); // reason required
+  await send(staff, "patch", `/api/frontdesk/penalties/${lamp.id}`, { action: "waive", reason: "Already broken" }).expect(200);
+  let b = await Booking.findById(stay._id);
+  assert.deepEqual([b.penaltyAmount, b.totalAmount], [400, 2400]);
+  assert.equal((await staff.get(url).expect(200)).body.data.length, 3);
+  // paying the whole balance settles the confirmed penalties
+  const paid = (await send(staff, "post", `/api/frontdesk/bookings/${stay.id}/payments`, { method: "cash" }).expect(201)).body.data;
+  assert.equal(paid.amount, 2400);
+  assert.equal(await Penalty.countDocuments({ bookingId: stay._id, status: "paid" }), 2);
+
+  // BR-43: found after check-out; one is paid, the other stays unpaid for 7 days
+  const left = await payBooking({ status: "checked_out", holdExpiresAt: undefined });
+  await Payment.create({ bookingId: left._id, kind: "final", amount: 2000, method: "cash", status: "success", paidAt: new Date() });
+  await send(staff, "post", `/api/frontdesk/bookings/${left.id}/penalties`, { itemName: "Minibar key", amount: 150 }).expect(201);
+  const late = await Penalty.findOne({ bookingId: left._id });
+  assert.equal(late.afterCheckout, true);
+  await Penalty.updateOne({ _id: late._id }, { confirmedAt: new Date(Date.now() - 30 * 864e5) });
+  assert.equal((await Penalty.findById(late._id)).status, "confirmed"); // BR-43: only the Receptionist may waive it
+  await send(staff, "patch", `/api/frontdesk/penalties/${late.id}`, { action: "waive", reason: "Guest disputes" }).expect(200);
+  b = await Booking.findById(left._id);
+  assert.deepEqual([b.penaltyAmount, b.totalAmount], [0, 2000]);
+  await send(staff, "post", `/api/frontdesk/bookings/${(await payBooking()).id}/penalties`, { itemName: "x", amount: 10 }).expect(409); // not checked in
+});
+
 test("jobs endpoint: off without JOB_SECRET, then needs the secret", async () => {
   const saved = process.env.JOB_SECRET;
   delete process.env.JOB_SECRET;

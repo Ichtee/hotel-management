@@ -7,6 +7,7 @@ const gateway = require("../services/gateway");
 const sepay = require("../services/sepay");
 const { paidAmount, settle, announce, reconcile } = require("../services/payments");
 const { audit } = require("../services/audit");
+const { settlePaid } = require("../services/penalties");
 
 const ONLINE = ["credit_card", "e_wallet", "bank_transfer"];
 // PAYMENT_PROVIDER=sepay uses the SePay gateway; anything else uses the built-in sandbox (tests, offline demo).
@@ -76,6 +77,7 @@ async function finalPayment(req, res) {
   const transactionRef = method === "cash" ? undefined : v.text(req.body.transactionRef, "transactionRef", 1, 100);
   const payment = await Payment.create({ bookingId: booking._id, kind: "final", amount, method, transactionRef, status: "success", paidAt: new Date(), recordedBy: req.user._id });
   await announce(payment, true);
+  if (amount === due) await settlePaid(booking._id);
   await audit(req.user._id, "payment.recorded", "payment", payment._id, { bookingId: booking._id, amount, method });
   res.status(201).json({ data: { paymentId: payment.id, status: "success", amount, remaining: due - amount } });
 }

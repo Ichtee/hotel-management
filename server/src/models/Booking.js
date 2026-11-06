@@ -104,6 +104,7 @@ const schema = new Schema({
   discountAmount: { type: Number, default: 0, min: 0 },
   roomAmount: { type: Number, required: true, min: 0 },
   serviceAmount: { type: Number, default: 0, min: 0 },
+  penaltyAmount: { type: Number, default: 0, min: 0 }, // confirmed UC38 penalties, included in totalAmount
   totalAmount: { type: Number, required: true, min: 0 },
   depositRequired: { type: Number, default: 0, min: 0 },
   currency: { type: String, default: 'VND', uppercase: true, trim: true },

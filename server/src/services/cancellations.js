@@ -22,13 +22,13 @@ const WRONG_OTP = "The verification code is incorrect or has expired. Please req
 const reference = (b) => b.bookingReference || String(b._id).slice(-8).toUpperCase();
 
 // Verified deposits, newest first; what the hotel still holds is amount - refundedAmount.
-const deposits = (bookingId) => Payment.find({ bookingId, kind: "deposit", status: "success" }).sort({ paidAt: -1 });
+const deposits = (bookingId) => Payment.find({ bookingId, kind: "deposit", status: "success", isLateDeposit: { $ne: true } }).sort({ paidAt: -1 });
 const held = (p) => p.amount - (p.refundedAmount || 0);
 
 // BR-32 / BR-37: the refundable amount if the request were made at `now`.
 async function estimate(booking, { now = new Date(), hotelCaused = false } = {}) {
   const policy = await currentCancellationPolicy(now);
-  const start = checkInAt(booking.checkInDate, policy?.checkInTime || DEFAULT_CHECK_IN);
+  const start = checkInAt(booking.checkInDate, booking.policySnapshot?.checkInTime || policy?.checkInTime || DEFAULT_CHECK_IN);
   // BR-35: the tiers copied into the booking; ponytail: bookings created without a snapshot use the current policy.
   const tiers = booking.policySnapshot?.cancellationTiers?.length ? booking.policySnapshot.cancellationTiers : policy?.cancellationTiers || [];
   const percent = hotelCaused ? 100 : refundPercent(tiers, (start - now) / 36e5);
@@ -62,6 +62,7 @@ async function request(booking, { actorId, channel, verifyMethod, reason, hotelC
   if (booking.status === "cancellation_requested") throw new v.HttpError(409, "A cancellation request for this booking is already waiting for review.");
   if (booking.status === "pending")
     throw new v.HttpError(409, "This booking is not booked yet: cancel the payment instead and the held room is released at once.");
+  if (booking.pendingChange?.holdExpiresAt > new Date()) throw new v.HttpError(409, "Wait for the pending booking change to finish or expire.");
   if (booking.status !== "confirmed") throw new v.HttpError(409, NOT_ALLOWED);
   const now = new Date();
   const { depositPaid, refundableAmount } = await estimate(booking, { now, hotelCaused });
@@ -126,10 +127,10 @@ async function approve(bookingId, approverId) {
 // T20 (job 02, every 5 minutes): approve requests undecided after 24 hours or at the check-in time (BR-36).
 async function autoApprove(now = new Date()) {
   const time = (await currentCancellationPolicy(now))?.checkInTime || DEFAULT_CHECK_IN;
-  const open = await Booking.find({ status: "cancellation_requested" }).select("checkInDate cancellation.requestedAt");
+  const open = await Booking.find({ status: "cancellation_requested" }).select("checkInDate cancellation.requestedAt policySnapshot.checkInTime");
   let approved = 0;
   for (const b of open) {
-    if (now - b.cancellation.requestedAt < DAY && now < checkInAt(b.checkInDate, time)) continue;
+    if (now - b.cancellation.requestedAt < DAY && now < checkInAt(b.checkInDate, b.policySnapshot?.checkInTime || time)) continue;
     try {
       await approve(b._id, null);
       approved++;

@@ -63,7 +63,7 @@ const summary = (b) => ({
 async function lookup(req, res) {
   const q = v.text(req.query.q, "q", 3, 40).toUpperCase();
   const or = [{ bookingReference: q }];
-  if (/^\d{10,11}$/.test(q)) or.push({ guestPhone: q }, { customerId: { $in: await User.find({ phone: q }).distinct("_id") } });
+  if (/^\d{10,11}$/.test(q)) or.push({ guestPhoneHash: require("../utils/guestData").phoneHash(q) }, { customerId: { $in: await User.find({ phone: q }).distinct("_id") } });
   const rows = await Booking.find({ $or: or }).populate("customerId", BOOKER).sort({ checkInDate: -1 }).limit(20);
   const data = await Promise.all(
     rows.map(async (b) => ({

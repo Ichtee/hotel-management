@@ -14,7 +14,7 @@ async function deliver(events) {
         accountIds = users.map((u) => u._id);
       }
       if (accountIds.length) await Notification.insertMany([...new Set(accountIds.map(String))].map((accountId) => ({
-        accountId, type: event.type, title: event.title, message: event.message, roomId: event.roomId,
+        accountId, type: event.type, title: event.title, message: event.message, roomId: event.roomId, bookingId: event.bookingId,
       })));
     } catch {
       stored = false;

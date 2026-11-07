@@ -6,6 +6,7 @@ const money = (n) => `${Number(n || 0).toLocaleString("en-US")} VND`;
 const events = {
   booking_confirmed: (d) => ["Booking confirmed", `Booking ${d.reference} is confirmed.`],
   booking_modified: (d) => ["Booking updated", `Booking ${d.reference} was modified.`],
+  booking_change_pending: (d) => ["Booking change awaiting deposit", `Booking ${d.reference}: the requested change needs an additional deposit of ${money(d.additionalDeposit)}. Your current stay dates remain valid until the change is confirmed.`],
   booking_cancelled: (d) => ["Booking cancelled", `Booking ${d.reference} was cancelled.`],
   payment_result: (d) => [
     d.success ? "Payment received" : "Payment failed",

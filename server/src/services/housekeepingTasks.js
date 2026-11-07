@@ -96,7 +96,8 @@ async function createRoutineTasks(session, events, now) {
     const checkout = await Booking.exists({ status: "checked_in", "rooms.roomId": room._id,
       checkOutDate: { $gte: today, $lt: tomorrow } }).session(session);
     if (checkout) continue;
-    await createTaskInSession({ roomId: room._id, type: "routine", routineKey,
+    const stay = await Booking.findOne({ status: "checked_in", "rooms.roomId": room._id }).select("_id").session(session);
+    await createTaskInSession({ roomId: room._id, bookingId: stay?._id, type: "routine", routineKey,
       checklist: checklist.map((label) => ({ label, completed: false })) }, session, events, now);
     created++;
   }
@@ -115,4 +116,4 @@ async function runHousekeepingTick(now = new Date()) {
   });
   return { created: result.created, notificationStored: await deliver(result.events) };
 }
-module.exports = { reconcileTasks, createCleaningTask, runHousekeepingTick };
+module.exports = { reconcileTasks, createCleaningTask, createTaskInSession, runHousekeepingTick };

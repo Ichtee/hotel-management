@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { Schema } = mongoose;
+const { encrypt, decrypt } = require("../utils/guestData");
 
 const bookingRoomSchema = new Schema({
   roomId: { type: Schema.Types.ObjectId, ref: 'Room' },
@@ -15,7 +16,9 @@ const bookingServiceSchema = new Schema({
   unitPrice: { type: Number, required: true, min: 0 },
   amount: { type: Number, required: true, min: 0 },
   recordedBy: { type: Schema.Types.ObjectId, ref: 'User' },
-  recordedAt: { type: Date, default: Date.now }
+  recordedAt: { type: Date, default: Date.now },
+  isVoided: { type: Boolean, default: false }, voidReason: String, voidedAt: Date,
+  voidedBy: { type: Schema.Types.ObjectId, ref: 'User' }, operationKey: String
 });
 
 const bookingEventSchema = new Schema({
@@ -65,7 +68,7 @@ const schema = new Schema({
   refundAccount: { bank: String, accountNumber: String, accountHolderName: String },
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'cancellation_requested', 'checked_in', 'checked_out', 'cancelled', 'expired'],
+    enum: ['pending', 'confirmed', 'cancellation_requested', 'checked_in', 'checked_out', 'cancelled', 'expired', 'no_show'],
     default: 'pending', index: true
   },
   rooms: {
@@ -87,11 +90,13 @@ const schema = new Schema({
   services: [bookingServiceSchema],
   events: [bookingEventSchema],
   guestName: { type: String, trim: true },
-  guestPhone: String,
-  guestEmail: String,
-  guestIdDocumentNo: { type: String, select: false },
+  guestPhone: { type: String, set: encrypt, get: decrypt },
+  guestPhoneHash: { type: String, index: true, select: false },
+  guestEmail: { type: String, set: encrypt, get: decrypt },
+  guestIdDocumentNo: { type: String, select: false, set: encrypt, get: decrypt },
   couponCode: { type: String, uppercase: true, trim: true },
   discountAmount: { type: Number, default: 0, min: 0 },
+  couponDiscountSnapshot: { type: Number, min: 0 },
   roomAmount: { type: Number, required: true, min: 0 },
   serviceAmount: { type: Number, default: 0, min: 0 },
   totalAmount: { type: Number, required: true, min: 0 },
@@ -107,8 +112,18 @@ const schema = new Schema({
       refundPercent: { type: Number, min: 0, max: 100 }
     }],
     depositDescription: String,
-    cancellationDescription: String
+    cancellationDescription: String,
+    checkInTime: String, checkOutTime: String, earlyCheckInFee: Number, lateCheckOutFee: Number
   },
+  nightlyRates: { type: [{ date: String, roomTypeId: { type: Schema.Types.ObjectId, ref: 'RoomType' }, price: { type: Number, min: 0 } }], default: undefined },
+  roomHistory: [{ roomId: { type: Schema.Types.ObjectId, ref: 'Room' }, roomTypeId: { type: Schema.Types.ObjectId, ref: 'RoomType' }, from: Date, to: Date }],
+  fees: [{ kind: { type: String, enum: ['early_check_in', 'late_check_out'] }, amount: { type: Number, min: 0 }, at: Date }],
+  feeAmount: { type: Number, default: 0 }, penaltyAmount: { type: Number, default: 0 },
+  checkout: { startedAt: Date, inspectionTaskId: { type: Schema.Types.ObjectId, ref: 'CleaningTask' }, skippedAt: Date, skipReason: String, skippedBy: { type: Schema.Types.ObjectId, ref: 'User' } },
+  pendingChange: { type: new Schema({ key: String, checkInDate: Date, checkOutDate: Date, nightlyRates: [new Schema({ date: String, roomTypeId: Schema.Types.ObjectId, price: Number }, { _id: false })], guestCount: Number, roomAmount: Number, totalAmount: Number, discountAmount: Number, depositRequired: Number, additionalDeposit: Number, holdExpiresAt: Date }, { _id: false }), default: undefined },
+  createKey: { type: String, unique: true, sparse: true },
+  rebookedFrom: { type: Schema.Types.ObjectId, ref: 'Booking' },
+  m4Version: Number,
   bookingSource: { type: String, enum: ['online', 'front_desk'], default: 'online' }
 }, { timestamps: true });
 

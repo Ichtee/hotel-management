@@ -15,7 +15,9 @@ const schema = new Schema({
   checklist: [{ label: String, completed: { type: Boolean, default: false } }],
   requestContent: String,
   routineKey: { type: String },
-  unassignedNotifiedKey: String
+  unassignedNotifiedKey: String,
+  inspectionResult: String, startedAt: Date, skipReason: String,
+  operationKey: { type: String, unique: true, sparse: true }
 }, { timestamps: true });
 schema.index({ assignedTo: 1, status: 1 });
 schema.index({ routineKey: 1 }, { unique: true, sparse: true });

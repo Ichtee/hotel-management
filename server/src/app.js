@@ -15,7 +15,13 @@ const customers = require("./controllers/customers");
 const roles = require("./controllers/roles");
 const promotions = require("./controllers/promotions");
 const bookings = require("./controllers/bookings");
-const bookingCreation = require("./controllers/bookingCreation");
+const stays = require("./controllers/stays");
+const stayRoutes = require("./routes/stayRoutes");
+const stayCatalog = require("./controllers/stayCatalog");
+const stayInvoices = require("./controllers/stayInvoices");
+const stayPenalties = require("./controllers/stayPenalties");
+const stayHousekeeping = require("./controllers/stayHousekeeping");
+const RoomType = require("./models/RoomType");
 const policies = require("./controllers/policies");
 const payments = require("./controllers/payments");
 const cancellations = require("./controllers/cancellations");
@@ -24,14 +30,7 @@ const jobs = require("./controllers/jobs");
 const { revenue } = require("./controllers/revenue");
 const { HttpError } = require("./utils/validation");
 
-// Member 2 Routes & Controllers
-const roomTypeRoutes = require("./routes/roomTypeRoutes");
-const roomRoutes = require("./routes/roomRoutes");
-const housekeepingRoutes = require("./routes/housekeepingRoutes");
-const bookingController = require("./controllers/bookingController");
-
 // Front-desk routes (theanh)
-const frontDeskRoutes = require("./routes/frontDeskBooking.routes");
 const customerRoutes = require("./routes/customer.routes");
 
 // The gateway calls this server-to-server, so it has no browser Origin or session; its HMAC signature authenticates it.
@@ -53,7 +52,7 @@ function createApp({
 
   app.use((req, res, next) => {
     const origin = req.get("Origin");
-    const allowed = !origin || origin === clientOrigin || origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:");
+    const allowed = !origin || origin === clientOrigin || (!production && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin));
     if (allowed) {
       res.set("Access-Control-Allow-Origin", origin || clientOrigin);
       res.set("Access-Control-Allow-Credentials", "true");
@@ -103,20 +102,14 @@ function createApp({
 
   app.get("/api/health", (req, res) => res.json({ data: { status: "ok" } }));
 
-  // --- Public Member 2 Routes (Room Search, Types, Housekeeping) ---
-  app.use("/api/room-types", roomTypeRoutes);
-  app.use("/api/rooms", roomRoutes);
-  app.use("/api/housekeeping", housekeepingRoutes);
+  app.get("/api/rooms/search", stays.search);
+  app.get("/api/public/room-types", async (req, res) => res.json({ data: await RoomType.find({ isActive: true }).lean() }));
+  app.get("/api/public/room-types/:id", async (req, res) => {
+    const type = await RoomType.findOne({ _id: require("./utils/validation").id(req.params.id), isActive: true }).lean();
+    if (!type) throw new HttpError(404, "Room type not found.");
+    res.json({ data: type });
+  });
 
-  // --- Member 2 Booking Endpoints ---
-  // Creation (UC07) is session-authenticated: see bookingCreation.create below.
-  // Cancellation (UC08) is M3's and needs a session: see /api/bookings/:id/cancel below.
-  app.get("/api/bookings/ref/:reference", (req, res, next) => {
-    bookingController.getByReference(req, res, next);
-  });
-  app.get("/api/bookings/my", (req, res, next) => {
-    bookingController.getMyBookings(req, res, next);
-  });
 
   // --- Auth Rate Limiter & Public Auth Routes ---
   const authLimit = rateLimit({
@@ -148,7 +141,31 @@ function createApp({
   app.get("/api/profile", auth.profile);
   app.put("/api/profile/password", authLimit, auth.changePassword);
   app.use("/api", requirePasswordChanged);
+  app.get("/api/bookings/my", bookings.listing);
+  app.get("/api/bookings/ref/:reference", bookings.byReference);
+  app.get("/api/bookings/:id/invoices", stayInvoices.list);
+  app.use("/api/front-desk", stayRoutes);
+  app.use("/api/frontdesk", stayRoutes);
+  app.get("/api/catalog/:kind", (req, res, next) => {
+    if (!["services", "compensation-items"].includes(req.params.kind)) throw new HttpError(404, "Catalog not found.");
+    if (req.role.key !== "manager" && !req.role.permissions.some((p) => ["booking_services.record", "penalties.record", "damages.report"].includes(p))) throw new HttpError(403, "You cannot view this catalog.");
+    next();
+  }, stayCatalog.list);
+  app.post("/api/catalog/:kind", requireManager, stayCatalog.save);
+  app.patch("/api/catalog/:kind/:id", requireManager, stayCatalog.save);
+  app.get("/api/housekeeping/tasks", permit("cleaning_tasks.own.read"), stayHousekeeping.list);
+  app.patch("/api/housekeeping/tasks/:id/status", permit("cleaning_tasks.status.update"), stayHousekeeping.update);
+  app.post("/api/housekeeping/bookings/:id/penalties", permit("damages.report"), stayPenalties.create);
+  app.post("/api/housekeeping/issues", permit("room_issues.report"), stayHousekeeping.reportIssue);
   app.patch("/api/profile", auth.updateProfile);
+  app.get("/api/notifications", async (req, res) => {
+    res.json({ data: await require("./models/Notification").find({ accountId: req.user._id }).sort({ createdAt: -1 }).limit(100).lean() });
+  });
+  app.patch("/api/notifications/:id/read", async (req, res) => {
+    const notification = await require("./models/Notification").findOneAndUpdate({ _id: require("./utils/validation").id(req.params.id), accountId: req.user._id }, { $set: { isRead: true, readAt: new Date() } }, { new: true });
+    if (!notification) throw new HttpError(404, "Notification not found.");
+    res.json({ data: notification });
+  });
   app.get("/api/options", accounts.options);
   app.get("/api/customers", customers.list);
   app.patch("/api/customers/:id/blacklist", customers.blacklist);
@@ -198,18 +215,7 @@ function createApp({
 
   // UC10 View Booking History (Session-authenticated)
   app.get("/api/bookings", bookings.listing);
-  app.post("/api/bookings", bookingCreation.create);
-  // SRS 2.4.3 permissions, so the manager's changes in UC33 apply to these front-desk functions.
-  app.post("/api/front-desk/bookings", permit("bookings.walk_in.create"), bookingCreation.createWalkIn);
-  app.patch("/api/front-desk/bookings/:id", permit("bookings.managed.update"), bookingCreation.modifyWalkIn);
-  app.post("/api/front-desk/bookings/:id/cancel", permit("bookings.managed.cancel"), bookingCreation.cancelWalkIn);
-  app.get("/api/front-desk/bookings/:id/available-rooms", permit("stays.check_in"), bookingCreation.availableRooms);
-  app.post("/api/front-desk/bookings/:id/check-in", permit("stays.check_in"), bookingCreation.checkIn);
-  app.get("/api/front-desk/bookings/:id/change-room-options", permit("rooms.change"), bookingCreation.changeRoomOptions);
-  app.post("/api/front-desk/bookings/:id/change-room", permit("rooms.change"), bookingCreation.changeRoom);
-  app.get("/api/front-desk/services", permit("booking_services.record"), bookingCreation.services);
-  app.post("/api/front-desk/bookings/:id/services", permit("booking_services.record"), bookingCreation.addService);
-  app.post("/api/front-desk/bookings/:id/check-out", permit("stays.check_out"), bookingCreation.checkOut);
+  app.post("/api/bookings", stays.createOnline);
   // UC11 View Booking Details
   app.get("/api/bookings/:id", bookings.detail);
 
@@ -247,7 +253,6 @@ function createApp({
 
   // Guest contact data is front-desk only (SRS 4.2.4); a Customer session must not read or change other customers.
   app.use("/api/front-desk/customers", (req, res, next) => permit(req.method === "GET" ? "bookings.managed.read" : "bookings.managed.update")(req, res, next), customerRoutes);
-  app.use("/api/front-desk", frontDeskRoutes);
 
   app.get("/api/reports/revenue", permit("revenue.read"), revenue);
 

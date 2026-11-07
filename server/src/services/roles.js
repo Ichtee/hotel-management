@@ -66,52 +66,76 @@ async function seedRoles() {
 }
 
 async function seedDefaultUsers() {
-  const passwordHash = await hashPassword("HotelDemo123!");
-  const accounts = [
-    ["admin", "admin", "Duc Anh"],
-    ["manager", "manager", "Alex Morgan"],
-    ["customer", "customer", "Jamie Nguyen"],
-    ["reception", "receptionist", "Minh Tran"],
-    ["housekeeping", "housekeeping", "Linh Pham"],
-  ];
+  try {
+    const passwordHash = await hashPassword("HotelDemo123!");
+    const accounts = [
+      { username: "admin", roleKey: "admin", fullName: "Admin User", email: "admin@demo.hotel" },
+      { username: "manager", roleKey: "manager", fullName: "Hotel Manager", email: "manager@demo.hotel" },
+      { username: "customer", roleKey: "customer", fullName: "Customer Demo", email: "customer@demo.hotel" },
+      { username: "reception", roleKey: "receptionist", fullName: "Front Desk Receptionist", email: "reception@demo.hotel" },
+      { username: "housekeeping", roleKey: "housekeeping", fullName: "Housekeeping Staff", email: "housekeeping@demo.hotel" },
+    ];
 
-  for (const [username, roleKey, fullName] of accounts) {
-    const email = `${username}@demo.hotel`;
-    const exists = await User.findOne({ email });
-    if (!exists) {
-      const role = await Role.findOne({ key: roleKey });
-      if (role) {
+    for (const acc of accounts) {
+      const role = await Role.findOne({ key: acc.roleKey });
+      if (!role) continue;
+
+      let user = await User.findOne({ email: acc.email });
+      if (user) {
+        // Reset password and ensure account is active and unlocked
+        user.passwordHash = passwordHash;
+        user.status = "active";
+        user.roleId = role._id;
+        user.failedLogins = 0;
+        user.lockedUntil = undefined;
+        await user.save();
+      } else {
+        // Avoid duplicate username if another user has the same username
+        let uname = acc.username;
+        const dupName = await User.findOne({ username: uname });
+        if (dupName) uname = `demo_${acc.username}`;
+
         await User.create({
-          username,
+          username: uname,
           roleId: role._id,
-          email,
+          email: acc.email,
           passwordHash,
           phone: "0912345678",
           status: "active",
-          customerProfile: { fullName, address: "Hanoi" },
-          employeeProfile: ["manager", "receptionist", "housekeeping"].includes(roleKey)
+          failedLogins: 0,
+          customerProfile: { fullName: acc.fullName, address: "Hanoi" },
+          employeeProfile: ["manager", "receptionist", "housekeeping"].includes(acc.roleKey)
             ? {
-                position: roleKey === "manager" ? "Hotel manager" : roleKey === "receptionist" ? "Front desk associate" : "Room attendant",
+                position: acc.roleKey === "manager" ? "Hotel manager" : acc.roleKey === "receptionist" ? "Front desk associate" : "Room attendant",
                 shift: "Morning",
-                hireDate: "2026-01-05",
+                hireDate: new Date("2026-01-05"),
               }
             : undefined,
         });
       }
     }
+    console.log("Demo accounts verified & ready with password: HotelDemo123!");
+  } catch (err) {
+    console.error("seedDefaultUsers error:", err.message);
   }
 }
 
 async function seedDefaultRooms() {
-  const count = await RoomType.countDocuments();
-  if (count === 0) {
-    const types = await RoomType.create([
+  let types = await RoomType.find();
+  if (types.length === 0) {
+    types = await RoomType.create([
       { name: "Deluxe Double", basePrice: 2100000, maxOccupancy: 2, bedType: "King bed", roomSizeSqm: 35, amenities: ["WiFi", "Air conditioning", "Smart TV", "Mini bar", "Bathtub"], images: ["https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=80"] },
       { name: "Superior Twin", basePrice: 1750000, maxOccupancy: 2, bedType: "2 Single beds", roomSizeSqm: 30, amenities: ["WiFi", "Air conditioning", "Smart TV"], images: ["https://images.unsplash.com/photo-1566665797739-1674de7a421a?auto=format&fit=crop&w=900&q=80"] },
       { name: "Family Suite", basePrice: 3600000, maxOccupancy: 4, bedType: "2 Queen beds", roomSizeSqm: 60, amenities: ["WiFi", "Air conditioning", "Smart TV", "Living room", "Balcony"], images: ["https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=900&q=80"] },
       { name: "Presidential Suite", basePrice: 7600000, maxOccupancy: 3, bedType: "Super King bed", roomSizeSqm: 100, amenities: ["WiFi", "Air conditioning", "Smart TV", "Jacuzzi", "Private bar", "Panoramic view"], images: ["https://images.unsplash.com/photo-1631049307264-da0ec9d70304?auto=format&fit=crop&w=900&q=80"] },
     ]);
-    await Room.create(types.map((type, index) => ({ roomTypeId: type._id, roomNumber: `D${index + 101}`, floor: 1, status: "available" })));
+  }
+  for (let i = 0; i < types.length; i++) {
+    const t = types[i];
+    const roomExists = await Room.findOne({ roomTypeId: t._id });
+    if (!roomExists) {
+      await Room.create({ roomTypeId: t._id, roomNumber: `R${i + 101}`, floor: 1, status: "available" });
+    }
   }
 }
 

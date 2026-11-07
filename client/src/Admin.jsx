@@ -455,7 +455,20 @@ function Login() {
       <h1>{forgot ? 'Reset staff password' : 'Staff sign in'}</h1>
       <p className="muted">{forgot ? 'Enter your details to reset your password.' : 'Use your hotel account to continue.'}</p>
       {msg && <p role="status" className="note ok-note">{msg}</p>}
-      {user && <p className="note bad-note">You are signed in as a customer ({user.email}). <button className="linklike" onClick={signOut}>Sign out</button> to use a staff account.</p>}
+      {user && (
+        <div style={{ background: '#fee2e2', border: '1px solid #f87171', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+          <span style={{ color: '#991b1b', fontSize: '0.9rem' }}>
+            You are signed in as a customer (<strong>{user.email}</strong>). Please sign out to access the staff portal.
+          </span>
+          <button
+            type="button"
+            onClick={signOut}
+            style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: '6px', padding: '6px 14px', fontWeight: 600, cursor: 'pointer' }}
+          >
+            Sign out now
+          </button>
+        </div>
+      )}
       {forgot ? (
         <ForgotPassword
           onDone={() => {

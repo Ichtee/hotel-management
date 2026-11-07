@@ -506,13 +506,14 @@ export function Profile() {
         extra={
           <button
             className="btn danger"
+            style={{ background: '#dc2626', color: '#ffffff', border: 'none', padding: '0.5rem 1.25rem', borderRadius: '6px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
             type="button"
             onClick={async () => {
               await signOut();
               location.hash = '#/login';
             }}
           >
-            Sign out
+            🚪 Sign out
           </button>
         }
       />

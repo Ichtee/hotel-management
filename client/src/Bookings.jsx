@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import StayInvoices from './StayInvoices.jsx';
 import { api, dateLabel, money } from './api/client.js';
 import { Badge, Notice, useApi } from './ui.jsx';
 
@@ -92,6 +93,8 @@ function Details({ id, startCancel, onChanged }) {
         <dl>
           <Row k="Rooms">{money(b.roomAmount)}</Row>
           {b.serviceAmount > 0 && <Row k="Services">{money(b.serviceAmount)}</Row>}
+          {b.feeAmount > 0 && <Row k="Stay fees">{money(b.feeAmount)}</Row>}
+          {b.penaltyAmount > 0 && <Row k="Confirmed penalties">{money(b.penaltyAmount)}</Row>}
           {b.discountAmount > 0 && <Row k="Discount">−{money(b.discountAmount)}</Row>}
           <Row k="Total"><strong>{money(b.totalAmount)}</strong></Row>
         </dl>
@@ -133,6 +136,8 @@ function Details({ id, startCancel, onChanged }) {
         </section>
       )}
       <Notice error={err} />
+      {b.pendingChange && new Date(b.pendingChange.holdExpiresAt) > new Date() && <p>Đề nghị đổi lịch đang chờ cọc bổ sung {money(b.pendingChange.additionalDeposit)}. Lịch hiện tại vẫn có hiệu lực; liên hệ lễ tân để theo dõi.</p>}
+      {b.status === 'checked_out' && <StayInvoices bookingId={id} />}
       {(b.refunds.length > 0 || b.status === 'cancelled') && (
         <section>
           <h3>Refund</h3>

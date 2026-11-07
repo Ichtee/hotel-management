@@ -30,17 +30,20 @@ export function Modal({ title, onClose, children }) {
   );
 }
 
-// Fetches a list endpoint and reloads when the path or params change.
+// Hủy yêu cầu cũ khi đổi bộ lọc để không hiển thị kết quả trả về trễ.
 export function useApi(path, enabled = true) {
-  const [state, setState] = useState({ data: null, meta: null, error: null, loading: true });
-  const load = useCallback(() => {
-    if (!enabled || !path) return;
-    setState((s) => ({ ...s, loading: true }));
-    api(path).then((r) => setState({ data: r.data, meta: r.meta, error: null, loading: false }))
-      .catch((error) => setState({ data: null, meta: null, error, loading: false }));
-  }, [path, enabled]);
-  useEffect(load, [load]);
-  return { ...state, reload: load };
+  const [version, setVersion] = useState(0);
+  const [state, setState] = useState({ data: null, meta: null, error: null, loading: Boolean(path && enabled) });
+  const reload = useCallback(() => setVersion((v) => v + 1), []);
+  useEffect(() => {
+    if (!enabled || !path) { setState({ data: null, meta: null, error: null, loading: false }); return; }
+    const controller = new AbortController();
+    setState((s) => ({ ...s, loading: true, error: null }));
+    api(path, { signal: controller.signal }).then((r) => { if (!controller.signal.aborted) setState({ data: r.data, meta: r.meta, error: null, loading: false }); })
+      .catch((error) => { if (!controller.signal.aborted) setState({ data: null, meta: null, error, loading: false }); });
+    return () => controller.abort();
+  }, [path, enabled, version]);
+  return { ...state, reload };
 }
 
 export function DataTable({ cols, rows }) {

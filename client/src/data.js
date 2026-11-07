@@ -1,12 +1,12 @@
 // Mock data shaped after server/src/models. Replace with API calls later.
 export const MENU = [
   { label: 'Dashboard', href: '#/admin' },
-  { label: 'Front desk', items: [['#/admin/bookings', 'Bookings', 'All reservations'], ['#/admin/frontdesk', 'Check-in / Check-out', 'Today’s arrivals & departures'], ['#/admin/cancellations', 'Cancellations', 'Requests to review', ['cancellations.review']]] },
-  { label: 'Rooms', items: [['#/admin/rooms', 'Room map', 'Live room status'], ['#/admin/roomtypes', 'Room types', 'Pricing & amenities'], ['#/admin/services', 'Services', 'Extras & add-ons']] },
-  { label: 'Housekeeping', items: [['#/admin/cleaning', 'Cleaning tasks', 'Assigned to staff'], ['#/admin/issues', 'Room issues', 'Maintenance reports']] },
-  { label: 'Billing', items: [['#/admin/invoices', 'Invoices', ''], ['#/admin/payments', 'Payments', ''], ['#/admin/refunds', 'Refunds', '', ['refunds.handle']], ['#/admin/revenue', 'Revenue', '', ['revenue.read']], ['#/admin/coupons', 'Coupons', '', ['promotions.manage']]] },
+  { label: 'Front desk', items: [['#/admin/bookings', 'Bookings', 'All reservations', ['bookings.managed.read']], ['#/admin/frontdesk', 'Check-in / Check-out', 'Today’s arrivals & departures', ['bookings.managed.read']], ['#/admin/cancellations', 'Cancellations', 'Requests to review', ['cancellations.review']]] },
+  { label: 'Rooms', items: [['#/admin/rooms', 'Room map', 'Live room status', ['manager.only']], ['#/admin/roomtypes', 'Room types', 'Pricing & amenities', ['manager.only']], ['#/admin/services', 'Services & compensation', 'Extras & add-ons', ['manager.only']]] },
+  { label: 'Housekeeping', items: [['#/admin/cleaning', 'Cleaning tasks', 'Assigned to staff', ['cleaning_tasks.own.read']], ['#/admin/issues', 'Room issues', 'Maintenance reports', ['cleaning_tasks.own.read']]] },
+  { label: 'Billing', items: [['#/admin/invoices', 'Invoices', '', ['invoices.print']], ['#/admin/payments', 'Payments', '', ['payments.settle']], ['#/admin/refunds', 'Refunds', '', ['refunds.handle']], ['#/admin/revenue', 'Revenue', '', ['revenue.read']], ['#/admin/coupons', 'Coupons', '', ['promotions.manage']]] },
   { label: 'Guests & staff', items: [['#/admin/customers', 'Customer accounts', '', ['manager.only']], ['#/admin/users', 'Users', '', ['users.manage']], ['#/admin/staff', 'Staff', '', ['staff.manage']], ['#/admin/roles', 'Roles', '', ['roles.manage']], ['#/admin/reviews', 'Reviews', '']] },
-  { label: 'Settings', items: [['#/admin/hotel', 'Hotel & policies', ''], ['#/admin/policy', 'Deposit & cancellation', '', ['policies.manage']]] }
+  { label: 'Settings', items: [['#/admin/hotel', 'Hotel & policies', '', ['policies.manage']], ['#/admin/policy', 'Deposit & cancellation', '', ['policies.manage']]] }
 ];
 
 export const STATS = [

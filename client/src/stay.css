@@ -1,0 +1,116 @@
+.stay-workspace {
+  display: grid;
+  gap: 20px;
+}
+.stay-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 16px;
+}
+.stay-toolbar label {
+  display: grid;
+  gap: 6px;
+  flex: 1 1 160px;
+}
+.stay-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 16px 0;
+}
+.stay-section {
+  border-top: 1px solid var(--line, #ddd);
+  padding-top: 16px;
+  margin-top: 16px;
+}
+.stay-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 12px;
+}
+.stay-summary dt {
+  color: var(--muted, #667085);
+}
+.stay-summary dd {
+  margin: 4px 0;
+  font-weight: 600;
+}
+.stay-invoice {
+  border: 1px solid var(--line, #ddd);
+  padding: 20px;
+  margin-top: 14px;
+  background: white;
+  color: #202936;
+}
+.stay-invoices {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.stay-invoice table {
+  min-width: 0;
+  width: 100%;
+}
+.stay-invoice td,
+.stay-invoice th {
+  white-space: normal;
+  padding: 10px 6px;
+}
+.stay-invoice td:last-child,
+.stay-invoice th:last-child {
+  text-align: right;
+}
+.stay-invoice p {
+  overflow-wrap: anywhere;
+}
+.stay-workspace .panel {
+  min-width: 0;
+}
+.stay-workspace form fieldset {
+  min-width: 0;
+}
+.stay-workspace textarea {
+  min-height: 70px;
+}
+.stay-workspace .form {
+  margin: 12px 0;
+}
+@media (max-width: 640px) {
+  .stay-toolbar > * {
+    width: 100%;
+  }
+  .stay-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media print {
+  body:has(.print-selected)
+    *:not(:has(.print-selected)):not(.print-selected):not(.print-selected *) {
+    display: none !important;
+  }
+  body:has(.print-selected),
+  body:has(.print-selected) *:has(.print-selected) {
+    display: block;
+    min-height: 0;
+    height: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: white;
+  }
+  .print-selected {
+    width: 100%;
+    border: 0;
+    margin: 0;
+    padding: 0;
+  }
+  .print-selected .no-print {
+    display: none;
+  }
+  dialog:has(.print-selected) {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
+}

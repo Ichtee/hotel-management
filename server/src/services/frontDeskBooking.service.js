@@ -144,7 +144,7 @@ async function recordService(bookingId, { serviceId, quantity = 1, note }, actor
   if (!booking) throw appError('Booking not found', 404);
   if (booking.status !== 'checked_in') throw appError('Services can only be recorded for checked-in bookings', 409);
   if (!isId(serviceId) || !Number.isInteger(Number(quantity)) || Number(quantity) < 1) throw appError('serviceId and a positive integer quantity are required');
-  const service = await Service.findOne({ _id: serviceId, hotelId: booking.hotelId, isActive: true });
+  const service = await Service.findOne({ _id: serviceId, hotelId: booking.hotelId, isActive: true, kind: { $ne: "compensation" } });
   if (!service) throw appError('Service is unavailable', 404);
   const item = { serviceId: service._id, name: service.name, quantity: Number(quantity), unitPrice: service.unitPrice, amount: service.unitPrice * Number(quantity), recordedBy: actorId };
   booking.services.push(item); totals(booking);

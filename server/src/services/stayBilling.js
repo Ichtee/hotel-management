@@ -1,7 +1,6 @@
 const { randomBytes } = require("node:crypto");
 const Booking = require("../models/Booking");
 const Payment = require("../models/Payment");
-const Penalty = require("../models/Penalty");
 const Invoice = require("../models/Invoice");
 const HotelInfo = require("../models/HotelInfo");
 const Task = require("../models/CleaningTask");
@@ -25,13 +24,15 @@ function addFee(booking, kind, value, now) {
 
 async function calculateBill(booking, session) {
   requireSnapshot(booking);
-  const penalties = await Penalty.find({
-    bookingId: booking._id,
-    afterCheckout: false,
-  })
-    .select("description quantity amount status")
-    .session(session)
-    .lean();
+  const penalties = (booking.penalties || [])
+    .filter((p) => !p.afterCheckout)
+    .map(({ _id, description, quantity, amount, status }) => ({
+      _id,
+      description,
+      quantity,
+      amount,
+      status,
+    }));
   const payments = await Payment.find({
     bookingId: booking._id,
     status: "success",
@@ -102,11 +103,7 @@ async function assertInspection(booking, session) {
       "Complete the inspection or record why it is skipped.",
     );
   if (
-    await Penalty.exists({
-      bookingId: booking._id,
-      afterCheckout: false,
-      status: "proposed",
-    }).session(session)
+    booking.penalties.some((p) => !p.afterCheckout && p.status === "proposed")
   )
     throw new v.HttpError(
       409,
@@ -156,13 +153,13 @@ async function generateInvoice(req, penaltyId) {
       );
     let lines, payments, total;
     if (penaltyId) {
-      const penalty = await Penalty.findOne({
-        _id: penaltyId,
-        bookingId: booking._id,
-        afterCheckout: true,
-        status: "confirmed",
-      }).session(session);
-      if (!penalty || (penalty.amount > 0 && !penalty.paymentId))
+      const penalty = booking.penalties.id(penaltyId);
+      if (
+        !penalty ||
+        !penalty.afterCheckout ||
+        penalty.status !== "confirmed" ||
+        (penalty.amount > 0 && !penalty.paymentId)
+      )
         throw new v.HttpError(
           409,
           "The supplementary charge has not been paid.",

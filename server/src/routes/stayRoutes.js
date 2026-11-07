@@ -47,7 +47,9 @@ router.post(
 );
 router.get("/services", permit("booking_services.record"), async (req, res) =>
   res.json({
-    data: await Service.find({ isActive: true }).sort({ name: 1 }).lean(),
+    data: await Service.find({ isActive: true, kind: { $ne: "compensation" } })
+      .sort({ name: 1 })
+      .lean(),
   }),
 );
 router.post(

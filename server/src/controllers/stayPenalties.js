@@ -1,5 +1,5 @@
-const Penalty = require("../models/Penalty");
-const Item = require("../models/CompensationItem");
+const Booking = require("../models/Booking");
+const Service = require("../models/Service");
 const Task = require("../models/CleaningTask");
 const v = require("../utils/validation");
 const { amount } = require("../services/stayPricing");
@@ -34,11 +34,9 @@ async function create(req, res) {
   const key = operationKey(req, `penalty:${v.id(req.params.id)}`);
   const quantity = v.number(req.body.quantity, "quantity", 1, 1000);
   const result = await hotelTransaction(async (session) => {
-    const existing = await Penalty.findOne({ operationKey: key }).session(
-      session,
-    );
-    if (existing) return existing;
     const b = await getBooking(req.params.id, session);
+    const existing = b.penalties.find((p) => p.operationKey === key);
+    if (existing) return { ...existing.toObject(), bookingId: b._id };
     if (!["checked_in", "checked_out"].includes(b.status))
       throw new v.HttpError(
         409,
@@ -59,8 +57,9 @@ async function create(req, res) {
         "After check-out, a penalty must come from turnover cleaning.",
       );
     const item = req.body.itemId
-      ? await Item.findOne({
+      ? await Service.findOne({
           _id: v.id(req.body.itemId),
+          kind: "compensation",
           isActive: true,
         }).session(session)
       : null;
@@ -76,27 +75,22 @@ async function create(req, res) {
         ? proposedAmount
         : v.number(req.body.amount, "amount", 0, 1e12)
       : proposedAmount;
-    const [penalty] = await Penalty.create(
-      [
-        {
-          bookingId: b._id,
-          taskId: task?._id,
-          itemId: item?._id,
-          description,
-          quantity,
-          unitPrice: item?.unitPrice,
-          proposedAmount,
-          amount: value,
-          afterCheckout: b.status === "checked_out",
-          status: direct ? "confirmed" : "proposed",
-          reportedBy: req.user._id,
-          confirmedBy: direct ? req.user._id : undefined,
-          confirmedAt: direct ? new Date() : undefined,
-          operationKey: key,
-        },
-      ],
-      { session },
-    );
+    const penalty = b.penalties.create({
+      taskId: task?._id,
+      itemId: item?._id,
+      description,
+      quantity,
+      unitPrice: item?.unitPrice,
+      proposedAmount,
+      amount: value,
+      afterCheckout: b.status === "checked_out",
+      status: direct ? "confirmed" : "proposed",
+      reportedBy: req.user._id,
+      confirmedBy: direct ? req.user._id : undefined,
+      confirmedAt: direct ? new Date() : undefined,
+      operationKey: key,
+    });
+    b.penalties.push(penalty);
     if (roomUnusable)
       await require("./stayHousekeeping").recordRoomIssue(
         req,
@@ -106,17 +100,17 @@ async function create(req, res) {
       );
     if (b.status === "checked_in") {
       await calculateBill(b, session);
-      await b.save({ session });
     }
+    await b.save({ session });
     await logChange(
       req,
       "penalty.reported",
-      "Penalty",
-      penalty._id,
-      { bookingId: b._id, amount: value, status: penalty.status },
+      "Booking",
+      b._id,
+      { penaltyId: penalty._id, amount: value, status: penalty.status },
       session,
     );
-    return penalty;
+    return { ...penalty.toObject(), bookingId: b._id };
   });
   const notificationStored = await deliver([
     {
@@ -136,10 +130,13 @@ async function update(req, res) {
   v.keys(req.body, ["status", "amount", "reason"]);
   const status = v.choice(req.body.status, "status", ["confirmed", "waived"]);
   const data = await hotelTransaction(async (session) => {
-    const penalty = await Penalty.findById(v.id(req.params.penaltyId)).session(
-      session,
-    );
-    if (!penalty) throw new v.HttpError(404, "Penalty not found.");
+    const penaltyId = v.id(req.params.penaltyId);
+    const owner = await Booking.findOne({ "penalties._id": penaltyId })
+      .select("_id")
+      .session(session);
+    if (!owner) throw new v.HttpError(404, "Penalty not found.");
+    const b = await getBooking(owner._id, session);
+    const penalty = b.penalties.id(penaltyId);
     if (
       penalty.paymentId ||
       penalty.status === "waived" ||
@@ -148,7 +145,6 @@ async function update(req, res) {
         .session(session))
     )
       throw new v.HttpError(409, "This penalty can no longer be changed.");
-    const b = await getBooking(penalty.bookingId, session);
     if (!penalty.afterCheckout && b.status !== "checked_in")
       throw new v.HttpError(409, "The original stay bill is already closed.");
     const value =
@@ -173,20 +169,19 @@ async function update(req, res) {
       confirmedBy: req.user._id,
       confirmedAt: new Date(),
     });
-    await penalty.save({ session });
     if (!penalty.afterCheckout) {
       await calculateBill(b, session);
-      await b.save({ session });
     }
+    await b.save({ session });
     await logChange(
       req,
       "penalty.decided",
-      "Penalty",
-      penalty._id,
-      { status, amount: value, reason },
+      "Booking",
+      b._id,
+      { penaltyId: penalty._id, status, amount: value, reason },
       session,
     );
-    return penalty;
+    return { ...penalty.toObject(), bookingId: b._id };
   });
   res.json({ data });
 }

@@ -1,5 +1,4 @@
 const Service = require("../models/Service");
-const CompensationItem = require("../models/CompensationItem");
 const v = require("../utils/validation");
 const { hotelTransaction } = require("../services/hotelOperations");
 const { logChange } = require("../services/audit");
@@ -7,13 +6,17 @@ const { logChange } = require("../services/audit");
 function catalog(kind) {
   if (!["services", "compensation-items"].includes(kind))
     throw new v.HttpError(404, "Catalog not found.");
-  return kind === "services" ? Service : CompensationItem;
+  return kind === "services"
+    ? { kind: { $ne: "compensation" } }
+    : { kind: "compensation" };
 }
 
 async function list(req, res) {
-  const Model = catalog(req.params.kind);
-  const filter = req.role.key === "manager" ? {} : { isActive: true };
-  res.json({ data: await Model.find(filter).sort({ name: 1 }).lean() });
+  const filter = {
+    ...catalog(req.params.kind),
+    ...(req.role.key === "manager" ? {} : { isActive: true }),
+  };
+  res.json({ data: await Service.find(filter).sort({ name: 1 }).lean() });
 }
 
 async function save(req, res) {
@@ -26,18 +29,34 @@ async function save(req, res) {
     input.unitPrice = v.number(req.body.unitPrice, "unitPrice", 0, 1e12);
   if (req.body.isActive !== undefined)
     input.isActive = v.boolean(req.body.isActive, "isActive");
-  const Model = catalog(req.params.kind);
+  const filter = catalog(req.params.kind);
   const data = await hotelTransaction(async (session) => {
     const item = creating
-      ? new Model(input)
-      : await Model.findById(v.id(req.params.id)).session(session);
+      ? new Service({
+          ...input,
+          kind: req.params.kind === "services" ? "service" : "compensation",
+        })
+      : await Service.findOne({ _id: v.id(req.params.id), ...filter }).session(
+          session,
+        );
     if (!item) throw new v.HttpError(404, "Catalog item not found.");
+    if (
+      await Service.exists({
+        ...filter,
+        name: input.name ?? item.name,
+        _id: { $ne: item._id },
+      }).session(session)
+    )
+      throw new v.HttpError(
+        409,
+        "A catalog item with this name already exists.",
+      );
     Object.assign(item, input);
     await item.save({ session });
     await logChange(
       req,
       creating ? "catalog.created" : "catalog.updated",
-      Model.modelName,
+      "Service",
       item._id,
       input,
       session,

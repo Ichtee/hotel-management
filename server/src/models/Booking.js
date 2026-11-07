@@ -21,6 +21,24 @@ const bookingServiceSchema = new Schema({
   voidedBy: { type: Schema.Types.ObjectId, ref: 'User' }, operationKey: String
 });
 
+const penaltySchema = new Schema({
+  taskId: { type: Schema.Types.ObjectId, ref: 'CleaningTask' },
+  itemId: { type: Schema.Types.ObjectId, ref: 'Service' },
+  description: { type: String, required: true },
+  quantity: { type: Number, required: true, min: 1 },
+  unitPrice: { type: Number, min: 0 },
+  proposedAmount: { type: Number, min: 0 },
+  amount: { type: Number, min: 0 },
+  status: { type: String, enum: ['proposed', 'confirmed', 'waived'], required: true },
+  reason: String,
+  reportedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  confirmedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  confirmedAt: Date,
+  afterCheckout: { type: Boolean, required: true },
+  paymentId: { type: Schema.Types.ObjectId, ref: 'Payment' },
+  operationKey: String
+}, { timestamps: true });
+
 const bookingEventSchema = new Schema({
   actorId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   type: {
@@ -88,6 +106,7 @@ const schema = new Schema({
     ]
   },
   services: [bookingServiceSchema],
+  penalties: [penaltySchema],
   events: [bookingEventSchema],
   guestName: { type: String, trim: true },
   guestPhone: { type: String, set: encrypt, get: decrypt },
@@ -131,6 +150,7 @@ schema.path('checkOutDate').validate(function (value) {
   return !this.checkInDate || value > this.checkInDate;
 }, 'checkOutDate must be after checkInDate');
 schema.index({ status: 1, checkInDate: 1, checkOutDate: 1 });
+schema.index({ 'penalties._id': 1 });
 schema.index({ status: 1, holdExpiresAt: 1 });
 schema.index({ 'rooms.roomId': 1, status: 1, checkInDate: 1, checkOutDate: 1 });
 schema.index({ 'rooms.roomTypeId': 1, status: 1, checkOutDate: 1 });

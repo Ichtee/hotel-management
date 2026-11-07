@@ -181,14 +181,14 @@ async function changeRoom(req, res) {
   res.json({ data: booking, meta: { extraCharge: extra } });
 }
 async function services(_req, res) {
-  res.json({ data: await Service.find({ isActive: true }).select("name category unitPrice").sort({ name: 1 }).lean() });
+  res.json({ data: await Service.find({ isActive: true, kind: { $ne: "compensation" } }).select("name category unitPrice").sort({ name: 1 }).lean() });
 }
 async function addService(req, res) {
   v.keys(req.body, ["serviceId", "quantity"]);
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   if (booking.status !== "checked_in") throw new v.HttpError(409, "Services can only be recorded for a checked-in booking.");
-  const service = await Service.findOne({ _id: v.id(req.body.serviceId, "serviceId"), isActive: true });
+  const service = await Service.findOne({ _id: v.id(req.body.serviceId, "serviceId"), isActive: true, kind: { $ne: "compensation" } });
   if (!service) throw new v.HttpError(404, "This service is no longer available.");
   const quantity = v.number(req.body.quantity, "quantity", 1, 100); const amount = service.unitPrice * quantity;
   booking.services.push({ serviceId: service._id, name: service.name, quantity, unitPrice: service.unitPrice, amount, recordedBy: req.user._id });

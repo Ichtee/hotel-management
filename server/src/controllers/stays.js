@@ -827,6 +827,7 @@ async function addService(req, res) {
       );
     const service = await Service.findOne({
       _id: v.id(req.body.serviceId, "serviceId"),
+      kind: { $ne: "compensation" },
       isActive: true,
     }).session(session);
     if (!service) throw new v.HttpError(404, "Service is unavailable.");

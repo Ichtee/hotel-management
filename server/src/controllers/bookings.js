@@ -5,7 +5,6 @@ require("../models/RoomType");
 require("../models/Room");
 const v = require("../utils/validation");
 const { decrypt, mask, phoneHash } = require("../utils/guestData");
-const Penalty = require("../models/Penalty");
 // BR-14: only verified (success) payments count as paid.
 function paymentStatus(booking, payments) {
   const paid = payments.filter((p) => p.status === "success" && p.kind !== "additional" && !p.isLateDeposit).reduce((s, p) => s + p.amount - (p.refundedAmount || 0), 0);
@@ -64,11 +63,11 @@ async function detail(req, res) {
     .populate("rooms.roomId", "roomNumber floor")
     .lean();
   if (!booking) throw new v.HttpError(404, "Booking not found.");
-  const [payments, refunds, penalties] = await Promise.all([
+  const [payments, refunds] = await Promise.all([
     Payment.find({ bookingId: booking._id }).select("kind amount currency method status paidAt createdAt refundedAmount isLateDeposit").sort({ createdAt: 1 }).lean(),
     Refund.find({ bookingId: booking._id }).select("amount currency status reason bankTransactionCode processedAt createdAt").sort({ createdAt: 1 }).lean(),
-    Penalty.find({ bookingId: booking._id }).select("description quantity amount status afterCheckout paymentId").lean(),
   ]);
+  const penalties = (booking.penalties || []).map(({ _id, description, quantity, amount, status, afterCheckout, paymentId }) => ({ _id, description, quantity, amount, status, afterCheckout, paymentId }));
   const presented = present(booking, req);
   if (req.role.permissions.includes("penalties.record") && penalties.some((p) => p.afterCheckout && p.status !== "waived" && !p.paymentId)) {
     presented.guestPhone = decrypt(booking.guestPhone);

@@ -51,10 +51,10 @@ export const bookingApi = {
   /**
    * Cancel an existing reservation (UC08 / BR-16, BR-32)
    */
-  async cancelBooking(bookingId, { reason = 'Cancelled by customer', refundAccount } = {}) {
+  async cancelBooking(bookingId, { reason = 'Cancelled by customer' } = {}) {
     return request(`/bookings/${bookingId}/cancel`, {
       method: 'POST',
-      body: JSON.stringify({ reason, refundAccount })
+      body: JSON.stringify({ reason })
     });
   },
 

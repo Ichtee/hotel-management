@@ -243,9 +243,6 @@ function ModifyModal({ booking, onClose, onSaved }) {
 function CancelModal({ booking, onClose, onCancelled }) {
   const isPending = booking.status === 'pending';
   const [reason, setReason] = useState('Change of travel plans');
-  const [bank, setBank] = useState('');
-  const [accountNumber, setAccountNumber] = useState('');
-  const [holderName, setHolderName] = useState(booking.guestName || '');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -264,14 +261,7 @@ function CancelModal({ booking, onClose, onCancelled }) {
         // UC08 / BR-16, BR-17, BR-32: Cancellation with tiered refund policy
         await api(`/bookings/${booking._id}/cancel`, {
           method: 'POST',
-          body: {
-            reason,
-            refundAccount: {
-              bank: bank.trim(),
-              accountNumber: accountNumber.trim(),
-              holderName: holderName.trim()
-            }
-          }
+          body: { reason }
         });
         onCancelled(`Cancellation request for ${booking.bookingReference || ''} has been submitted for front desk review.`);
       }
@@ -288,7 +278,7 @@ function CancelModal({ booking, onClose, onCancelled }) {
         <p className="muted" style={{ marginBottom: '1rem' }}>
           {isPending
             ? 'This reservation is currently pending deposit payment. Cancelling now will release your 15-minute room hold immediately.'
-            : 'According to hotel policy, cancellations requested > 48 hours before check-in receive a 100% deposit refund. Please provide your refund bank account details for front desk review.'}
+            : 'According to hotel policy, cancellations requested > 48 hours before check-in receive a 100% deposit refund. If a deposit was paid, the front desk will contact you for your bank account to transfer the refund.'}
         </p>
 
         <Field label="Reason for cancellation">
@@ -299,37 +289,6 @@ function CancelModal({ booking, onClose, onCancelled }) {
             <option value="Other reason">Other reason</option>
           </select>
         </Field>
-
-        {!isPending && (
-          <>
-            <Field label="Bank Name (for refund)">
-              <input
-                type="text"
-                placeholder="e.g. Vietcombank, Techcombank, MB Bank"
-                value={bank}
-                onChange={(e) => setBank(e.target.value)}
-                required
-              />
-            </Field>
-            <Field label="Account Number">
-              <input
-                type="text"
-                placeholder="Bank account number"
-                value={accountNumber}
-                onChange={(e) => setAccountNumber(e.target.value)}
-                required
-              />
-            </Field>
-            <Field label="Account Holder Name (must match booker)">
-              <input
-                type="text"
-                value={holderName}
-                onChange={(e) => setHolderName(e.target.value)}
-                required
-              />
-            </Field>
-          </>
-        )}
 
         <div className="full">
           <Notice error={err} />

@@ -77,7 +77,7 @@ export function LineChart({ labels, cur, prev, format, summary }) {
     setHover(Math.min(cur.length - 1, Math.max(0, Math.round(((px - L) / (W - L - R)) * n))));
   };
   const step = Math.ceil(labels.length / 5);
-  const short = (v) => (v >= 1e6 ? `${v / 1e6}M` : v >= 1e3 ? `${v / 1e3}k` : v);
+  const short = (v) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(v);
   return (
     <div className="chart">
       <div className="legend-row"><span><i className="sw cur" />This period</span>{prev && <span><i className="sw prev" />Previous period</span>}</div>

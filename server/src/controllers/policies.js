@@ -82,4 +82,13 @@ async function updateHotelInfo(req, res) {
   await audit(req.user._id, "hotel_info.updated", "hotel_info", info._id);
   res.json({ data: info });
 }
-module.exports = { listing, create, cancellationListing, createCancellation, hotelInfo, updateHotelInfo };
+// Public summary of the policies in force, for the website (no internal ids or history).
+async function publicSummary(req, res) {
+  const [deposit, cancellation] = await Promise.all([currentDepositPolicy(), currentCancellationPolicy()]);
+  res.json({ data: {
+    depositPercent: deposit?.deposit?.value ?? null,
+    cancellationTiers: (cancellation?.cancellationTiers || []).map(({ minHoursBeforeCheckIn, refundPercent }) => ({ minHoursBeforeCheckIn, refundPercent })),
+    checkInTime: cancellation?.checkInTime || DEFAULT_CHECK_IN, checkOutTime: cancellation?.checkOutTime || null,
+  } });
+}
+module.exports = { publicSummary, listing, create, cancellationListing, createCancellation, hotelInfo, updateHotelInfo };

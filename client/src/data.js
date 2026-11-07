@@ -2,11 +2,11 @@
 export const MENU = [
   { label: 'Dashboard', href: '#/admin' },
   { label: 'Front desk', items: [['#/admin/bookings', 'Bookings', 'All reservations'], ['#/admin/frontdesk', 'Check-in / Check-out', 'Today’s arrivals & departures'], ['#/admin/cancellations', 'Cancellations', 'Requests to review', ['cancellations.review']]] },
-  { label: 'Rooms', items: [['#/admin/rooms', 'Room map', 'Live room status'], ['#/admin/roomtypes', 'Room types', 'Pricing & amenities'], ['#/admin/services', 'Services', 'Extras & add-ons']] },
+  { label: 'Rooms', items: [['#/admin/rooms', 'Room map', 'Live room status'], ['#/admin/roomtypes', 'Room types', 'Pricing & amenities']] },
   { label: 'Housekeeping', items: [['#/admin/cleaning', 'Cleaning tasks', 'Assigned to staff'], ['#/admin/cleaning-request', 'Cleaning request', 'Create ad-hoc request', ['cleaning_tasks.ad_hoc.create']], ['#/admin/assignments', 'Assignments', 'Plans by room, floor and shift', ['manager.only']], ['#/admin/issues', 'Room issues', 'Maintenance reports']] },
-  { label: 'Billing', items: [['#/admin/invoices', 'Invoices', ''], ['#/admin/payments', 'Payments', ''], ['#/admin/refunds', 'Refunds', '', ['refunds.handle']], ['#/admin/revenue', 'Revenue', '', ['revenue.read']], ['#/admin/occupancy', 'Occupancy', '', ['revenue.read']], ['#/admin/coupons', 'Coupons', '', ['promotions.manage']]] },
-  { label: 'Guests & staff', items: [['#/admin/customers', 'Customer accounts', '', ['manager.only']], ['#/admin/users', 'Users', '', ['users.manage']], ['#/admin/staff', 'Staff', '', ['staff.manage']], ['#/admin/roles', 'Roles', '', ['roles.manage']], ['#/admin/reviews', 'Reviews', '']] },
-  { label: 'Settings', items: [['#/admin/hotel', 'Hotel & policies', ''], ['#/admin/policy', 'Deposit & cancellation', '', ['policies.manage']]] }
+  { label: 'Billing', items: [['#/admin/payments', 'Payments', '', ['payments.settle', 'revenue.read']], ['#/admin/invoices', 'Invoices', '', ['payments.settle', 'revenue.read']], ['#/admin/refunds', 'Refunds', '', ['refunds.handle']], ['#/admin/revenue', 'Revenue', '', ['revenue.read']], ['#/admin/occupancy', 'Occupancy', '', ['revenue.read']], ['#/admin/coupons', 'Coupons', '', ['promotions.manage']]] },
+  { label: 'Guests & staff', items: [['#/admin/customers', 'Customer accounts', '', ['manager.only']], ['#/admin/users', 'Users', '', ['users.manage']], ['#/admin/staff', 'Staff', '', ['staff.manage']], ['#/admin/roles', 'Roles', '', ['roles.manage']]] },
+  { label: 'Settings', items: [['#/admin/policy', 'Hotel & policies', 'Deposit, cancellation and hotel details', ['policies.manage']]] }
 ];
 
 export const STATS = [

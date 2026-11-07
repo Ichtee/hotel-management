@@ -1017,6 +1017,25 @@ test("UC38: penalties join the bill, are confirmed, reduced or waived once, and 
   await send(staff, "post", `/api/frontdesk/bookings/${(await payBooking()).id}/penalties`, { itemName: "x", amount: 10 }).expect(409); // not checked in
 });
 
+test("Member 2 booking routes need a session and never act for another customer", async () => {
+  const booking = await payBooking();
+  const anon = request(app);
+  await anon.post(`/api/bookings/${booking.id}/modify`).set("Origin", origin).send({ guestCount: 2 }).expect(401);
+  await anon.post(`/api/bookings/${booking.id}/withdraw-cancellation`).set("Origin", origin).send({}).expect(401);
+  await anon.get("/api/bookings/search").expect(401);
+  assert.ok("depositPercent" in (await anon.get("/api/public/policies").expect(200)).body.data);
+  await anon.get(`/api/bookings/ref/${booking.bookingReference}`).expect(401);
+  await customer.get("/api/bookings/search").expect(403); // all guests' bookings are staff-only
+  await staff.get("/api/bookings/search").expect(200);
+  await customer.get("/api/frontdesk/payments").expect(403);
+  const pays = (await staff.get("/api/frontdesk/payments?status=pending").expect(200)).body.data;
+  assert.ok(pays.every((p) => p.status === "pending"));
+  await manager.get("/api/frontdesk/invoices").expect(200);
+  // a body customerId or x-user-id header cannot impersonate the owner
+  const owner = String(booking.customerId);
+  await send(admin, "post", `/api/bookings/${booking.id}/modify`, { customerId: owner, guestCount: 2 }).set("x-user-id", owner).expect((r) => assert.ok(r.status >= 400));
+});
+
 test("jobs endpoint: off without JOB_SECRET, then needs the secret", async () => {
   const saved = process.env.JOB_SECRET;
   delete process.env.JOB_SECRET;

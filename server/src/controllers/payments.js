@@ -2,6 +2,7 @@ const { randomBytes } = require("node:crypto");
 const mongoose = require("mongoose");
 const Booking = require("../models/Booking");
 const Payment = require("../models/Payment");
+const Invoice = require("../models/Invoice");
 const v = require("../utils/validation");
 const gateway = require("../services/gateway");
 const sepay = require("../services/sepay");
@@ -157,4 +158,18 @@ async function show(req, res) {
   const { kind, amount, currency, method, status, paidAt, failureReason } = payment;
   res.json({ data: { _id: payment.id, bookingId: payment.bookingId, kind, amount, currency, method, status, paidAt, failureReason, booking } });
 }
-module.exports = { deposit, finalPayment, callback, sepayIpn, sandbox, back, methods, show };
+// Billing screens (read-only): the latest payments and invoices with their booking, newest first.
+const BOOKING = { path: "bookingId", select: "bookingReference guestName status" };
+async function listing(req, res) {
+  v.keys(req.query, ["status", "kind", "limit"]);
+  const filter = {};
+  if (req.query.status) filter.status = v.choice(req.query.status, "status", Payment.schema.path("status").enumValues);
+  if (req.query.kind) filter.kind = v.choice(req.query.kind, "kind", Payment.schema.path("kind").enumValues);
+  const limit = req.query.limit ? v.number(Number(req.query.limit), "limit", 1, 200) : 100;
+  res.json({ data: await Payment.find(filter).populate(BOOKING).sort({ createdAt: -1 }).limit(limit).lean() });
+}
+async function invoices(req, res) {
+  v.keys(req.query, []);
+  res.json({ data: await Invoice.find().populate(BOOKING).populate("issuedBy", "username customerProfile.fullName").sort({ createdAt: -1 }).limit(200).lean() });
+}
+module.exports = { listing, invoices, deposit, finalPayment, callback, sepayIpn, sandbox, back, methods, show };

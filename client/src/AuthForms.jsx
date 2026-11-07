@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from './api/client.js';
 import { useAuth } from './context/Auth.jsx';
 import { Field, Notice } from './ui.jsx';
@@ -66,16 +66,34 @@ function PasswordField({ label, name, error, autoComplete, onChange, minLength, 
   );
 }
 
+// Google reCAPTCHA v2 checkbox; the site key comes from the server (Google's test key when none is configured).
+function Captcha({ onToken, resetKey }) {
+  const box = useRef(null); const widget = useRef(null);
+  useEffect(() => {
+    let alive = true;
+    const draw = (siteKey) => { if (alive && box.current && widget.current == null) widget.current = window.grecaptcha.render(box.current, { sitekey: siteKey, callback: onToken, 'expired-callback': () => onToken('') }); };
+    api('/auth/captcha-config').then(({ data: { siteKey } }) => {
+      if (window.grecaptcha?.render) return draw(siteKey);
+      window.__onCaptchaLoad = () => draw(siteKey);
+      if (!document.getElementById('recaptcha-js')) document.head.append(Object.assign(document.createElement('script'), { id: 'recaptcha-js', src: 'https://www.google.com/recaptcha/api.js?onload=__onCaptchaLoad&render=explicit', async: true }));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => { if (resetKey && widget.current != null) { window.grecaptcha.reset(widget.current); onToken(''); } }, [resetKey]);
+  return <div ref={box} style={{ minHeight: 78 }} />;
+}
+
 export function SignIn({ onDone, hint, onForgot }) {
   const { signIn } = useAuth();
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [token, setToken] = useState(''); const [tries, setTries] = useState(0);
   const submit = async (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
     setBusy(true);
-    try { await signIn({ email: f.email, password: f.password }); setErr(null); onDone(); }
-    catch (x) { setErr(x); setBusy(false); }
+    try { await signIn({ email: f.email, password: f.password, captchaToken: token || undefined }); setErr(null); onDone(); }
+    catch (x) { setErr(x); setBusy(false); setTries((t) => t + 1); } // a token is single-use
   };
   return (
     <form className="form one" onSubmit={submit}>
@@ -93,6 +111,7 @@ export function SignIn({ onDone, hint, onForgot }) {
           </button>
         </div>
       )}
+      <Captcha onToken={setToken} resetKey={tries} />
       <Notice error={err} />
       <button className="btn primary wide" type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
       {hint}

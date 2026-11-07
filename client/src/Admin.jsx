@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { BOOKINGS, MENU, ROOMS, TABLES } from './data.js';
+import { MENU } from './data.js';
 import AdminRoomMap from './pages/AdminRoomMap.jsx';
 import AdminRoomTypes from './pages/AdminRoomTypes.jsx';
 import AdminCleaningTasks from './pages/AdminCleaningTasks.jsx';
@@ -14,7 +14,7 @@ import { Badge, DataTable, Field, LineChart, Modal, Notice, PageHead, useApi } f
 import { AuthShell, SignIn, ForgotPassword } from './AuthForms.jsx';
 import { Coupons, DepositPolicy, Occupancy, Profile, Revenue, Roles, Users } from './AdminPages.jsx';
 import { Cancellations, Refunds } from './Cancellations.jsx';
-import { api, money } from './api/client.js';
+import { api, dateLabel, money } from './api/client.js';
 
 const ICONS = {
   grid: 'M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z',
@@ -27,6 +27,7 @@ const ICONS = {
   bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9 M13.7 21a2 2 0 0 1-3.4 0',
   menu: 'M3 6h18 M3 12h18 M3 18h18',
   search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z M21 21l-4.3-4.3',
+  lock: 'M5 11h14v10H5z M8 11V7a4 4 0 0 1 8 0v4',
   globe: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z M2 12h20 M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z'
 };
 const SECTION_ICON = { 'Front desk': 'calendar', Rooms: 'bed', Housekeeping: 'sparkle', Billing: 'card', 'Guests & staff': 'users', Settings: 'gear' };
@@ -78,8 +79,7 @@ function Topbar({ onMenu }) {
   return (
     <header className="atop" ref={ref}>
       <button className="ibtn burger" aria-label="Open menu" onClick={onMenu}><Icon n="menu" /></button>
-      <label className="asearch"><Icon n="search" size={16} /><input type="search" placeholder="Search bookings, guests, rooms…" aria-label="Search" /></label>
-      <button className="ibtn bell" aria-label="Notifications, 3 unread"><Icon n="bell" /><i>3</i></button>
+      <span className="atop-gap" />
       <div className="aprofile">
         <button aria-expanded={menu} aria-haspopup="true" onClick={() => setMenu(!menu)}>
           <span className="avatar">{initials}</span><span className="who"><b>{name}</b><small>{user.roleName}</small></span>
@@ -96,114 +96,99 @@ function Topbar({ onMenu }) {
   );
 }
 
-const TablePage = ({ id }) => {
-  const t = TABLES[id];
-  return <><PageHead title={t.title} sub={t.sub} action={t.action} /><DataTable cols={t.cols} rows={t.rows} /></>;
-};
-
-/* ---------- Dashboard charts (inline SVG, reference-palette blue + muted comparison) ---------- */
-const DAYS = ['29 Sep', '30 Sep', '1 Oct', '2 Oct', '3 Oct', '4 Oct', '5 Oct', '6 Oct', '7 Oct', '8 Oct', '9 Oct', '10 Oct', '11 Oct', '12 Oct'];
-const CUR = [3200, 3550, 3100, 4100, 4400, 5200, 5600, 4300, 4600, 4000, 4900, 5300, 5900, 4860];
-const PREV = [2900, 3000, 3300, 3500, 3800, 4300, 4900, 3900, 4100, 3700, 4200, 4600, 5000, 4400];
-const fmt = (n) => `$${n.toLocaleString('en-US')}`;
-
-function Sparkline({ data }) {
-  const max = Math.max(...data), min = Math.min(...data);
-  const pts = data.map((v, i) => `${(i / (data.length - 1)) * 100},${28 - ((v - min) / (max - min || 1)) * 24}`).join(' ');
-  return <svg className="spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><polyline points={pts} fill="none" stroke="var(--series-1)" strokeWidth="2" vectorEffect="non-scaling-stroke" /></svg>;
-}
-
-function Kpi({ label, value, delta, up, data, cmp = 'vs last week' }) {
-  return (
-    <div className="kpi">
-      <p>{label}</p>
-      <strong>{value}</strong>
-      <small className={up ? 'up' : 'down'}>{up ? '▲' : '▼'} {delta} <span>{cmp}</span></small>
-      <Sparkline data={data} />
-    </div>
-  );
-}
-
-const TYPE_OCC = [['Deluxe Double', 86], ['Superior Twin', 72], ['Family Suite', 64], ['Presidential Suite', 40]];
-const ACTIVITY = [
-  ['Tran Binh checked in', 'Room 512 · 10 min ago'], ['Payment received $75', 'BK-1042 · 32 min ago'],
-  ['Room 305 marked dirty', 'by Mai · 1 h ago'], ['Cancellation request', 'BK-1029 · 2 h ago'], ['New review (5★)', 'Nguyen An · 3 h ago']
-];
-const STATUSES = [['available', 'Available'], ['occupied', 'Occupied'], ['dirty', 'Dirty'], ['maintenance', 'Maintenance']];
-
+/* ---------- Dashboard: live data only ---------- */
 const vnDay = (offset) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(Date.now() + offset * 864e5));
 const shortDate = (iso) => new Date(`${iso}T00:00:00+07:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Ho_Chi_Minh' });
+const endOfToday = () => encodeURIComponent(`${vnDay(0)}T23:59:59+07:00`);
+const ROOM_STATUSES = [['available', 'Available'], ['occupied', 'Occupied'], ['cleaning', 'Cleaning'], ['maintenance', 'Maintenance']];
+const canSeeBookings = (u) => ['manager', 'admin'].includes(u.role) || u.permissions.includes('bookings.managed.read');
+
+function Stat({ label, value, hint, href }) {
+  const body = <><p>{label}</p><strong>{value ?? '—'}</strong>{hint && <small className="muted">{hint}</small>}</>;
+  return href ? <a className="kpi kpi-link" href={href}>{body}</a> : <div className="kpi">{body}</div>;
+}
+
+// Today's arrivals (confirmed, check-in today or overdue) and departures (in-house, check-out today or overdue).
+function useFrontDesk(enabled) {
+  const arrivals = useApi(`/bookings/search?status=confirmed&checkInTo=${endOfToday()}&limit=100`, enabled);
+  const inHouse = useApi('/bookings/search?status=checked_in&limit=100', enabled);
+  const end = new Date(`${vnDay(0)}T23:59:59+07:00`);
+  const departures = (inHouse.data || []).filter((b) => new Date(b.checkOutDate) <= end);
+  return { arrivals, inHouse, departures, reload: () => { arrivals.reload(); inHouse.reload(); } };
+}
+
+const roomOf = (b) => (b.rooms?.[0]?.roomId?.roomNumber ? `Room ${b.rooms[0].roomId.roomNumber}` : b.rooms?.[0]?.roomTypeId?.name || '—');
+
+function Queue({ title, rows, empty, action, onAction, loading }) {
+  return (
+    <section className="panel">
+      <div className="phead"><h2>{title}</h2><span className="pill">{rows.length}</span></div>
+      {loading ? <p className="muted">Loading…</p> : rows.length === 0 ? <p className="empty">{empty}</p> : (
+        <ul className="queue">
+          {rows.map((b) => (
+            <li key={b._id}>
+              <div><strong>{b.guestName || 'Guest'}</strong><small>{b.bookingReference} · {roomOf(b)} · {dateLabel(b.checkInDate)} → {dateLabel(b.checkOutDate)}</small></div>
+              {onAction && <button className="btn sm primary" onClick={() => onAction(b)}>{action}</button>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
 
 function Dashboard() {
   const { user } = useAuth();
   const name = user.customerProfile?.fullName?.split(' ').pop() || user.username;
+  const desk = canSeeBookings(user);
+  const fd = useFrontDesk(desk);
   const canRev = user.permissions.includes('revenue.read');
-  const rev = useApi(`/reports/revenue?from=${vnDay(-27)}&to=${vnDay(0)}&groupBy=day`, canRev);
+  const rev = useApi(`/reports/revenue?from=${vnDay(-13)}&to=${vnDay(0)}&groupBy=day`, canRev);
+  const rooms = useApi('/rooms?limit=100', user.role === 'manager');
+  const cx = useApi('/frontdesk/cancellations', user.permissions.includes('cancellations.review'));
+  const [checkingIn, setCheckingIn] = useState(null);
+  const [checkingOut, setCheckingOut] = useState(null);
   const series = rev.data?.series || [];
-  const real = canRev && series.length === 28 ? { cur: series.slice(14).map((r) => r.net), prev: series.slice(0, 14).map((r) => r.net), labels: series.slice(14).map((r) => shortDate(r.date)) } : null;
-  const sample = { cur: CUR, prev: PREV, labels: DAYS };
-  const chart = real || sample;
-  const fmtMoney = real ? money : fmt;
-  const total = chart.cur.reduce((a, b) => a + b, 0);
-  const last = chart.cur[chart.cur.length - 1], before = chart.cur[chart.cur.length - 2];
-  const pct = before ? Math.round(((last - before) / before) * 100) : 0;
-  const count = (s) => ROOMS.filter((r) => r.status === s).length;
+  const roomList = (rooms.data || []).filter((r) => r.isActive !== false);
+  const count = (s) => roomList.filter((r) => r.status === s).length;
+  const occupancy = roomList.length ? `${Math.round((count('occupied') / roomList.length) * 100)}%` : null;
+  const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Ho_Chi_Minh' });
   return (
     <>
-      <PageHead title={`Hello, ${name}`} sub={`${new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} · ${user.roleName}`} action="New booking" extra={<button className="btn">Export report</button>} />
+      <PageHead title={`Hello, ${name}`} sub={`${today} · ${user.roleName}`} />
       <div className="kpis">
-        <Kpi label="Occupancy" value="78%" delta="4%" up data={[70, 72, 68, 74, 75, 73, 78]} />
-        <Kpi label="Revenue today" value={fmtMoney(last)} delta={`${Math.abs(pct)}%`} up={pct >= 0} data={chart.cur.slice(-7)} cmp="vs yesterday" />
-        <Kpi label="Arrivals / Departures" value="12 / 9" delta="2" up data={[8, 10, 9, 11, 12, 10, 12]} />
-        <Kpi label="Cancellations" value="3" delta="1" up={false} data={[1, 2, 1, 0, 2, 4, 3]} />
+        {desk && <Stat label="Arrivals today" value={fd.arrivals.data?.length} hint="Confirmed, not checked in" href="#/admin/frontdesk" />}
+        {desk && <Stat label="Departures today" value={fd.inHouse.data ? fd.departures.length : null} hint="Due to check out" href="#/admin/frontdesk" />}
+        {desk && <Stat label="In-house guests" value={fd.inHouse.data?.length} hint="Checked in now" href="#/admin/bookings" />}
+        {cx.data && <Stat label="Cancellation requests" value={cx.data.length} hint="Waiting for review" href="#/admin/cancellations" />}
+        {occupancy && <Stat label="Occupancy now" value={occupancy} hint={`${count('occupied')} of ${roomList.length} rooms`} href="#/admin/rooms" />}
+        {canRev && <Stat label="Revenue today" value={series.length ? money(series[series.length - 1].net) : null} hint="Receipts minus refunds" href="#/admin/revenue" />}
       </div>
-
+      {desk && <div className="qgrid">
+        <Queue title="Today’s arrivals" rows={fd.arrivals.data || []} loading={fd.arrivals.loading} empty="No arrivals waiting." action="Check in" onAction={user.permissions.includes('stays.check_in') ? setCheckingIn : null} />
+        <Queue title="Today’s departures" rows={fd.departures} loading={fd.inHouse.loading} empty="No departures due." action="Check out" onAction={user.permissions.includes('stays.check_out') ? setCheckingOut : null} />
+      </div>}
       <div className="dgrid">
-        <section className="panel span2">
-          <div className="phead"><h2>Revenue</h2><span className="muted">{real ? 'Last 14 days' : 'Sample data · last 14 days'} · <b>{fmtMoney(total)}</b></span></div>
-          {canRev && rev.loading ? <p className="muted">Loading…</p> : <LineChart labels={chart.labels} cur={chart.cur} prev={chart.prev} format={fmtMoney} summary={`Daily revenue for the last 14 days, total ${fmtMoney(total)}`} />}
-        </section>
-        <section className="panel">
-          <div className="phead"><h2>Room status</h2><span className="muted">{ROOMS.length} rooms</span></div>
-          <div className="stack-bar" role="img" aria-label={STATUSES.map(([s, l]) => `${l} ${count(s)}`).join(', ')}>
-            {STATUSES.map(([s]) => count(s) > 0 && <span key={s} className={`s-${s}`} style={{ flex: count(s) }} />)}
-          </div>
-          <ul className="rs-list">
-            {STATUSES.map(([s, l]) => <li key={s}><i className={`s-${s}`} />{l}<b>{count(s)}</b></li>)}
-          </ul>
-          <a className="more" href="#/admin/rooms">Open room map →</a>
-        </section>
-
-        <section className="panel span2">
-          <div className="phead"><h2>Today’s arrivals</h2><a className="more" href="#/admin/frontdesk">Front desk →</a></div>
-          <DataTable cols={['Code', 'Guest', 'Room', 'Type', 'Status']} rows={BOOKINGS.slice(0, 5).map((b) => [b.code, b.guest, b.room, b.type, b.status])} />
-        </section>
-        <section className="panel">
-          <div className="phead"><h2>Occupancy by room type</h2></div>
-          <ul className="hbars">
-            {TYPE_OCC.map(([n, v]) => (
-              <li key={n}>
-                <div className="between"><span>{n}</span><b>{v}%</b></div>
-                <div className="track"><div className="fillb" style={{ width: `${v}%` }} /></div>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="panel span2">
-          <div className="phead"><h2>Housekeeping progress</h2><span className="muted">7 of 12 tasks done</span></div>
-          <div className="track big"><div className="fillb" style={{ width: '58%' }} /></div>
-          <div className="mini-stats">
-            <div><b>7</b><span>Done</span></div><div><b>3</b><span>In progress</span></div><div><b>2</b><span>Pending</span></div><div><b>2</b><span>Open issues</span></div>
-          </div>
-        </section>
-        <section className="panel">
-          <div className="phead"><h2>Recent activity</h2></div>
-          <ul className="feed">
-            {ACTIVITY.map(([t, s]) => <li key={t}><b>{t}</b><span>{s}</span></li>)}
-          </ul>
-        </section>
+        {canRev && (
+          <section className="panel span2">
+            <div className="phead"><h2>Revenue · last 14 days</h2><span className="muted"><b>{money(series.reduce((a, r) => a + r.net, 0))}</b></span></div>
+            {rev.loading ? <p className="muted">Loading…</p> : series.length ? <LineChart labels={series.map((r) => shortDate(r.date))} cur={series.map((r) => r.net)} format={money} summary="Daily revenue for the last 14 days" /> : <p className="empty">No revenue yet.</p>}
+          </section>
+        )}
+        {roomList.length > 0 && (
+          <section className="panel">
+            <div className="phead"><h2>Room status</h2><span className="muted">{roomList.length} rooms</span></div>
+            <div className="stack-bar" role="img" aria-label={ROOM_STATUSES.map(([s, l]) => `${l} ${count(s)}`).join(', ')}>
+              {ROOM_STATUSES.map(([s]) => count(s) > 0 && <span key={s} className={`s-${s}`} style={{ flex: count(s) }} />)}
+            </div>
+            <ul className="rs-list">{ROOM_STATUSES.map(([s, l]) => <li key={s}><i className={`s-${s}`} />{l}<b>{count(s)}</b></li>)}</ul>
+            <a className="more" href="#/admin/rooms">Open room map →</a>
+          </section>
+        )}
       </div>
+      {!desk && !canRev && <p className="empty">Use the menu to open your tasks.</p>}
+      {checkingIn && <CheckInBooking booking={checkingIn} onClose={() => { setCheckingIn(null); fd.reload(); }} />}
+      {checkingOut && <CheckOutBooking booking={checkingOut} onClose={() => { setCheckingOut(null); fd.reload(); }} />}
     </>
   );
 }
@@ -224,14 +209,13 @@ function Bookings() {
   const statusParam = f !== 'all' ? `&status=${f}` : '';
   const searchParam = search ? `&reference=${encodeURIComponent(search)}` : '';
   const live = useApi(`/bookings/search?limit=100${statusParam}${searchParam}`);
-  const fallbackRows = (BOOKINGS || []).filter((b) => f === 'all' || b.status === f);
-  const bookingsList = live.data || fallbackRows;
+  const bookingsList = live.data || [];
 
   return (
     <>
       <PageHead
         title="Bookings"
-        sub="All reservations with real-time status and search (UC39)"
+        sub="All reservations, newest first"
         action={user.role === 'receptionist' || user.role === 'admin' ? 'New booking' : null}
         onAction={() => setCreating(true)}
       />
@@ -251,33 +235,27 @@ function Bookings() {
       </div>
       <Notice error={live.error} />
       <DataTable
-        cols={['Code', 'Guest', 'Room', 'Type', 'Check-in', 'Check-out', 'Total', 'Status', 'Actions']}
-        rows={bookingsList.map((b) => b._id ? [
+        cols={['Code', 'Guest', 'Room', 'Check-in', 'Check-out', 'Total', 'Status', '']}
+        rows={bookingsList.map((b) => [
           b.bookingReference || b._id.slice(-8).toUpperCase(),
           b.guestName || '—',
-          b.rooms?.[0]?.roomId?.roomNumber ? `Room ${b.rooms[0].roomId.roomNumber}` : 'Assigned at check-in',
-          b.rooms?.[0]?.roomTypeId?.name || 'Room',
-          b.checkInDate?.slice(0, 10),
-          b.checkOutDate?.slice(0, 10),
+          roomOf(b),
+          dateLabel(b.checkInDate),
+          dateLabel(b.checkOutDate),
           money(b.totalAmount),
           b.status,
-          <span className="row-actions" key={b._id}>
-            <button className="btn sm" onClick={() => setEditing(b)}>Edit</button>
-            {b.status === 'confirmed' && <button className="btn sm" onClick={() => setCheckingIn(b)}>Check in</button>}
-            {b.status === 'checked_in' && (
-              <>
-                <button className="btn sm" onClick={() => setChangingRoom(b)}>Change room</button>
-                <button className="btn sm" onClick={() => setAddingService(b)}>Add service</button>
-                <button className="btn sm" onClick={() => setCheckingOut(b)}>Check out</button>
-              </>
-            )}
-            {['checked_in', 'checked_out'].includes(b.status) && <button className="btn sm" onClick={() => setPenalizing(b)}>Penalties</button>}
-            {['pending', 'confirmed'].includes(b.status) && <button className="btn sm" onClick={() => setCancelling(b)}>Cancel</button>}
-          </span>
-        ] : [
-          b.code, b.guest, b.room, b.type, b.inD, b.outD, b.total, b.status, ''
+          <RowActions key={b._id} actions={[
+            b.status === 'confirmed' && ['Check in', () => setCheckingIn(b)],
+            b.status === 'checked_in' && ['Check out', () => setCheckingOut(b)],
+            ['pending', 'confirmed'].includes(b.status) && ['Edit', () => setEditing(b)],
+            b.status === 'checked_in' && ['Change room', () => setChangingRoom(b)],
+            b.status === 'checked_in' && ['Add service', () => setAddingService(b)],
+            ['checked_in', 'checked_out'].includes(b.status) && ['Penalties', () => setPenalizing(b)],
+            ['pending', 'confirmed'].includes(b.status) && ['Cancel', () => setCancelling(b)],
+          ].filter(Boolean)} />
         ])}
       />
+      {!live.loading && bookingsList.length === 0 && <p className="empty">No bookings match this filter.</p>}
       {creating && <WalkInBooking onClose={() => { setCreating(false); live.reload(); }} />}
       {editing && <EditBooking booking={editing} onClose={() => { setEditing(null); live.reload(); }} />}
       {cancelling && <CancelBooking booking={cancelling} onClose={() => { setCancelling(null); live.reload(); }} />}
@@ -287,6 +265,23 @@ function Bookings() {
       {checkingOut && <CheckOutBooking booking={checkingOut} onClose={() => { setCheckingOut(null); live.reload(); }} />}
       {penalizing && <Penalties booking={penalizing} onClose={() => { setPenalizing(null); live.reload(); }} />}
     </>
+  );
+}
+
+// First action as a button, the rest in a "More" menu, so a row never turns into a wall of buttons.
+function RowActions({ actions }) {
+  if (!actions.length) return null;
+  const [[label, run], ...rest] = actions;
+  return (
+    <span className="row-actions">
+      <button className="btn sm" onClick={run}>{label}</button>
+      {rest.length > 0 && (
+        <details className="rowmenu">
+          <summary className="btn sm" aria-label="More actions">More ▾</summary>
+          <div>{rest.map(([l, fn]) => <button key={l} onClick={(e) => { e.currentTarget.closest('details').open = false; fn(); }}>{l}</button>)}</div>
+        </details>
+      )}
+    </span>
   );
 }
 
@@ -421,54 +416,59 @@ function WalkInBooking({ onClose }) {
 }
 
 function FrontDesk() {
-  const list = (status, label) => BOOKINGS.filter((b) => b.status === status).map((b) => (
-    <li key={b.code}><div><strong>{b.guest}</strong><small>{b.code} · Room {b.room}</small></div><button className="btn">{label}</button></li>
-  ));
+  const { user } = useAuth();
+  const fd = useFrontDesk(true);
+  const [checkingIn, setCheckingIn] = useState(null);
+  const [checkingOut, setCheckingOut] = useState(null);
+  const done = (set) => () => { set(null); fd.reload(); };
   return (
     <>
-      <PageHead title="Check-in / Check-out" sub="Today’s front desk queue" />
-      <div className="two">
-        <section className="panel"><h2>Arrivals</h2><ul className="queue">{list('confirmed', 'Check in')}{list('pending', 'Check in')}</ul></section>
-        <section className="panel"><h2>Departures</h2><ul className="queue">{list('checked_in', 'Check out')}</ul></section>
+      <PageHead title="Check-in / Check-out" sub="Today’s arrivals and departures, including overdue ones" />
+      <Notice error={fd.arrivals.error || fd.inHouse.error} />
+      <div className="qgrid">
+        <Queue title="Arrivals" rows={fd.arrivals.data || []} loading={fd.arrivals.loading} empty="No arrivals waiting." action="Check in" onAction={user.permissions.includes('stays.check_in') ? setCheckingIn : null} />
+        <Queue title="Departures" rows={fd.departures} loading={fd.inHouse.loading} empty="No departures due today." action="Check out" onAction={user.permissions.includes('stays.check_out') ? setCheckingOut : null} />
+        <div className="qfull"><Queue title="In-house guests" rows={fd.inHouse.data || []} loading={fd.inHouse.loading} empty="Nobody is checked in." /></div>
       </div>
+      {checkingIn && <CheckInBooking booking={checkingIn} onClose={done(setCheckingIn)} />}
+      {checkingOut && <CheckOutBooking booking={checkingOut} onClose={done(setCheckingOut)} />}
     </>
   );
 }
 
-function RoomMap() {
-  const floors = [...new Set(ROOMS.map((r) => r.no[0]))];
+const METHOD = { cash: 'Cash', pos: 'Card (POS)', credit_card: 'Card', e_wallet: 'E-wallet', bank_transfer: 'Bank transfer' };
+const STAMP = (d) => (d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' }) : '—');
+
+function Payments() {
+  const [status, setStatus] = useState('');
+  const list = useApi(`/frontdesk/payments${status ? `?status=${status}` : ''}`);
+  const rows = list.data || [];
+  const received = rows.filter((p) => p.status === 'success').reduce((a, p) => a + p.amount - (p.refundedAmount || 0), 0);
   return (
     <>
-      <PageHead title="Room map" sub="Live status by floor" action="Add room" />
-      <div className="legend">{STATUSES.map(([s, l]) => <span key={s}><i className={`s-${s}`} />{l}</span>)}</div>
-      {floors.map((fl) => (
-        <section key={fl} className="floor">
-          <h2>Floor {fl}</h2>
-          <div className="rooms">
-            {ROOMS.filter((r) => r.no[0] === fl).map((r) => (
-              <button key={r.no} className={`room s-${r.status}`} aria-label={`Room ${r.no}, ${r.status}`}><b>{r.no}</b><small>{r.status}</small></button>
-            ))}
-          </div>
-        </section>
-      ))}
+      <PageHead title="Payments" sub="Deposits paid online and balances collected at the front desk" />
+      <div className="chips" role="group" aria-label="Filter by status">
+        {[['', 'All'], ['success', 'Paid'], ['pending', 'Pending'], ['failed', 'Failed']].map(([v, l]) => <button key={l} className={status === v ? 'chip on' : 'chip'} aria-pressed={status === v} onClick={() => setStatus(v)}>{l}</button>)}
+      </div>
+      <Notice error={list.error} />
+      {list.loading ? <p className="muted">Loading…</p> : rows.length === 0 ? <p className="empty">No payments yet.</p> : <>
+        <p className="muted">{rows.length} payments · net received {money(received)}</p>
+        <DataTable cols={['Date', 'Booking', 'Guest', 'Type', 'Method', 'Amount', 'Status']} rows={rows.map((p) => [STAMP(p.paidAt || p.createdAt), p.bookingId?.bookingReference || '—', p.bookingId?.guestName || '—', p.kind, METHOD[p.method] || p.method, money(p.amount), p.status === 'success' ? 'paid' : p.status])} />
+      </>}
     </>
   );
 }
 
-function Hotel() {
+function Invoices() {
+  const list = useApi('/frontdesk/invoices');
+  const rows = list.data || [];
   return (
     <>
-      <PageHead title="Hotel & policies" sub="Property details and booking rules" />
-      <form className="panel form" onSubmit={(e) => e.preventDefault()}>
-        <label>Hotel name<input defaultValue="GrandStay Da Nang" /></label>
-        <label>City<input defaultValue="Da Nang" /></label>
-        <label>Address<input defaultValue="1 Vo Nguyen Giap" /></label>
-        <label>Star rating<select defaultValue="5">{[1, 2, 3, 4, 5].map((n) => <option key={n}>{n}</option>)}</select></label>
-        <label>Check-in time<input type="time" defaultValue="14:00" /></label>
-        <label>Check-out time<input type="time" defaultValue="12:00" /></label>
-        <label>Free cancellation (hours before)<input type="number" defaultValue="48" min="0" /></label>
-        <button className="btn primary" type="submit">Save changes</button>
-      </form>
+      <PageHead title="Invoices" sub="Issued automatically at check-out" />
+      <Notice error={list.error} />
+      {list.loading ? <p className="muted">Loading…</p> : rows.length === 0 ? <p className="empty">No invoices yet. An invoice is issued when a guest checks out.</p> : (
+        <DataTable cols={['Invoice', 'Booking', 'Guest', 'Total', 'Status', 'Issued']} rows={rows.map((i) => [i.invoiceNumber || '—', i.bookingId?.bookingReference || '—', i.bookingId?.guestName || '—', money(i.totalAmount || 0), i.status, STAMP(i.issuedAt || i.createdAt)])} />
+      )}
     </>
   );
 }
@@ -515,13 +515,14 @@ const PAGES = {
   '#/admin/profile': Profile,
   '#/admin/bookings': Bookings,
   '#/admin/frontdesk': FrontDesk,
+  '#/admin/payments': Payments,
+  '#/admin/invoices': Invoices,
   '#/admin/rooms': AdminRoomMap,
   '#/admin/assignments': HousekeepingAssignments,
   '#/admin/cleaning-request': AdHocCleaningRequest,
   '#/admin/roomtypes': AdminRoomTypes,
   '#/admin/cleaning': AdminCleaningTasks,
   '#/admin/issues': AdminRoomIssues,
-  '#/admin/hotel': Hotel,
   '#/admin/policy': DepositPolicy,
   '#/admin/cancellations': Cancellations,
   '#/admin/refunds': Refunds
@@ -538,8 +539,7 @@ export default function Admin({ route }) {
   if (route === '#/admin/login') return <Login />;
   if (!user || user.scope === 'self') { if (location.hash !== '#/admin/login') location.hash = '#/admin/login'; return null; }
   const denied = ((route === '#/admin/customers' || route === '#/admin/assignments') && user.role !== 'manager') || (NEEDS[route] && !user.permissions.includes(NEEDS[route]));
-  const id = route.slice(8);
-  const Page = denied ? Forbidden : PAGES[route] || (TABLES[id] ? () => <TablePage id={id} /> : Dashboard);
+  const Page = denied ? Forbidden : PAGES[route] || Dashboard;
   return (
     <div className="adm">
       <a className="skip" href="#main">Skip to content</a>

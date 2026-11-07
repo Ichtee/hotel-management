@@ -113,36 +113,6 @@ function createApp({
 
 
   // Creation (UC06), cancel (UC08) and cancel-payment are session-authenticated and registered below (bookingCreation, cancellations).
-  // --- Member 2 Booking Endpoints (modify / withdraw / search) ---
-  // BR-36: Withdraw cancellation request — restore to confirmed
-  app.post("/api/bookings/:id/withdraw-cancellation", (req, res, next) => {
-    bookingController.withdrawCancellation(req, res, next);
-  });
-  app.post("/api/bookings/:id/modify", (req, res, next) => {
-    bookingController.modify(req, res, next);
-  });
-  app.patch("/api/bookings/:id/modify", (req, res, next) => {
-    bookingController.modify(req, res, next);
-  });
-  app.patch("/api/bookings/:id", (req, res, next) => {
-    bookingController.modify(req, res, next);
-  });
-
-  // --- Member 2 Booking Endpoints ---
-
-
-
-  app.get("/api/bookings/ref/:reference", (req, res, next) => {
-    bookingController.getByReference(req, res, next);
-  });
-  app.get("/api/bookings/my", (req, res, next) => {
-    bookingController.getMyBookings(req, res, next);
-  });
-  app.get("/api/bookings/search", (req, res, next) => {
-    bookingController.search(req, res, next);
-  });
-
-
   // --- Auth Rate Limiter & Public Auth Routes ---
   const authLimit = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -178,12 +148,28 @@ function createApp({
   app.get("/api/payments/return", payments.back);
   app.post("/api/jobs/:name", jobs.run);
   app.get("/api/hotel-info", policies.hotelInfo);
+  app.get("/api/public/policies", policies.publicSummary);
   app.use("/api", authenticate);
 
   app.get("/api/auth/me", auth.profile);
   app.get("/api/profile", auth.profile);
   app.put("/api/profile/password", authLimit, auth.changePassword);
   app.use("/api", requirePasswordChanged);
+  // Member 2 modify / withdraw / search. The customer is always the signed-in user (never a body field or header),
+  // so nobody can change another customer's booking; searching all bookings is for front-desk staff only.
+  const asSelf = (handler) => (req, res, next) => {
+    req.body = { ...(req.body || {}), customerId: String(req.user._id) };
+    delete req.headers["x-user-id"];
+    handler.call(bookingController, req, res, next);
+  };
+  const staffSearch = (req, res, next) => {
+    if (!["manager", "admin"].includes(req.role.key)) return permit("bookings.managed.read")(req, res, next);
+    next();
+  };
+  app.post("/api/bookings/:id/withdraw-cancellation", asSelf(bookingController.withdrawCancellation));
+  app.post("/api/bookings/:id/modify", asSelf(bookingController.modify));
+  app.patch("/api/bookings/:id/modify", asSelf(bookingController.modify));
+  app.get("/api/bookings/search", staffSearch, (req, res, next) => bookingController.search(req, res, next));
   app.patch("/api/profile", auth.updateProfile);
   // UC12 Submit Review (Customer session)
   app.post("/api/reviews", roomTypes.submitReview);
@@ -274,6 +260,10 @@ function createApp({
   // SRS 2.4.3 permissions (UC33 lets the manager change them).
   const settle = permit("payments.settle"), cancel = permit("bookings.managed.cancel"), review = permit("cancellations.review"), refund = permit("refunds.handle");
   app.post("/api/frontdesk/bookings/:id/payments", settle, payments.finalPayment);
+  // Receptionists (payments.settle) and the Hotel Manager (revenue.read) read the billing lists.
+  const billing = (req, res, next) => (req.role.permissions.includes("revenue.read") ? next() : settle(req, res, next));
+  app.get("/api/frontdesk/payments", billing, payments.listing);
+  app.get("/api/frontdesk/invoices", billing, payments.invoices);
   app.post("/api/frontdesk/bookings/:id/cancel-otp", cancel, cancellations.sendOtp);
   app.get("/api/frontdesk/cancellations/lookup", cancel, cancellations.lookup);
   app.get("/api/frontdesk/cancellations", review, cancellations.listing);

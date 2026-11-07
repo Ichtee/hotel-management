@@ -883,7 +883,6 @@ class BookingService {
 
     const [data, total] = await Promise.all([
       Booking.find(query)
-        .populate('hotelId', 'name city')
         .populate('rooms.roomTypeId', 'name basePrice')
         .populate('rooms.roomId', 'roomNumber floor')
         .sort({ createdAt: -1 })

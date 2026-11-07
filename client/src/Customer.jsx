@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from './context/Auth.jsx';
 import { AuthShell, AuthTabs, SignIn, Register, ForgotPassword } from './AuthForms.jsx';
 import { Profile } from './AdminPages.jsx';
-import { EXTRAS, OFFERS, REVIEWS, ROOM_TYPES } from './data.js';
+import { OFFERS, REVIEWS, ROOM_TYPES } from './data.js';
 import { MyBookings } from './Bookings.jsx';
-import { roomApi } from './api/roomApi.js';
 import { PaymentPage, PaymentResult, SandboxGateway } from './Payments.jsx';
-import { api } from './api/client.js';
+import { money } from './api/client.js';
+import { Notice, useApi } from './ui.jsx';
+import { LiveRooms as Rooms, LiveRoomDetail as RoomDetail, LiveCheckout as Checkout } from './LiveBooking.jsx';
 
 const NAV = [
   { label: 'Home', href: '#/' },
@@ -21,7 +22,6 @@ const parse = (route) => {
   return [path, Object.fromEntries(new URLSearchParams(q))];
 };
 const route0 = (q) => `${q.in}${q.out}${q.guests}`;
-const money = (n) => `$${Number(n || 0).toFixed(0)}`;
 const nightsBetween = (a, b) => (a && b ? Math.max(0, Math.round((new Date(b) - new Date(a)) / 864e5)) : 0);
 const day = (offset) => new Date(Date.now() + offset * 864e5).toISOString().slice(0, 10);
 const Stars = ({ n }) => <span className="stars" role="img" aria-label={`${n} out of 5`}>{'★'.repeat(Math.round(n))}{'☆'.repeat(5 - Math.round(n))}</span>;
@@ -138,20 +138,11 @@ function Home() {
     ['Best price guarantee', 'Coupons and seasonal rates applied automatically.', 'M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z M7 7h.01'],
     ['Free cancellation', 'Cancel up to 48 hours before check-in.', 'M3 12a9 9 0 1 0 3-6.7 M3 4v5h5 M12 8v4l3 2'],
     ['Verified reviews', 'Only guests who stayed can review.', 'M12 2l3 6.3 6.9.9-5 4.8 1.2 6.9L12 17.5 5.9 20.9 7.1 14 2.1 9.2l6.9-.9z'],
-    ['Secure payment', 'Pay a deposit or in full, invoice included.', 'M5 11h14v10H5z M8 11V7a4 4 0 0 1 8 0v4']
+    ['Secure payment', 'Pay your deposit online and settle the balance at the front desk.', 'M5 11h14v10H5z M8 11V7a4 4 0 0 1 8 0v4']
   ];
 
-  const [featuredRooms, setFeaturedRooms] = useState(ROOM_TYPES.slice(0, 3));
-
-  useEffect(() => {
-    roomTypeServiceFetch();
-  }, []);
-
-  const roomTypeServiceFetch = async () => {
-    try {
-      const res = await roomApi.getRoomTypes({ isActive: true });
-      if (res.data && res.data.length > 0) {
-        const mapped = res.data.slice(0, 3).map((rt, i) => ({
+  const featured = useApi('/public/room-types');
+  const featuredRooms = (featured.data || []).slice(0, 3).map((rt, i) => ({
           id: rt._id,
           name: rt.name,
           price: rt.basePrice,
@@ -163,12 +154,6 @@ function Home() {
           img: rt.images?.[0] || ROOM_TYPES[i % ROOM_TYPES.length].img,
           desc: rt.description || 'Spacious and well-appointed luxury room.'
         }));
-        setFeaturedRooms(mapped);
-      }
-    } catch {
-      // Fallback
-    }
-  };
 
   return (
     <>
@@ -182,6 +167,9 @@ function Home() {
       </section>
       <section className="c-wrap c-section">
         <div className="between"><h2>Our rooms</h2><a href="#/rooms">View all →</a></div>
+        <Notice error={featured.error} />
+        {featured.loading && <p>Đang tải phòng…</p>}
+        {!featured.loading && !featured.error && !featuredRooms.length && <p>Chưa có loại phòng đang mở bán.</p>}
         <div className="c-grid">{featuredRooms.map((r) => <RoomCard key={r.id} r={r} />)}</div>
       </section>
       <section className="c-wrap c-section">
@@ -232,215 +220,6 @@ const Offers = () => (
     <p className="muted">Free cancellation up to 48 hours before check-in. A 20% deposit is charged at booking and refunded according to the cancellation window.</p>
   </div>
 );
-
-// UC06: Check Room Availability & Search
-function Rooms({ q }) {
-  const [price, setPrice] = useState(400);
-  const [cat, setCat] = useState(q.cat || 'all');
-  const [isSearchingApi, setIsSearchingApi] = useState(false);
-  const [apiRooms, setApiRooms] = useState(null);
-
-  useEffect(() => setCat(q.cat || 'all'), [q.cat]);
-
-  // Query Backend search API if dates are specified (UC06 / T06)
-  useEffect(() => {
-    if (q.in && q.out) {
-      setIsSearchingApi(true);
-      roomApi.searchRooms({ checkIn: q.in, checkOut: q.out, guests: q.guests })
-        .then(res => {
-          if (res.data && res.data.length > 0) {
-            const mappedTypes = new Map();
-            for (const r of res.data) {
-              const rt = r.roomTypeId;
-              if (rt && !mappedTypes.has(String(rt._id))) {
-                mappedTypes.set(String(rt._id), {
-                  id: rt._id,
-                  name: rt.name,
-                  price: rt.basePrice,
-                  guests: rt.maxOccupancy || 2,
-                  bed: rt.bedType || 'King bed',
-                  size: rt.roomSizeSqm || 32,
-                  rating: 5,
-                  amenities: rt.amenities?.length ? rt.amenities : ['WiFi', 'Air conditioning', 'Smart TV'],
-                  img: rt.images?.[0] || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=80',
-                  cat: rt.name.toLowerCase().includes('suite') ? 'suite' : 'standard'
-                });
-              }
-            }
-            setApiRooms(Array.from(mappedTypes.values()));
-          } else {
-            setApiRooms(ROOM_TYPES);
-          }
-        })
-        .catch(() => {
-          setApiRooms(ROOM_TYPES);
-        })
-        .finally(() => setIsSearchingApi(false));
-    } else {
-      setApiRooms(null);
-    }
-  }, [q.in, q.out, q.guests]);
-
-  const guests = +q.guests || 2;
-  const sourceList = apiRooms !== null ? apiRooms : ROOM_TYPES;
-  const list = sourceList.filter((r) => r.price <= price && r.guests >= guests && (cat === 'all' || r.cat === cat));
-  const carry = q.in ? `?${new URLSearchParams({ in: q.in, out: q.out, guests: q.guests })}` : '';
-
-  return (
-    <div className="c-wrap c-section">
-      <div className="between">
-        <h1 className="title">Available rooms</h1>
-        {isSearchingApi && <small className="muted">Checking room availability live...</small>}
-      </div>
-      <SearchBar key={route0(q)} q={q} />
-      <div className="c-layout">
-        <aside className="panel filters" aria-label="Filters">
-          <h2>Filters</h2>
-          <label>Max price: {money(price)}<input type="range" min="50" max="400" step="10" value={price} onChange={(e) => setPrice(+e.target.value)} /></label>
-          <label>Category<select value={cat} onChange={(e) => setCat(e.target.value)}><option value="all">All</option><option value="standard">Standard</option><option value="suite">Suites</option></select></label>
-        </aside>
-        <div>
-          <p className="muted">
-            {list.length} room type(s) available for {guests} guest(s)
-            {apiRooms !== null && <span style={{ marginLeft: 8, color: 'var(--green)' }}>● Live verified from server</span>}
-          </p>
-          <div className="c-grid g2">{list.map((r) => <RoomCard key={r.id} r={r} q={carry} />)}</div>
-          {!list.length && <p>No rooms match your search dates or criteria. Try adjusting dates or filters.</p>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RoomDetail({ id, q }) {
-  const r = ROOM_TYPES.find((x) => String(x.id) === String(id)) || ROOM_TYPES[0];
-  const [d, setD] = useState({ in: q.in || day(7), out: q.out || day(10), guests: +q.guests || 2, coupon: '' });
-  const [extras, setExtras] = useState([]);
-  const nights = nightsBetween(d.in, d.out);
-  const offer = OFFERS.find((o) => o.code === d.coupon.trim().toUpperCase());
-  const sub = nights * r.price + extras.reduce((s, i) => s + EXTRAS[i][1], 0);
-  const total = sub * (1 - (offer?.pct || 0) / 100);
-  const set = (k) => (e) => setD({ ...d, [k]: e.target.value });
-
-  const go = (e) => {
-    e.preventDefault();
-    location.hash = `#/checkout?${new URLSearchParams({ room: r.id, in: d.in, out: d.out, guests: d.guests, coupon: offer?.code || '', extras: extras.join(',') })}`;
-  };
-
-  return (
-    <div className="c-wrap c-section">
-      <a href="#/rooms">← Back to rooms</a>
-      <div className="c-layout detail">
-        <div>
-          <img className="hero-img" src={r.img} alt={`${r.name} room`} width="900" height="600" />
-          <div className="between mt"><h1 className="title">{r.name}</h1><Stars n={r.rating} /></div>
-          <p className="muted">{r.bed} · {r.size} m² · up to {r.guests} guests</p>
-          <p>{r.desc}</p>
-          <h2>Amenities</h2>
-          <ul className="tags big">{r.amenities.map((a) => <li key={a}>{a}</li>)}</ul>
-          <h2 className="mt">Policies</h2>
-          <p className="muted">Check-in from 14:00, check-out by 12:00. Free cancellation up to 48 hours before arrival. 20% deposit at booking.</p>
-        </div>
-        <form className="panel book" onSubmit={go}>
-          <p className="price"><strong>{money(r.price)}</strong> <span className="muted">/ night</span></p>
-          <label>Check-in<input type="date" value={d.in} min={day(0)} onChange={set('in')} required /></label>
-          <label>Check-out<input type="date" value={d.out} min={d.in} onChange={set('out')} required /></label>
-          <label>Guests<select value={d.guests} onChange={set('guests')}>{Array.from({ length: r.guests }, (_, i) => <option key={i}>{i + 1}</option>)}</select></label>
-          <fieldset>
-            <legend>Add-ons</legend>
-            {EXTRAS.map(([n, p], i) => (
-              <label className="check" key={n}>
-                <input type="checkbox" checked={extras.includes(i)} onChange={() => setExtras(extras.includes(i) ? extras.filter((x) => x !== i) : [...extras, i])} />
-                {n} <span>+{money(p)}</span>
-              </label>
-            ))}
-          </fieldset>
-          <label>Coupon code<input value={d.coupon} onChange={set('coupon')} placeholder="WELCOME10" /></label>
-          {d.coupon && <small className={offer ? 'ok' : 'bad'}>{offer ? `${offer.pct}% discount applied` : 'Invalid code'}</small>}
-          <dl className="sum">
-            <div><dt>{money(r.price)} × {nights} night(s)</dt><dd>{money(nights * r.price)}</dd></div>
-            {extras.map((i) => <div key={i}><dt>{EXTRAS[i][0]}</dt><dd>{money(EXTRAS[i][1])}</dd></div>)}
-            {offer && <div><dt>Discount</dt><dd>−{money(sub - total)}</dd></div>}
-            <div className="tot"><dt>Total</dt><dd>{money(total)}</dd></div>
-          </dl>
-          <button className="btn primary" type="submit" disabled={!nights}>
-            {nights ? 'Continue to checkout' : 'Choose valid dates'}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// UC07: Make Reservation (Core)
-function Checkout({ q, user }) {
-  const { user: authUser } = useAuth();
-  const currentUser = user || authUser;
-
-  const r = ROOM_TYPES.find((x) => String(x.id) === String(q.room)) || ROOM_TYPES[0];
-  const nights = nightsBetween(q.in, q.out);
-  const ex = (q.extras ? q.extras.split(',') : []).map((i) => EXTRAS[+i]);
-  const offer = OFFERS.find((o) => o.code === q.coupon);
-  const sub = nights * r.price + ex.reduce((s, [, p]) => s + p, 0);
-  const total = sub * (1 - (offer?.pct || 0) / 100);
-  const [pay, setPay] = useState('deposit');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const confirm = async (e) => {
-    e.preventDefault();
-    setSaving(true); setError('');
-    try {
-      const types = await api('/room-types');
-      const type = types.data.find((item) => item.name === r.name);
-      if (!type) throw new Error('This room is no longer available. Please choose another room.');
-      const created = await api('/bookings', { method: 'POST', body: {
-        roomTypeId: type._id, checkInDate: q.in, checkOutDate: q.out,
-        guestCount: Number(q.guests), couponCode: q.coupon || undefined, paymentOption: pay
-      } });
-      location.hash = `#/confirmation?${new URLSearchParams({ ref: created.data.bookingReference })}`;
-    } catch (err) { setError(err.message || 'Unable to create your booking.'); }
-    finally { setSaving(false); }
-  };
-  return (
-    <div className="c-wrap c-section">
-      <h1 className="title">Checkout</h1>
-      {errorMsg && <p className="alert bad">{errorMsg}</p>}
-      <div className="c-layout detail">
-        <form className="panel form" onSubmit={confirm} id="co">
-          {currentUser && (
-            <div style={{ background: 'var(--green-bg)', color: 'var(--green)', padding: '.65rem 1rem', borderRadius: 8, fontSize: '.9rem', marginBottom: '1rem', gridColumn: '1 / -1' }}>
-              ✓ Signed in as <strong>{currentUser.fullName || currentUser.email}</strong>
-            </div>
-          )}
-          <h2 className="full">Guest details</h2>
-          <label>Full name<input name="fullName" required autoComplete="name" defaultValue={currentUser?.customerProfile?.fullName || currentUser?.fullName || ''} /></label>
-          <label>Email<input name="email" type="email" required autoComplete="email" defaultValue={currentUser?.email || ''} /></label>
-          <label>Phone<input name="phone" type="tel" required autoComplete="tel" defaultValue={currentUser?.phone || ''} /></label>
-          <label>Special requests<input name="specialRequests" placeholder="Late arrival, high floor, quiet room…" /></label>
-          <fieldset className="full">
-            <legend>Payment</legend>
-            {[['deposit', `Pay 20% deposit now (${money(total * 0.2)})`], ['full', `Pay in full (${money(total)})`], ['hotel', 'Pay at the hotel']].map(([v, l]) => (
-              <label className="check" key={v}><input type="radio" name="pay" checked={pay === v} onChange={() => setPay(v)} />{l}</label>
-            ))}
-          </fieldset>
-          {error && <p className="note bad-note full" role="alert">{error}</p>}
-          <button className="btn primary" type="submit" disabled={saving}>{saving ? 'Creating booking…' : 'Confirm booking'}</button>
-        </form>
-        <aside className="panel book">
-          <img className="thumb" src={r.img} alt="" />
-          <h2>{r.name}</h2>
-          <p className="muted">{q.in} → {q.out} · {nights} night(s) · {q.guests} guest(s)</p>
-          <dl className="sum">
-            <div><dt>Room</dt><dd>{money(nights * r.price)}</dd></div>
-            {ex.map(([n, p]) => <div key={n}><dt>{n}</dt><dd>{money(p)}</dd></div>)}
-            {offer && <div><dt>{offer.code}</dt><dd>−{money(sub - total)}</dd></div>}
-            <div className="tot"><dt>Total</dt><dd>{money(total)}</dd></div>
-          </dl>
-        </aside>
-      </div>
-    </div>
-  );
-}
 
 const Confirmation = ({ q }) => (
   <div className="c-wrap c-section center">

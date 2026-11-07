@@ -26,6 +26,7 @@ const { occupancy } = require("./controllers/occupancy");
 const roomIssues = require("./controllers/roomIssues");
 const stayRequests = require("./controllers/stayRequests");
 const invoices = require("./controllers/invoices");
+const reviews = require("./controllers/reviews");
 const housekeepingTasks = require("./controllers/housekeepingTasks");
 const { HttpError } = require("./utils/validation");
 
@@ -224,6 +225,7 @@ function createApp({
   // UC11 View Booking Details
   app.get("/api/bookings/:id", bookings.detail);
   app.post("/api/bookings/:id/requests", stayRequests.create);
+  app.post("/api/bookings/:id/reviews", reviews.create);
 
   app.post("/api/bookings/:id/payments/deposit", payments.deposit);
   app.get("/api/payments/methods", payments.methods);

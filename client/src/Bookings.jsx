@@ -166,6 +166,12 @@ export function MyBookings() {
     const note = window.prompt('Optional note for the front desk:', '') || '';
     try { await api(`/bookings/${booking._id}/requests`, { method: 'POST', body: { type, requestedTime, note } }); setMsg('Your request was sent to the front desk.'); s.reload(); } catch (error) { setMsg(error.message); }
   };
+  const writeReview = async (booking) => {
+    const rating = Number(window.prompt('Rating from 1 to 5:', '5')); if (!rating) return;
+    const title = window.prompt('Review title (optional):', '') || '';
+    const comment = window.prompt('Your review (optional):', '') || '';
+    try { await api(`/bookings/${booking._id}/reviews`, { method: 'POST', body: { rating, title, comment } }); setMsg('Thank you. Your review has been published.'); } catch (error) { setMsg(error.message); }
+  };
   const all = s.data || [];
   const isUp = (b) => UPCOMING.includes(b.status);
   const counts = { upcoming: all.filter(isUp).length, past: all.filter((b) => !isUp(b)).length };
@@ -210,7 +216,7 @@ export function MyBookings() {
                     {b.status === 'confirmed' && <button className="btn" onClick={() => { setOpen(b._id); setCancelFor(b._id); setMsg(null); }}>Cancel</button>}
                     {b.status === 'confirmed' && <button className="btn" onClick={() => requestStayChange(b, 'check_in')}>Request early check-in</button>}
                     {b.status === 'checked_in' && <button className="btn" onClick={() => requestStayChange(b, 'check_out')}>Request late check-out</button>}
-                    {b.status === 'checked_out' && <button className="btn">Write review</button>}
+                    {b.status === 'checked_out' && <button className="btn" onClick={() => writeReview(b)}>Write review</button>}
                   </div>
                 </article>
                 {open === b._id && <Details key={`${b._id}-${cancelFor === b._id}`} id={b._id} startCancel={cancelFor === b._id} onChanged={changed} />}

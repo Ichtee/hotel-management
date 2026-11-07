@@ -500,7 +500,23 @@ export function Profile() {
   };
   return (
     <>
-      <PageHead title="My profile" sub={`${user.roleName || user.email} · ${user.email}`} />
+      <PageHead
+        title="My profile"
+        sub={`${user.roleName} · ${user.email}`}
+        extra={
+          <button
+            className="btn danger"
+            style={{ background: '#dc2626', color: '#ffffff', border: 'none', padding: '0.5rem 1.25rem', borderRadius: '6px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            type="button"
+            onClick={async () => {
+              await signOut();
+              location.hash = '#/login';
+            }}
+          >
+            🚪 Sign out
+          </button>
+        }
+      />
       <div className="two">
         <form className="panel form one" onSubmit={save}>
           <h2>Personal details</h2>

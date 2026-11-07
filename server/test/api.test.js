@@ -570,7 +570,7 @@ test("booking history and details expose only the customer's own bookings with p
   const mineBooking = await Booking.create(base(guest._id, { status: "confirmed" }));
   const cancelled = await Booking.create(base(guest._id, { status: "cancelled" }));
   const foreign = await Booking.create(base(other._id));
-  const deposit = await Payment.create({ bookingId: mineBooking.id, kind: "deposit", amount: 600, method: "e_wallet", status: "success" });
+  const deposit = await Payment.create({ bookingId: mineBooking.id, kind: "deposit", amount: 600, method: "bank_transfer", status: "success" });
   await Payment.create({ bookingId: mineBooking.id, kind: "final", amount: 1400, method: "cash", status: "failed" });
   await Refund.create({ bookingId: cancelled.id, paymentId: deposit.id, amount: 300, status: "completed" });
 
@@ -628,7 +628,7 @@ test("online booking: held 15 minutes for the deposit (BR-29), no pay-at-hotel o
   const holdMinutes = (Date.parse(booking.holdExpiresAt) - Date.now()) / 60000;
   assert.ok(holdMinutes > 14 && holdMinutes <= 15);
   assert.equal(await Payment.countDocuments({ bookingId: booking._id }), 0); // no placeholder payment
-  const order = (await send(customer, "post", `/api/bookings/${booking._id}/payments/deposit`, { method: "e_wallet" }).expect(201)).body.data;
+  const order = (await send(customer, "post", `/api/bookings/${booking._id}/payments/deposit`, { method: "bank_transfer" }).expect(201)).body.data;
   assert.equal(order.amount, 1000);
 });
 
@@ -655,9 +655,9 @@ test("deposit payment: verified callback confirms the booking; forged, mismatche
   const booking = await payBooking();
   const url = `/api/bookings/${booking.id}/payments/deposit`;
   await send(customer, "post", url, { method: "cash" }).expect(400);
-  await send(customer, "post", url, { method: "e_wallet", amount: 1 }).expect(400);
-  await send(manager, "post", url, { method: "e_wallet" }).expect(404);
-  const first = (await send(customer, "post", url, { method: "e_wallet" }).expect(201)).body.data;
+  await send(customer, "post", url, { method: "bank_transfer", amount: 1 }).expect(400);
+  await send(manager, "post", url, { method: "bank_transfer" }).expect(404);
+  const first = (await send(customer, "post", url, { method: "bank_transfer" }).expect(201)).body.data;
   assert.equal(first.amount, 600);
   assert.match(first.payUrl, /^#\/pay\/sandbox\/ORD/);
   assert.equal((await send(customer, "post", url, { method: "bank_transfer" }).expect(201)).body.data.orderId, first.orderId);
@@ -675,7 +675,7 @@ test("deposit payment: verified callback confirms the booking; forged, mismatche
   assert.equal((await hook(callbackBody(first.orderId, "success", 600)).expect(200)).body.data.duplicate, true);
   assert.equal(await Notification.countDocuments({ bookingId: booking._id, type: "booking_confirmed" }), 1);
   assert.equal(await Notification.countDocuments({ bookingId: booking._id, type: "payment_result" }), 1);
-  await send(customer, "post", url, { method: "e_wallet" }).expect(409);
+  await send(customer, "post", url, { method: "bank_transfer" }).expect(409);
   assert.equal((await customer.get(`/api/payments/${first.paymentId}`).expect(200)).body.data.status, "success");
   await manager.get(`/api/payments/${first.paymentId}`).expect(404);
 });
@@ -700,12 +700,12 @@ test("deposit payment: a declined payment can be retried; a deposit confirmed af
 });
 test("BR-14: the balance is paid only at the front desk, never online; the receptionist records it", async () => {
   const booking = await payBooking({ status: "confirmed", holdExpiresAt: undefined });
-  await Payment.create({ bookingId: booking._id, kind: "deposit", amount: 600, method: "e_wallet", status: "success", paidAt: new Date() });
+  await Payment.create({ bookingId: booking._id, kind: "deposit", amount: 600, method: "bank_transfer", status: "success", paidAt: new Date() });
   // there is no online final payment for the customer, and the desk route rejects them and online methods
-  await send(customer, "post", `/api/bookings/${booking.id}/payments/final`, { method: "e_wallet" }).expect(404);
+  await send(customer, "post", `/api/bookings/${booking.id}/payments/final`, { method: "bank_transfer" }).expect(404);
   const desk = `/api/frontdesk/bookings/${booking.id}/payments`;
   await send(customer, "post", desk, { method: "cash" }).expect(403);
-  await send(staff, "post", desk, { method: "e_wallet" }).expect(400);
+  await send(staff, "post", desk, { method: "bank_transfer" }).expect(400);
   assert.equal(await Payment.countDocuments({ bookingId: booking._id, kind: "final" }), 0);
 
   const cash = (await send(staff, "post", desk, { method: "cash" }).expect(201)).body.data;
@@ -869,7 +869,7 @@ const AuditLog = require("../src/models/AuditLog");
 const Notification = require("../src/models/Notification");
 async function paidBooking(extra = {}) {
   const booking = await payBooking({ status: "confirmed", holdExpiresAt: undefined, ...extra });
-  await Payment.create({ bookingId: booking._id, kind: "deposit", amount: 600, method: "e_wallet", status: "success", paidAt: new Date(), transactionRef: `DEP-${booking.id}` });
+  await Payment.create({ bookingId: booking._id, kind: "deposit", amount: 600, method: "bank_transfer", status: "success", paidAt: new Date(), transactionRef: `DEP-${booking.id}` });
   return booking;
 }
 const tiers = (...pairs) => pairs.map(([minHoursBeforeCheckIn, refundPercent]) => ({ minHoursBeforeCheckIn, refundPercent }));
@@ -931,7 +931,7 @@ test("UC08: the customer requests a cancellation with a locked refund, withdraws
   // Pending Payment: only "Cancel payment"; a result that still arrives becomes a late-deposit refund case.
   const pending = await payBooking();
   await send(customer, "post", `/api/bookings/${pending.id}/cancel`).expect(409);
-  const o = (await send(customer, "post", `/api/bookings/${pending.id}/payments/deposit`, { method: "e_wallet" }).expect(201)).body.data;
+  const o = (await send(customer, "post", `/api/bookings/${pending.id}/payments/deposit`, { method: "bank_transfer" }).expect(201)).body.data;
   assert.equal((await send(customer, "post", `/api/bookings/${pending.id}/cancel-payment`).expect(200)).body.data.status, "expired");
   assert.equal((await Payment.findById(o.paymentId)).status, "cancelled");
   await hook(callbackBody(o.orderId, "success", 600)).expect(200);
@@ -1132,7 +1132,7 @@ test("UC11: the receptionist splits the balance over cash, POS and transfer unti
   const booking = await paidBooking({ status: "checked_in" });
   const url = `/api/frontdesk/bookings/${booking.id}/payments`;
   await send(customer, "post", url, { method: "cash" }).expect(403);
-  await send(customer, "post", `/api/bookings/${booking.id}/payments/final`, { method: "e_wallet", amount: 100 }).expect(404);
+  await send(customer, "post", `/api/bookings/${booking.id}/payments/final`, { method: "bank_transfer", amount: 100 }).expect(404);
   await send(staff, "post", url, { method: "cash", amount: 1401 }).expect(400);
   await send(staff, "post", url, { method: "pos", amount: 400 }).expect(400); // slip reference required
   assert.equal((await send(staff, "post", url, { method: "cash", amount: 400 }).expect(201)).body.data.remaining, 1000);
@@ -1145,7 +1145,7 @@ test("UC11: the receptionist splits the balance over cash, POS and transfer unti
 
 test("UC10: a deposit already pending at the gateway when the hold ends still confirms within 15 more minutes", async () => {
   const booking = await payBooking();
-  const o = (await send(customer, "post", `/api/bookings/${booking.id}/payments/deposit`, { method: "e_wallet" }).expect(201)).body.data;
+  const o = (await send(customer, "post", `/api/bookings/${booking.id}/payments/deposit`, { method: "bank_transfer" }).expect(201)).body.data;
   await Payment.collection.updateOne({ _id: new mongoose.Types.ObjectId(o.paymentId) }, { $set: { createdAt: new Date(Date.now() - 10 * 60000) } });
   await Booking.updateOne({ _id: booking._id }, { holdExpiresAt: new Date(Date.now() - 5 * 60000) });
   await hook(callbackBody(o.orderId, "success", 600)).expect(200);

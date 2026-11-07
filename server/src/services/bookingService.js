@@ -160,6 +160,7 @@ class BookingService {
           const error = new Error(`Room with ID ${roomReq.roomId} not found`);
           error.status = 404;
           throw error;
+
         }
 
         const isAvailable = await roomService.isRoomAvailable(physicalRoom._id, inDate, outDate);
@@ -167,6 +168,8 @@ class BookingService {
           const error = new Error(`Room ${physicalRoom.roomNumber} is unavailable for the selected dates`);
           error.status = 409;
           throw error;
+
+
         }
         roomType = physicalRoom.roomTypeId;
       } else if (roomReq.roomTypeId) {
@@ -175,6 +178,7 @@ class BookingService {
           const error = new Error(`Room type with ID ${roomReq.roomTypeId} not found`);
           error.status = 404;
           throw error;
+
         }
 
         physicalRoom = await roomService.findAvailableRoomForType({
@@ -618,6 +622,7 @@ class BookingService {
           const error = new Error(`Room with ID ${item.roomId} not found`);
           error.status = 404;
           throw error;
+
         }
 
         // Check if current room is available on the new dates (excluding this booking)
@@ -635,9 +640,11 @@ class BookingService {
           });
 
           if (!replacement) {
-            const error = new Error(`Room ${physicalRoom.roomNumber} is unavailable for the selected dates and no replacement of type is available.`);
+            const error = new Error(`Room ${physicalRoom.roomNumber} is unavailable for the selected dates and no replacement of this type is available.`);
             error.status = 409;
             throw error;
+  
+  
           }
           assignedRoom = replacement;
         }
@@ -704,7 +711,7 @@ class BookingService {
     await booking.save();
 
     return Booking.findById(booking._id)
-      .populate('hotelId', 'name city address starRating')
+
       .populate('rooms.roomTypeId', 'name basePrice bedType images')
       .populate('rooms.roomId', 'roomNumber floor');
   }

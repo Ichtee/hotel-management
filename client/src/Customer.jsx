@@ -80,7 +80,7 @@ function SiteHeader({ route }) {
                 <button
                   className="btn ghost-w"
                   onClick={async () => { done(); await signOut(); location.hash = '#/'; }}
-                  style={{ border: '1px solid rgba(255,255,255,0.3)', color: '#fff', background: 'transparent' }}
+                  style={{ border: '1px solid #cbd5e1', color: '#dc2626', background: '#fff', fontWeight: 600, padding: '0.4rem 0.85rem' }}
                 >
                   Sign out
                 </button>
@@ -501,8 +501,17 @@ function Checkout({ q, user }) {
       }
       bookingPayload.rooms[0].roomTypeId = targetRoomTypeId;
       const created = await api('/bookings', { method: 'POST', body: bookingPayload });
-      const bRef = created?.data?.bookingReference || 'confirmed';
-      location.hash = `#/confirmation?${new URLSearchParams({ ref: bRef })}`;
+      const bookingData = created?.data || created;
+      const bRef = bookingData?.bookingReference || 'confirmed';
+      const bId = bookingData?._id;
+
+      if (pay === 'deposit' && bId) {
+        location.hash = `#/pay/${bId}?kind=deposit`;
+      } else if (pay === 'full' && bId) {
+        location.hash = `#/pay/${bId}?kind=full`;
+      } else {
+        location.hash = `#/confirmation?${new URLSearchParams({ ref: bRef })}`;
+      }
       return;
 
 

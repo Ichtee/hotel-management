@@ -8,7 +8,7 @@ const sepay = require("../services/sepay");
 const { paidAmount, settle, announce, reconcile } = require("../services/payments");
 const { audit } = require("../services/audit");
 
-const ONLINE = ["credit_card", "e_wallet", "bank_transfer"];
+const ONLINE = ["bank_transfer", "credit_card"];
 // PAYMENT_PROVIDER=sepay uses the SePay gateway; anything else uses the built-in sandbox (tests, offline demo).
 const useSepay = () => process.env.PAYMENT_PROVIDER === "sepay";
 const onlineMethods = () => (useSepay() ? sepay.methods() : ONLINE);

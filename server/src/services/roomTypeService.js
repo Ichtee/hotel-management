@@ -10,7 +10,7 @@ class RoomTypeService {
     const query = {};
     if (filter.hotelId) query.hotelId = filter.hotelId;
     if (filter.isActive !== undefined) query.isActive = filter.isActive;
-    return RoomType.find(query).populate('hotelId', 'name city address starRating').sort({ createdAt: -1 });
+    return RoomType.find(query).sort({ createdAt: -1 });
   }
 
   /**
@@ -18,7 +18,7 @@ class RoomTypeService {
    * (UC06 - View Room Details)
    */
   async getRoomTypeById(id) {
-    const roomType = await RoomType.findById(id).populate('hotelId', 'name city address starRating phone email');
+    const roomType = await RoomType.findById(id);
     if (!roomType) {
       const error = new Error('Room type not found');
       error.status = 404;

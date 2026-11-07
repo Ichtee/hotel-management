@@ -480,7 +480,7 @@ export function Occupancy() {
 
 /* ---------------- Profile & password (UC03), shared by both shells ---------------- */
 export function Profile() {
-  const { user, setUser } = useAuth();
+  const { user, setUser, signOut } = useAuth();
   const [err, setErr] = useState(null);
   const [ok, setOk] = useState('');
   const [pErr, setPErr] = useState(null);
@@ -500,7 +500,22 @@ export function Profile() {
   };
   return (
     <>
-      <PageHead title="My profile" sub={`${user.roleName} · ${user.email}`} />
+      <PageHead
+        title="My profile"
+        sub={`${user.roleName} · ${user.email}`}
+        extra={
+          <button
+            className="btn danger"
+            type="button"
+            onClick={async () => {
+              await signOut();
+              location.hash = '#/login';
+            }}
+          >
+            Sign out
+          </button>
+        }
+      />
       <div className="two">
         <form className="panel form one" onSubmit={save}>
           <h2>Personal details</h2>

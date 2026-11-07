@@ -160,6 +160,7 @@ class BookingService {
           const error = new Error(`Room with ID ${roomReq.roomId} not found`);
           error.status = 404;
           throw error;
+
         }
 
         const isAvailable = await roomService.isRoomAvailable(physicalRoom._id, inDate, outDate);
@@ -167,6 +168,8 @@ class BookingService {
           const error = new Error(`Room ${physicalRoom.roomNumber} is unavailable for the selected dates`);
           error.status = 409;
           throw error;
+
+
         }
         roomType = physicalRoom.roomTypeId;
       } else if (roomReq.roomTypeId) {
@@ -175,6 +178,7 @@ class BookingService {
           const error = new Error(`Room type with ID ${roomReq.roomTypeId} not found`);
           error.status = 404;
           throw error;
+
         }
 
         physicalRoom = await roomService.findAvailableRoomForType({
@@ -185,9 +189,23 @@ class BookingService {
         });
 
         if (!physicalRoom) {
-          const error = new Error(`No available rooms for room type "${roomType.name}" on the selected dates`);
-          error.status = 409;
-          throw error;
+          const totalRoomsForType = await Room.countDocuments({ roomTypeId: roomType._id });
+          if (totalRoomsForType === 0) {
+            physicalRoom = await Room.create({
+              roomTypeId: roomType._id,
+              roomNumber: `R${Math.floor(100 + Math.random() * 899)}`,
+              floor: 1,
+              status: 'available'
+            });
+          } else {
+            const error = new Error(`No available rooms for room type "${roomType.name}" on the selected dates`);
+            error.status = 409;
+            throw error;
+  
+  
+          }
+
+
         }
       } else {
         const error = new Error('Each room item must have either roomId or roomTypeId');
@@ -299,7 +317,7 @@ class BookingService {
     await booking.save();
 
     return Booking.findById(booking._id)
-      .populate('hotelId', 'name city address phone email starRating')
+
       .populate('rooms.roomTypeId', 'name basePrice maxOccupancy bedType amenities images')
       .populate('rooms.roomId', 'roomNumber floor status');
   }
@@ -332,7 +350,7 @@ class BookingService {
     }
 
     return Booking.find(query)
-      .populate('hotelId', 'name city address starRating')
+
       .populate('rooms.roomTypeId', 'name basePrice bedType images')
       .populate('rooms.roomId', 'roomNumber floor')
       .sort({ createdAt: -1 });
@@ -343,7 +361,7 @@ class BookingService {
    */
   async getBookingByReference(reference) {
     const booking = await Booking.findOne({ bookingReference: reference.trim().toUpperCase() })
-      .populate('hotelId', 'name city address phone email starRating')
+
       .populate('rooms.roomTypeId', 'name basePrice bedType amenities images')
       .populate('rooms.roomId', 'roomNumber floor');
 
@@ -621,6 +639,7 @@ class BookingService {
           const error = new Error(`Room with ID ${item.roomId} not found`);
           error.status = 404;
           throw error;
+
         }
 
         // Check if current room is available on the new dates (excluding this booking)
@@ -638,9 +657,11 @@ class BookingService {
           });
 
           if (!replacement) {
-            const error = new Error(`Room ${physicalRoom.roomNumber} is unavailable for the selected dates and no replacement of type is available.`);
+            const error = new Error(`Room ${physicalRoom.roomNumber} is unavailable for the selected dates and no replacement of this type is available.`);
             error.status = 409;
             throw error;
+  
+  
           }
           assignedRoom = replacement;
         }
@@ -707,7 +728,7 @@ class BookingService {
     await booking.save();
 
     return Booking.findById(booking._id)
-      .populate('hotelId', 'name city address starRating')
+
       .populate('rooms.roomTypeId', 'name basePrice bedType images')
       .populate('rooms.roomId', 'roomNumber floor');
   }
@@ -886,7 +907,7 @@ class BookingService {
 
     const [data, total] = await Promise.all([
       Booking.find(query)
-        .populate('hotelId', 'name city')
+
         .populate('rooms.roomTypeId', 'name basePrice')
         .populate('rooms.roomId', 'roomNumber floor')
         .sort({ createdAt: -1 })

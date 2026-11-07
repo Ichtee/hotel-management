@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const { Schema } = mongoose;
 const schema = new Schema({
+  hotelId: { type: Schema.Types.ObjectId, ref: 'HotelInfo' },
   name: { type: String, required: true, trim: true, unique: true }, description: String,
   basePrice: { type: Number, required: true, min: 0 }, maxOccupancy: { type: Number, required: true, min: 1, validate: Number.isInteger },
   amenities: [String], images: [String], bedType: String, roomSizeSqm: { type: Number, min: 0 },

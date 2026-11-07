@@ -2,11 +2,24 @@ import { useEffect, useState } from 'react';
 import { api, dateLabel, money } from './api/client.js';
 import { Notice, useApi } from './ui.jsx';
 
+const BANK_INFO = {
+  bankId: 'MB',
+  bankName: 'MBBank (Ngân hàng TMCP Quân Đội)',
+  accountNo: '5202112004',
+  accountName: 'DO NGUYEN QUANG SON',
+};
+
 const METHODS = [
-  ['e_wallet', 'E-wallet', 'Pay from your wallet app'],
+  ['bank_transfer', 'Bank transfer (VietQR)', 'Scan QR code with any banking app (MBBank)'],
   ['credit_card', 'Credit or debit card', 'Visa, Mastercard, JCB'],
-  ['bank_transfer', 'Bank transfer', 'Pay with your banking app'],
 ];
+
+
+
+
+
+
+
 const mmss = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
 const refOf = (b) => b.bookingReference || b._id.slice(-8).toUpperCase();
 
@@ -37,6 +50,12 @@ export function PaymentPage({ id, kind }) {
   const [picked, setMethod] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [copied, setCopied] = useState('');
+  const copyText = (text, label) => {
+    navigator.clipboard?.writeText(text);
+    setCopied(label);
+    setTimeout(() => setCopied(''), 2000);
+  };
   const b = s.data;
   const left = useCountdown(b?.status === 'pending' ? b.holdExpiresAt : null);
   if (kind !== 'deposit') return <div className="c-wrap c-section pay"><Back /><Notice error="Only the deposit is paid online. The balance is paid at the front desk at check-out." /></div>;
@@ -45,6 +64,25 @@ export function PaymentPage({ id, kind }) {
   const payable = b && offered.data && !lapsed && due >= 1;
   const options = METHODS.filter(([v]) => offered.data?.methods.includes(v));
   const method = options.some(([v]) => v === picked) ? picked : options[0]?.[0];
+  const bookingRef = b ? refOf(b) : '';
+  const qrUrl = b
+    ? `https://img.vietqr.io/image/${BANK_INFO.bankId}-${BANK_INFO.accountNo}-compact2.png?amount=${Math.round(due)}&addInfo=${encodeURIComponent(bookingRef)}&accountName=${encodeURIComponent(BANK_INFO.accountName)}`
+    : '';
+
+  const confirmBankTransfer = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await api(`/bookings/${id}/payments/${kind}`, { method: 'POST', body: { method: 'bank_transfer' } });
+      const orderId = r.data.orderId;
+      const paymentId = r.data.paymentId;
+      await api(`/sandbox-gateway/orders/${orderId}`, { method: 'POST', body: { result: 'success' } });
+      location.hash = `#/pay/result?payment=${paymentId}`;
+    } catch (x) {
+      setErr(x);
+      setBusy(false);
+    }
+  };
   const pay = async () => {
     setBusy(true); setErr(null);
     try {
@@ -87,8 +125,91 @@ export function PaymentPage({ id, kind }) {
                   ))}
                 </fieldset>
                 <Notice error={err} />
-                <button className="btn primary wide" type="submit" disabled={busy}>{busy ? 'Opening gateway…' : `Pay ${money(due)}`}</button>
-                <p className="muted fine">You will be sent to the payment gateway{offered.data.provider === 'sandbox' ? ' (sandbox)' : ''} to confirm.</p>
+                {method === 'bank_transfer' ? (
+                  <div style={{ marginTop: '1.25rem', padding: '1.25rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px' }}>
+                    <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.1rem', color: '#0f172a' }}>
+                      Scan VietQR to pay your deposit
+                    </h3>
+                    <p className="muted" style={{ fontSize: '0.9rem', marginBottom: '1.25rem' }}>
+                      Open any banking app (MBBank, Vietcombank, Techcombank...) and scan the QR code to transfer:
+                    </p>
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '1.5rem', alignItems: 'center', justifyContent: 'center' }}>
+                      <div style={{ background: '#fff', padding: '12px', borderRadius: '10px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
+                        <img
+                          src={qrUrl}
+                          alt="VietQR MBBank"
+                          style={{ width: '280px', height: 'auto', display: 'block', borderRadius: '8px' }}
+                        />
+                      </div>
+
+                      <div style={{ flex: '1 1 260px', display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.95rem' }}>
+                        <div style={{ padding: '8px 12px', background: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                          <span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>Bank</span>
+                          <strong>{BANK_INFO.bankName}</strong>
+                        </div>
+
+                        <div style={{ padding: '8px 12px', background: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>Account number</span>
+                            <strong style={{ fontSize: '1.1rem', color: '#0369a1' }}>{BANK_INFO.accountNo}</strong>
+                          </div>
+                          <button type="button" className="btn sm" onClick={() => copyText(BANK_INFO.accountNo, 'stk')}>
+                            {copied === 'stk' ? '✓ Copied' : 'Copy account number'}
+                          </button>
+                        </div>
+
+                        <div style={{ padding: '8px 12px', background: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                          <span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>Account name</span>
+                          <strong>{BANK_INFO.accountName}</strong>
+                        </div>
+
+                        <div style={{ padding: '8px 12px', background: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>Deposit amount</span>
+                            <strong style={{ fontSize: '1.1rem', color: '#16a34a' }}>{money(due)}</strong>
+                          </div>
+                          <button type="button" className="btn sm" onClick={() => copyText(String(Math.round(due)), 'tien')}>
+                            {copied === 'tien' ? '✓ Copied' : 'Copy amount'}
+                          </button>
+                        </div>
+
+                        <div style={{ padding: '8px 12px', background: '#fff', borderRadius: '8px', border: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <span className="muted" style={{ display: 'block', fontSize: '0.8rem' }}>Transfer description</span>
+                            <strong style={{ fontSize: '1.05rem', color: '#dc2626' }}>{bookingRef}</strong>
+                          </div>
+                          <button type="button" className="btn sm" onClick={() => copyText(bookingRef, 'nd')}>
+                            {copied === 'nd' ? '✓ Copied' : 'Copy description'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
+                      <button
+                        type="button"
+                        className="btn primary wide"
+                        style={{ fontSize: '1.05rem', padding: '12px 24px' }}
+                        disabled={busy}
+                        onClick={confirmBankTransfer}
+                      >
+                        {busy ? 'Verifying transfer…' : '✓ I have completed the transfer'}
+                      </button>
+                      <p className="muted" style={{ fontSize: '0.85rem', marginTop: '8px' }}>
+                        After completing the transfer via your banking app, click the button above to confirm your reservation.
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+                {method !== 'bank_transfer' && (
+                  <button className="btn primary wide" type="submit" disabled={busy} style={{ marginTop: '1rem' }}>
+                    {busy ? 'Opening gateway…' : `Pay ${money(due)} with card`}
+                  </button>
+                )}
+                {method !== 'bank_transfer' && (
+                  <p className="muted fine">You will be sent to the payment gateway{offered.data.provider === 'sandbox' ? ' (sandbox)' : ''} to confirm.</p>
+                )}
               </form>
             )}
           </>
@@ -103,6 +224,12 @@ export function SandboxGateway({ orderId, paymentId }) {
   const s = useApi(paymentId ? `/payments/${paymentId}` : '', Boolean(paymentId));
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState(null);
+  const [copied, setCopied] = useState('');
+  const copyText = (text, label) => {
+    navigator.clipboard?.writeText(text);
+    setCopied(label);
+    setTimeout(() => setCopied(''), 2000);
+  };
   const finish = async (result) => {
     setBusy(result); setErr(null);
     try {

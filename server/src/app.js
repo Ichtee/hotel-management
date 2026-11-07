@@ -25,6 +25,9 @@ const jobs = require("./controllers/jobs");
 const { revenue } = require("./controllers/revenue");
 const { occupancy } = require("./controllers/occupancy");
 const roomIssues = require("./controllers/roomIssues");
+const stayRequests = require("./controllers/stayRequests");
+const invoices = require("./controllers/invoices");
+const reviews = require("./controllers/reviews");
 const housekeepingTasks = require("./controllers/housekeepingTasks");
 const { HttpError } = require("./utils/validation");
 const RoomType = require("./models/RoomType");
@@ -242,9 +245,13 @@ function createApp({
   app.post("/api/front-desk/bookings/:id/change-room", permit("rooms.change"), bookingCreation.changeRoom);
   app.get("/api/front-desk/services", permit("booking_services.record"), bookingCreation.services);
   app.post("/api/front-desk/bookings/:id/services", permit("booking_services.record"), bookingCreation.addService);
+  app.post("/api/front-desk/bookings/:id/services/:serviceLineId/void", permit("booking_services.record"), bookingCreation.voidService);
   app.post("/api/front-desk/bookings/:id/check-out", permit("stays.check_out"), bookingCreation.checkOut);
   // UC11 View Booking Details
   app.get("/api/bookings/:id", bookings.detail);
+  app.get("/api/bookings/:bookingId/invoice", invoices.customerDetail);
+  app.post("/api/bookings/:id/requests", stayRequests.create);
+  app.post("/api/bookings/:id/reviews", reviews.create);
 
   app.post("/api/bookings/:id/payments/deposit", payments.deposit);
   app.get("/api/payments/methods", payments.methods);
@@ -263,7 +270,10 @@ function createApp({
   // Receptionists (payments.settle) and the Hotel Manager (revenue.read) read the billing lists.
   const billing = (req, res, next) => (req.role.permissions.includes("revenue.read") ? next() : settle(req, res, next));
   app.get("/api/frontdesk/payments", billing, payments.listing);
-  app.get("/api/frontdesk/invoices", billing, payments.invoices);
+  app.get("/api/frontdesk/invoices", billing, invoices.listing);
+  app.get("/api/frontdesk/invoices/:id", billing, invoices.detail);
+  app.get("/api/frontdesk/requests", permit("stay_requests.manage"), stayRequests.listing);
+  app.patch("/api/frontdesk/requests/:id", permit("stay_requests.manage"), stayRequests.handle);
   app.post("/api/frontdesk/bookings/:id/cancel-otp", cancel, cancellations.sendOtp);
   app.get("/api/frontdesk/cancellations/lookup", cancel, cancellations.lookup);
   app.get("/api/frontdesk/cancellations", review, cancellations.listing);

@@ -8,8 +8,9 @@ const Coupon = require("../models/Coupon");
 const Service = require("../models/Service");
 const Invoice = require("../models/Invoice");
 const { validateCoupon } = require("../services/promotions");
-const { currentDepositPolicy } = require("../services/policies");
+const { currentDepositPolicy, currentCancellationPolicy } = require("../services/policies");
 const { createCleaningTask } = require("../services/housekeepingTasks");
+const { closeForBooking } = require("./stayRequests");
 const v = require("../utils/validation");
 
 const ACTIVE = ["pending", "confirmed", "checked_in"];
@@ -61,6 +62,7 @@ async function createWalkIn(req, res) {
   v.keys(req.body, ["roomTypeId", "checkInDate", "checkOutDate", "guestCount", "fullName", "phone", "email", "idDocumentNo"]);
   const b = req.body;
   v.id(b.roomTypeId, "roomTypeId"); v.date(b.checkInDate, "checkInDate"); v.date(b.checkOutDate, "checkOutDate");
+  if (b.checkInDate !== vnDate()) v.fail("A walk-in booking must check in today.", "checkInDate", 409);
   const guestCount = v.number(b.guestCount, "guestCount", 1, 20);
   const fullName = v.text(b.fullName, "fullName", 2, 80), phone = v.phone(b.phone, true), email = v.email(b.email), idDocumentNo = v.text(b.idDocumentNo, "idDocumentNo", 3, 40);
   const type = await RoomType.findOne({ _id: b.roomTypeId, isActive: true });
@@ -95,7 +97,14 @@ async function modifyWalkIn(req, res) {
     if (!type) throw new v.HttpError(409, "The booked room type is unavailable.");
     const guests = b.guestCount === undefined ? room.guestCount : v.number(b.guestCount, "guestCount", 1, 20);
     if (guests > type.maxOccupancy) v.fail(`This room accommodates up to ${type.maxOccupancy} guests.`, "guestCount");
-    const assignment = await assignRoom(type._id, checkInDate, checkOutDate, booking._id);
+    // A guest already staying in the hotel keeps the physical room when extending.
+    // Only future overlap of that same room can block the extension.
+    let assignment;
+    if (booking.status === "checked_in") {
+      const conflict = await Booking.exists({ _id: { $ne: booking._id }, status: { $in: ACTIVE }, "rooms.roomId": room.roomId,
+        checkInDate: { $lt: new Date(`${checkOutDate}T00:00:00Z`) }, checkOutDate: { $gt: booking.checkOutDate } });
+      assignment = conflict ? {} : { roomId: room.roomId };
+    } else assignment = await assignRoom(type._id, checkInDate, checkOutDate, booking._id);
     if (!assignment.roomId) throw new v.HttpError(409, "No rooms of this type are available for those dates.");
     const newRoomAmount = priceAt(type, checkInDate) * nights;
     const paid = await Payment.aggregate([{ $match: { bookingId: booking._id, status: "success" } }, { $group: { _id: null, total: { $sum: "$amount" } } }]);
@@ -124,7 +133,7 @@ async function cancelWalkIn(req, res) {
   if (!paidDeposit) {
     booking.status = "cancelled"; booking.cancelledAt = new Date();
     booking.events.push({ actorId: req.user._id, type: "cancelled", note: `Cancelled at front desk: ${reason}` });
-    await booking.save(); return res.json({ data: booking, meta: { reviewRequired: false } });
+    await booking.save(); await closeForBooking(booking._id, "cancelled"); return res.json({ data: booking, meta: { reviewRequired: false } });
   }
   const refundableAmount = refundFor(booking, paidDeposit);
   if (refundableAmount && (!b.bank || !b.accountNumber || !b.accountHolderName)) v.fail("Refund bank, account number and account holder are required.");
@@ -154,16 +163,26 @@ async function checkIn(req, res) {
   const type = await RoomType.findById(booking.rooms[0].roomTypeId);
   if (!type || guestCount > type.maxOccupancy) v.fail("Invalid guest count.", "guestCount");
   booking.rooms[0].roomId = room._id; booking.rooms[0].guestCount = guestCount; booking.guestIdDocumentNo = v.text(req.body.idDocumentNo, "idDocumentNo", 3, 40);
+  const policy = await currentCancellationPolicy();
+  const checkInTime = policy?.checkInTime || "14:00";
+  const scheduledCheckIn = new Date(`${booking.checkInDate.toISOString().slice(0, 10)}T${checkInTime}:00+07:00`);
+  const earlyFee = new Date() < scheduledCheckIn ? (policy?.earlyCheckInFee || 0) : 0;
+  if (earlyFee) {
+    booking.feeAmount = (booking.feeAmount || 0) + earlyFee;
+    booking.totalAmount += earlyFee;
+    booking.events.push({ actorId: req.user._id, type: "modified", note: `Early check-in fee added: ${earlyFee}` });
+  }
   booking.status = "checked_in"; booking.actualCheckInAt = new Date(); booking.checkedInBy = req.user._id;
   booking.events.push({ actorId: req.user._id, type: "checked_in", note: `Checked in to room ${room.roomNumber}` });
   room.status = "occupied"; await room.save(); await booking.save();
+  await closeForBooking(booking._id);
   res.json({ data: booking });
 }
 async function changeRoomOptions(req, res) {
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking || booking.status !== "checked_in") throw new v.HttpError(409, "Only a checked-in booking can change rooms.");
   const current = booking.rooms[0]; const currentType = await RoomType.findById(current.roomTypeId);
-  const types = await RoomType.find({ isActive: true, basePrice: { $gte: currentType.basePrice } }).select("name basePrice").lean();
+  const types = await RoomType.find({ isActive: true }).select("name basePrice").lean();
   const rooms = await Room.find({ roomTypeId: { $in: types.map((t) => t._id) }, isActive: true, status: "available" }).select("roomNumber floor roomTypeId").lean();
   const typeById = new Map(types.map((t) => [String(t._id), t]));
   res.json({ data: rooms.map((room) => ({ ...room, roomType: typeById.get(String(room.roomTypeId)) })) });
@@ -175,8 +194,10 @@ async function changeRoom(req, res) {
   const oldRoom = await Room.findById(booking.rooms[0].roomId); const newRoom = await Room.findOne({ _id: v.id(req.body.newRoomId, "newRoomId"), isActive: true, status: "available" });
   if (!oldRoom || !newRoom) throw new v.HttpError(409, "The selected room is no longer available.");
   const [oldType, newType] = await Promise.all([RoomType.findById(oldRoom.roomTypeId), RoomType.findById(newRoom.roomTypeId)]);
-  if (!oldType || !newType || newType.basePrice < oldType.basePrice) throw new v.HttpError(409, "Only the booked room type or an upgrade is available.");
   const cause = v.choice(req.body.cause, "cause", ["hotel", "guest"]);
+  if (!oldType || !newType) throw new v.HttpError(409, "The room type is unavailable.");
+  if (cause === "guest" && newType.basePrice < oldType.basePrice)
+    throw new v.HttpError(409, "A guest-requested room change must keep the same category or upgrade.");
   const today = new Date(`${vnDate()}T00:00:00Z`); const remainingNights = Math.max(0, Math.ceil((booking.checkOutDate - today) / 86400000));
   const extra = cause === "guest" ? Math.max(0, newType.basePrice - oldType.basePrice) * remainingNights : 0;
   booking.rooms[0].roomId = newRoom._id; booking.rooms[0].roomTypeId = newType._id;
@@ -202,12 +223,35 @@ async function addService(req, res) {
   booking.events.push({ actorId: req.user._id, type: "service_added", note: `Added ${quantity} × ${service.name}`, newValue: { serviceId: service._id, quantity, amount } });
   await booking.save(); res.status(201).json({ data: booking });
 }
+async function voidService(req, res) {
+  v.keys(req.body, ["reason"]);
+  const booking = await Booking.findById(v.id(req.params.id));
+  if (!booking) throw new v.HttpError(404, "Booking not found.");
+  if (booking.status !== "checked_in") throw new v.HttpError(409, "Only services on a checked-in booking can be voided.");
+  const line = booking.services.id(v.id(req.params.serviceLineId, "serviceLineId"));
+  if (!line) throw new v.HttpError(404, "Service line not found.");
+  if (line.status === "voided") throw new v.HttpError(409, "This service line has already been voided.");
+  line.status = "voided"; line.voidReason = v.text(req.body.reason, "reason", 2, 500); line.voidedBy = req.user._id; line.voidedAt = new Date();
+  booking.serviceAmount = Math.max(0, booking.serviceAmount - line.amount);
+  booking.totalAmount = Math.max(0, booking.totalAmount - line.amount);
+  booking.events.push({ actorId: req.user._id, type: "modified", note: `Voided service: ${line.name}` });
+  await booking.save(); res.json({ data: booking });
+}
 async function checkOut(req, res) {
   v.keys(req.body, ["inspectionConfirmed", "paymentMethod", "transactionRef"]);
   if (req.body.inspectionConfirmed !== true) v.fail("Room inspection must be completed or explicitly skipped.", "inspectionConfirmed");
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   if (booking.status !== "checked_in") throw new v.HttpError(409, "Only a checked-in booking can be checked out.");
+  const policy = await currentCancellationPolicy();
+  const checkOutTime = policy?.checkOutTime || "12:00";
+  const scheduledCheckOut = new Date(`${booking.checkOutDate.toISOString().slice(0, 10)}T${checkOutTime}:00+07:00`);
+  const lateFee = new Date() > scheduledCheckOut ? (policy?.lateCheckOutFee || 0) : 0;
+  if (lateFee) {
+    booking.feeAmount = (booking.feeAmount || 0) + lateFee;
+    booking.totalAmount += lateFee;
+    booking.events.push({ actorId: req.user._id, type: "modified", note: `Late check-out fee added: ${lateFee}` });
+  }
   const payments = await Payment.find({ bookingId: booking._id, status: "success" }).lean();
   const paidAmount = payments.reduce((sum, payment) => sum + payment.amount, 0);
   const balance = Math.max(0, booking.totalAmount - paidAmount);
@@ -220,8 +264,9 @@ async function checkOut(req, res) {
   booking.status = "checked_out"; booking.actualCheckOutAt = new Date(); booking.checkedOutBy = req.user._id;
   booking.events.push({ actorId: req.user._id, type: "checked_out", note: `Checked out; final payment ${balance}` });
   await booking.save();
-  const invoice = await Invoice.findOneAndUpdate({ bookingId: booking._id }, { $setOnInsert: { bookingId: booking._id, invoiceNumber: `INV-${Date.now()}`, issuedBy: req.user._id, issuedAt: new Date() }, $set: { subtotal: booking.roomAmount + booking.serviceAmount, totalAmount: booking.totalAmount, status: "paid" } }, { new: true, upsert: true });
+  await closeForBooking(booking._id);
+  const invoice = await Invoice.findOneAndUpdate({ bookingId: booking._id }, { $setOnInsert: { bookingId: booking._id, invoiceNumber: `INV-${Date.now()}`, issuedBy: req.user._id, issuedAt: new Date() }, $set: { subtotal: booking.roomAmount + booking.serviceAmount + booking.feeAmount, totalAmount: booking.totalAmount, status: "paid" } }, { new: true, upsert: true });
   const turnovers = await Promise.all(roomIds.map((roomId) => createCleaningTask({ roomId: String(roomId), bookingId: String(booking._id), type: "turnover" })));
   res.json({ data: { booking, invoice, paidAmount: paidAmount + balance, balance, turnoverTasks: turnovers.map((item) => item.data) } });
 }
-module.exports = { create, roomTypes, createWalkIn, modifyWalkIn, cancelWalkIn, availableRooms, checkIn, changeRoomOptions, changeRoom, services, addService, checkOut };
+module.exports = { create, roomTypes, createWalkIn, modifyWalkIn, cancelWalkIn, availableRooms, checkIn, changeRoomOptions, changeRoom, services, addService, voidService, checkOut };

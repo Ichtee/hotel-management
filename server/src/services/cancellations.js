@@ -4,6 +4,7 @@ const Payment = require("../models/Payment");
 const Refund = require("../models/Refund");
 const Coupon = require("../models/Coupon");
 const CouponUsage = require("../models/CouponUsage");
+const CheckInOutRequest = require("../models/CheckInOutRequest");
 const User = require("../models/User");
 const v = require("../utils/validation");
 const notifications = require("./notifications");
@@ -51,6 +52,7 @@ async function cancelNow(booking, actorId, reason) {
   );
   if (!done) throw new v.HttpError(409, NOT_ALLOWED);
   await restoreCoupon(done);
+  await CheckInOutRequest.updateMany({ bookingId: done._id, status: { $in: ["pending", "approved"] } }, { $set: { status: "cancelled" } });
   await notify("booking_cancelled", done.customerId, { reference: reference(done) }, { bookingId: done._id });
   await audit(actorId, "booking.cancelled", "booking", done._id, { reason, refundableAmount: 0 });
   return done;
@@ -104,6 +106,7 @@ async function approve(bookingId, approverId) {
   const booking = await Booking.findOneAndUpdate({ _id: bookingId, status: "cancellation_requested" }, { $set: decision }, { new: true });
   if (!booking) throw new v.HttpError(409, "This request is no longer waiting for review.");
   await restoreCoupon(booking);
+  await CheckInOutRequest.updateMany({ bookingId: booking._id, status: { $in: ["pending", "approved"] } }, { $set: { status: "cancelled" } });
   const amount = booking.cancellation.refundableAmount || 0;
   // One refund case per deposit payment, so each payment is refunded at most once (BR-17).
   let left = amount;

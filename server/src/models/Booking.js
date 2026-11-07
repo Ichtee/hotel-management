@@ -15,7 +15,11 @@ const bookingServiceSchema = new Schema({
   unitPrice: { type: Number, required: true, min: 0 },
   amount: { type: Number, required: true, min: 0 },
   recordedBy: { type: Schema.Types.ObjectId, ref: 'User' },
-  recordedAt: { type: Date, default: Date.now }
+  recordedAt: { type: Date, default: Date.now },
+  status: { type: String, enum: ['active', 'voided'], default: 'active' },
+  voidReason: String,
+  voidedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  voidedAt: Date
 });
 
 const bookingEventSchema = new Schema({
@@ -43,6 +47,7 @@ const schema = new Schema({
   checkedOutBy: { type: Schema.Types.ObjectId, ref: 'User' },
   holdExpiresAt: Date, // BR-29: pending online bookings hold the room for 15 minutes
   cancelledAt: Date,
+  noShowAt: Date,
   cancellationReason: String,
 
   // BR-32 / BR-36 / BR-37: cancellation request, locked refundable amount and approval
@@ -76,7 +81,7 @@ const schema = new Schema({
 
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'cancellation_requested', 'checked_in', 'checked_out', 'cancelled', 'expired'],
+    enum: ['pending', 'confirmed', 'cancellation_requested', 'checked_in', 'checked_out', 'cancelled', 'expired', 'no_show'],
     default: 'pending', index: true
   },
   rooms: {
@@ -106,6 +111,7 @@ const schema = new Schema({
   roomAmount: { type: Number, required: true, min: 0 },
   serviceAmount: { type: Number, default: 0, min: 0 },
   penaltyAmount: { type: Number, default: 0, min: 0 }, // confirmed UC38 penalties, included in totalAmount
+  feeAmount: { type: Number, default: 0, min: 0 },
   totalAmount: { type: Number, required: true, min: 0 },
   depositRequired: { type: Number, default: 0, min: 0 },
   currency: { type: String, default: 'VND', uppercase: true, trim: true },

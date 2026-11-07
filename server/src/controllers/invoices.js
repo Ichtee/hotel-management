@@ -8,8 +8,14 @@ async function listing(req, res) {
   res.json(result);
 }
 async function detail(req, res) {
-  const invoice = await Invoice.findById(v.id(req.params.id)).populate({ path: "bookingId", select: "bookingReference guestName guestPhone guestEmail checkInDate checkOutDate roomAmount serviceAmount totalAmount services" }).lean();
+  const invoice = await Invoice.findById(v.id(req.params.id)).populate({ path: "bookingId", select: "bookingReference guestName guestPhone guestEmail checkInDate checkOutDate roomAmount serviceAmount feeAmount totalAmount services" }).lean();
   if (!invoice) throw new v.HttpError(404, "Invoice not found.");
   res.json({ data: invoice });
 }
-module.exports = { listing, detail };
+async function customerDetail(req, res) {
+  const invoice = await Invoice.findOne({ bookingId: v.id(req.params.bookingId) })
+    .populate({ path: "bookingId", select: "customerId bookingReference guestName guestPhone checkInDate checkOutDate roomAmount serviceAmount feeAmount totalAmount services" }).lean();
+  if (!invoice || String(invoice.bookingId?.customerId) !== String(req.user._id)) throw new v.HttpError(404, "Invoice not found.");
+  res.json({ data: invoice });
+}
+module.exports = { listing, detail, customerDetail };

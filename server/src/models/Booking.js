@@ -15,7 +15,11 @@ const bookingServiceSchema = new Schema({
   unitPrice: { type: Number, required: true, min: 0 },
   amount: { type: Number, required: true, min: 0 },
   recordedBy: { type: Schema.Types.ObjectId, ref: 'User' },
-  recordedAt: { type: Date, default: Date.now }
+  recordedAt: { type: Date, default: Date.now },
+  status: { type: String, enum: ['active', 'voided'], default: 'active' },
+  voidReason: String,
+  voidedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  voidedAt: Date
 });
 
 const bookingEventSchema = new Schema({
@@ -95,6 +99,7 @@ const schema = new Schema({
   discountAmount: { type: Number, default: 0, min: 0 },
   roomAmount: { type: Number, required: true, min: 0 },
   serviceAmount: { type: Number, default: 0, min: 0 },
+  feeAmount: { type: Number, default: 0, min: 0 },
   totalAmount: { type: Number, required: true, min: 0 },
   depositRequired: { type: Number, default: 0, min: 0 },
   currency: { type: String, default: 'VND', uppercase: true, trim: true },

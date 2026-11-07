@@ -221,9 +221,11 @@ function createApp({
   app.post("/api/front-desk/bookings/:id/change-room", permit("rooms.change"), bookingCreation.changeRoom);
   app.get("/api/front-desk/services", permit("booking_services.record"), bookingCreation.services);
   app.post("/api/front-desk/bookings/:id/services", permit("booking_services.record"), bookingCreation.addService);
+  app.post("/api/front-desk/bookings/:id/services/:serviceLineId/void", permit("booking_services.record"), bookingCreation.voidService);
   app.post("/api/front-desk/bookings/:id/check-out", permit("stays.check_out"), bookingCreation.checkOut);
   // UC11 View Booking Details
   app.get("/api/bookings/:id", bookings.detail);
+  app.get("/api/bookings/:bookingId/invoice", invoices.customerDetail);
   app.post("/api/bookings/:id/requests", stayRequests.create);
   app.post("/api/bookings/:id/reviews", reviews.create);
 

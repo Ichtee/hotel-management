@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, dateLabel, money } from './api/client.js';
-import { Badge, Notice, useApi } from './ui.jsx';
+import { Badge, DataTable, Modal, Notice, useApi } from './ui.jsx';
 
 const UPCOMING = ['pending', 'confirmed', 'cancellation_requested', 'checked_in'];
 const nightsOf = (a, b) => Math.max(1, Math.round((new Date(b) - new Date(a)) / 864e5));
@@ -158,6 +158,7 @@ export function MyBookings() {
   const [open, setOpen] = useState(null);
   const [cancelFor, setCancelFor] = useState(null);
   const [msg, setMsg] = useState(null);
+  const [invoice, setInvoice] = useState(null);
   const s = useApi('/bookings?limit=100');
   const changed = (m) => { setMsg(m); setOpen(null); s.reload(); };
   const requestStayChange = async (booking, type) => {
@@ -172,6 +173,7 @@ export function MyBookings() {
     const comment = window.prompt('Your review (optional):', '') || '';
     try { await api(`/bookings/${booking._id}/reviews`, { method: 'POST', body: { rating, title, comment } }); setMsg('Thank you. Your review has been published.'); } catch (error) { setMsg(error.message); }
   };
+  const viewInvoice = async (booking) => { try { setInvoice((await api(`/bookings/${booking._id}/invoice`)).data); } catch (error) { setMsg(error.message); } };
   const all = s.data || [];
   const isUp = (b) => UPCOMING.includes(b.status);
   const counts = { upcoming: all.filter(isUp).length, past: all.filter((b) => !isUp(b)).length };
@@ -216,6 +218,7 @@ export function MyBookings() {
                     {b.status === 'confirmed' && <button className="btn" onClick={() => { setOpen(b._id); setCancelFor(b._id); setMsg(null); }}>Cancel</button>}
                     {b.status === 'confirmed' && <button className="btn" onClick={() => requestStayChange(b, 'check_in')}>Request early check-in</button>}
                     {b.status === 'checked_in' && <button className="btn" onClick={() => requestStayChange(b, 'check_out')}>Request late check-out</button>}
+                    {b.status === 'checked_out' && <button className="btn" onClick={() => viewInvoice(b)}>View invoice</button>}
                     {b.status === 'checked_out' && <button className="btn" onClick={() => writeReview(b)}>Write review</button>}
                   </div>
                 </article>
@@ -225,6 +228,12 @@ export function MyBookings() {
           })}
         </div>
       </div>
+      {invoice && <CustomerInvoice invoice={invoice} onClose={() => setInvoice(null)} />}
     </div>
   );
+}
+
+function CustomerInvoice({ invoice, onClose }) {
+  const b = invoice.bookingId;
+  return <Modal title={`Invoice ${invoice.invoiceNumber}`} onClose={onClose}><p>{b.bookingReference} · {dateLabel(b.checkInDate)} - {dateLabel(b.checkOutDate)}</p><DataTable cols={['Item', 'Amount']} rows={[["Room charges", money(b.roomAmount)], ["Additional services", money(b.serviceAmount)], ...(b.feeAmount ? [["Stay fees", money(b.feeAmount)]] : []), ...(b.services || []).filter((s) => s.status !== 'voided').map((s) => [`${s.name} x${s.quantity}`, money(s.amount)]), ["Total paid", money(invoice.totalAmount)]]} /><div className="modal-actions"><button className="btn" onClick={onClose}>Close</button><button className="btn primary" onClick={() => window.print()}>Print</button></div></Modal>;
 }

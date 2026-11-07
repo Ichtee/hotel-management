@@ -5,6 +5,7 @@ const Booking = require("../src/models/Booking");
 const Invoice = require("../src/models/Invoice");
 const CouponUsage = require("../src/models/CouponUsage");
 const AuditLog = require("../src/models/AuditLog");
+const Service = require("../src/models/Service");
 const { encrypt, decrypt, phoneHash } = require("../src/utils/guestData");
 const { dates, day, amount } = require("../src/services/stayPricing");
 const { hotelTransaction } = require("../src/services/hotelOperations");
@@ -59,6 +60,35 @@ function checkedHistory(booking, entry) {
 // Chỉ thay chỉ mục cũ đã biết; không xóa bản ghi hay thay lịch sử hóa đơn.
 async function migrateIndexes(apply) {
   const actions = [];
+  const serviceIndexes = await Service.collection
+    .listIndexes()
+    .toArray()
+    .catch((error) => {
+      if (error.code === 26) return [];
+      throw error;
+    });
+  const oldServiceIndex = serviceIndexes.find(
+    (index) => index.name === "name_1" && index.unique,
+  );
+  if (oldServiceIndex)
+    actions.push({
+      collection: Service.collection.name,
+      index: "name_1",
+      action: "replace-legacy-unique-index",
+    });
+  if (apply) {
+    await hotelTransaction(async (session) => {
+      await Service.collection.updateMany(
+        { kind: { $exists: false } },
+        { $set: { kind: "service" } },
+        { session },
+      );
+    });
+    await Service.createIndexes();
+    await Booking.createIndexes();
+    if (oldServiceIndex)
+      await Service.collection.dropIndex(oldServiceIndex.name);
+  }
   for (const [Model, name] of [
     [Invoice, "bookingId_1"],
     [CouponUsage, "couponId_1_customerId_1"],
@@ -94,6 +124,128 @@ async function migrateIndexes(apply) {
     } else if (apply) await Model.createIndexes();
   }
   return actions;
+}
+
+// Sao chép theo lô, giữ ID và dữ liệu nguồn; chạy lại không ghi đè dữ liệu đã chuyển.
+async function migrateStorage({
+  source,
+  apply = false,
+  after,
+  limit = 100,
+} = {}) {
+  if (!["catalog", "penalties"].includes(source))
+    throw new Error("Storage source must be catalog or penalties.");
+  const collection = mongoose.connection.collection(
+    source === "catalog" ? "compensationitems" : "penalties",
+  );
+  const rows = await collection
+    .find(after ? { _id: { $gt: new mongoose.Types.ObjectId(after) } } : {})
+    .sort({ _id: 1 })
+    .limit(limit)
+    .toArray();
+  const report = {
+    source,
+    apply,
+    scanned: rows.length,
+    copied: 0,
+    skipped: 0,
+    resumeAfter: rows.at(-1)?._id.toString(),
+  };
+  for (const row of rows) {
+    const copy = async (session) => {
+      const legacy = await collection.findOne({ _id: row._id }, { session });
+      if (!legacy)
+        throw new Error("A source record disappeared. Rerun this batch.");
+      const target =
+        source === "catalog"
+          ? await Service.findById(row._id).session(session)
+          : await Booking.findById(legacy.bookingId).session(session);
+      if (legacy.m4MigratedAt) {
+        if (
+          source === "catalog"
+            ? target?.kind !== "compensation"
+            : !target?.penalties.id(row._id)
+        )
+          throw new Error(
+            "A migrated target is missing. Review the source record.",
+          );
+        return false;
+      }
+      if (source === "catalog") {
+        if (
+          target ||
+          (await Service.exists({
+            kind: "compensation",
+            name: legacy.name,
+          }).session(session))
+        )
+          throw new Error(
+            "A catalog ID or name conflicts. Review before migrating.",
+          );
+        const item = new Service({ ...legacy, kind: "compensation" });
+        await item.validate();
+        if (apply) await item.save({ session, timestamps: false });
+      } else {
+        if (!target)
+          throw new Error("A penalty has no booking. Review before migrating.");
+        if (
+          (await Booking.exists({ "penalties._id": row._id }).session(
+            session,
+          )) ||
+          (legacy.operationKey &&
+            target.penalties.some(
+              (p) => p.operationKey === legacy.operationKey,
+            ))
+        )
+          throw new Error(
+            "A penalty ID or operation key conflicts. Review before migrating.",
+          );
+        if (
+          legacy.itemId &&
+          !(await Service.exists({
+            _id: legacy.itemId,
+            kind: "compensation",
+          }).session(session))
+        )
+          throw new Error(
+            "Migrate the compensation catalog before its penalties.",
+          );
+        const penalty = target.penalties.create(legacy);
+        await penalty.validate();
+        if (apply)
+          await Booking.collection.updateOne(
+            { _id: target._id },
+            {
+              $push: { penalties: penalty.toObject() },
+              $set: { updatedAt: new Date() },
+            },
+            { session },
+          );
+      }
+      if (apply) {
+        await collection.updateOne(
+          { _id: row._id },
+          { $set: { m4MigratedAt: new Date() } },
+          { session },
+        );
+        await AuditLog.create(
+          [
+            {
+              action: "m4.storage_migrated",
+              targetType: source === "catalog" ? "Service" : "Booking",
+              targetId: source === "catalog" ? row._id : legacy.bookingId,
+              detail: { sourceId: row._id, totalsPreserved: true },
+            },
+          ],
+          { session },
+        );
+      }
+      return true;
+    };
+    const copied = apply ? await hotelTransaction(copy) : await copy(null);
+    report[copied ? "copied" : "skipped"]++;
+  }
+  return report;
 }
 
 // Chạy lại theo ID; chỉ dùng lịch sử đã duyệt và giữ nguyên mọi tổng tiền.
@@ -201,13 +353,16 @@ async function main() {
     const reviewed = value("--reviewed")
       ? JSON.parse(fs.readFileSync(value("--reviewed"), "utf8"))
       : {};
-    const report = await migrate({
-      apply,
-      after: value("--after"),
-      limit,
-      reviewed,
-    });
-    if (indexes) report.indexes = await migrateIndexes(true);
+    const indexReport = indexes ? await migrateIndexes(true) : undefined;
+    const report = value("--storage")
+      ? await migrateStorage({
+          source: value("--storage"),
+          apply,
+          after: value("--after"),
+          limit,
+        })
+      : await migrate({ apply, after: value("--after"), limit, reviewed });
+    if (indexes) report.indexes = indexReport;
     console.log(JSON.stringify(report, null, 2));
   } finally {
     await mongoose.disconnect();
@@ -219,4 +374,4 @@ if (require.main === module)
     console.error(error.message);
     process.exitCode = 1;
   });
-module.exports = { migrate, migrateIndexes, checkedHistory };
+module.exports = { migrate, migrateIndexes, migrateStorage, checkedHistory };

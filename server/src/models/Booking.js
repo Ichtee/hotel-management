@@ -48,6 +48,7 @@ const schema = new Schema({
   holdExpiresAt: Date, // BR-29: pending online bookings hold the room for 15 minutes
   cancelledAt: Date,
   noShowAt: Date,
+  reminderSentAt: Date, // arrival reminder sent (one day before check-in)
   cancellationReason: String,
 
   // BR-32 / BR-36 / BR-37: cancellation request, locked refundable amount and approval

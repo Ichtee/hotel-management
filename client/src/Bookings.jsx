@@ -132,6 +132,26 @@ function Details({ id, startCancel, onChanged }) {
           <button className="btn" onClick={() => act(`/bookings/${id}/withdraw-cancellation`, 'POST', 'Withdraw the cancellation request and keep this booking?')}>Withdraw request</button>
         </section>
       )}
+      {b.penalties?.length > 0 && (
+        <section>
+          <h3>Damage / loss charges</h3>
+          <ul className="lines" aria-label="Penalties">
+            {b.penalties.map((p) => (
+              <li key={p._id}><span>{p.itemName}{p.status === 'waived' && p.waivedReason ? ` · waived: ${p.waivedReason}` : ''}</span><span>{money(p.amount || 0)} <Badge v={p.status} /></span></li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {b.invoices?.length > 0 && (
+        <section>
+          <h3>Invoices</h3>
+          <ul className="lines" aria-label="Invoices">
+            {b.invoices.map((inv) => (
+              <li key={inv._id}><span>{inv.invoiceNumber}{inv.kind === 'supplementary' ? ` · supplementary (${(inv.lines || []).map((l) => l.name).join(', ')})` : ''} · {dateLabel(inv.issuedAt || inv.createdAt)}</span><span>{money(inv.totalAmount)}</span></li>
+            ))}
+          </ul>
+        </section>
+      )}
       <Notice error={err} />
       {(b.refunds.length > 0 || b.status === 'cancelled') && (
         <section>

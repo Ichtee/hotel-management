@@ -33,8 +33,11 @@ const { HttpError } = require("./utils/validation");
 const RoomType = require("./models/RoomType");
 
 // Member 2 Routes & Controllers
-const roomTypeRoutes = require("./routes/roomTypeRoutes");
-const roomRoutes = require("./routes/roomRoutes");
+const roomTypeController = require("./controllers/roomTypeController");
+const catalog = require("./controllers/catalog");
+const notifications = require("./controllers/notifications");
+const auditLogs = require("./controllers/auditLogs");
+const roomController = require("./controllers/roomController");
 const bookingController = require("./controllers/bookingController");
 
 // Front-desk routes (theanh)
@@ -55,7 +58,7 @@ function createApp({
     throw new Error("SESSION_SECRET must contain at least 32 characters.");
   const app = express();
   app.disable("x-powered-by");
-  if (production) app.set("trust proxy", 1);
+  if (production) app.set("trust proxy", Number(process.env.TRUST_PROXY) || 1); // 2 when Vercel proxies /api to Render
   app.use(helmet());
 
   app.use((req, res, next) => {
@@ -110,9 +113,9 @@ function createApp({
 
   app.get("/api/health", (req, res) => res.json({ data: { status: "ok" } }));
 
-  // --- Public Member 2 Routes (Room Search and Types) ---
-  app.use("/api/room-types", roomTypeRoutes);
-  app.use("/api/rooms", roomRoutes);
+  // --- Public Member 2 Routes (Room Search and Types) --- read-only; their writes are registered for the manager below.
+  app.get("/api/rooms/search", roomController.search);
+  app.get("/api/room-types/:id/price-on-date", roomTypeController.getPriceForDate);
 
 
   // Creation (UC06), cancel (UC08) and cancel-payment are session-authenticated and registered below (bookingCreation, cancellations).
@@ -155,6 +158,10 @@ function createApp({
   app.use("/api", authenticate);
 
   app.get("/api/auth/me", auth.profile);
+  // UC13 View Notifications: each user reads only their own (BR-28).
+  app.get("/api/notifications", notifications.listing);
+  app.post("/api/notifications/read", notifications.markRead);
+  app.get("/api/audit-logs", auditLogs.listing);
   app.get("/api/profile", auth.profile);
   app.put("/api/profile/password", authLimit, auth.changePassword);
   app.use("/api", requirePasswordChanged);
@@ -219,7 +226,12 @@ function createApp({
   app.patch("/api/room-types/:id", roomTypes.update);
   app.delete("/api/room-types/:id", roomTypes.remove);
   app.get("/api/room-types/:id/reviews", roomTypes.reviews);
+  app.put("/api/room-types/:id/pricing", roomTypeController.updatePricing);
   app.patch("/api/reviews/:id/visibility", requireManager, roomTypes.visibility);
+  // UC34 Additional services & compensation items (manager)
+  app.get("/api/catalog/:catalog", requireManager, catalog.listing);
+  app.post("/api/catalog/:catalog", requireManager, catalog.create);
+  app.patch("/api/catalog/:catalog/:id", requireManager, catalog.update);
   app.use("/api/housekeeping-assignments", requireManager);
   app.get("/api/housekeeping-assignments/options", assignments.options);
   app.get("/api/housekeeping-assignments", assignments.listing);
@@ -256,7 +268,7 @@ function createApp({
   app.post("/api/bookings/:id/payments/deposit", payments.deposit);
   app.get("/api/payments/methods", payments.methods);
   app.get("/api/payments/:id", payments.show);
-  if (!production) app.post("/api/sandbox-gateway/orders/:orderId", payments.sandbox);
+  if (!production || process.env.ENABLE_SANDBOX_GATEWAY === "true") app.post("/api/sandbox-gateway/orders/:orderId", payments.sandbox); // demo deployments only: moves no money
   // UC08 Cancel Reservation (customer)
   app.get("/api/bookings/:id/refund-estimate", cancellations.estimate);
   app.post("/api/bookings/:id/cancel", cancellations.requestOnline);

@@ -64,7 +64,9 @@ tr:last-child td { border-bottom: 0; } tbody tr:hover { background: #fafbfc; }
 /* Let text cells wrap so tables fit the screen; codes, dates and amounts have no break points. */
 td { white-space: normal; }
 td.nw, td .badge, td .btn { white-space: nowrap; }
-.row-actions { display: flex; flex-wrap: wrap; gap: .35rem; min-width: 9.5rem; max-width: 15rem; }
+.row-actions { display: flex; flex-wrap: nowrap; gap: .35rem; justify-content: flex-end; }
+.row-actions .btn, .row-actions summary { white-space: nowrap; flex-shrink: 0; }
+textarea { font: inherit; min-height: 88px; padding: .55rem .7rem; }
 .badge { padding: .15rem .65rem; border-radius: 99px; font-size: .78rem; font-weight: 600; text-transform: capitalize; background: var(--grey-bg); }
 .b-confirmed, .b-active, .b-paid, .b-success, .b-completed, .b-done, .b-resolved, .b-published, .b-low { background: var(--green-bg); color: var(--green); }
 .b-checked_in, .b-in_progress, .b-medium { background: var(--blue-bg); color: var(--blue); }
@@ -288,3 +290,25 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; }
 .narrow { max-width: 760px; }
 .policy-list { display: grid; gap: .6rem; padding-left: 1.2rem; margin: .5rem 0 0; }
 .policy-list li { line-height: 1.5; }
+
+/* UC13 notification bell (staff topbar and customer header) */
+.bell { position: relative; }
+.bell-btn { position: relative; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; background: none; color: inherit; cursor: pointer; }
+.bell-btn:hover { background: #0000000d; }
+.bell-dot { position: absolute; top: 6px; right: 4px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: #c0392b; color: #fff; font: 700 11px/18px system-ui, sans-serif; text-align: center; }
+.bell-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 60; width: min(360px, calc(100vw - 32px)); max-height: 70vh; overflow: auto; background: #fff; color: #1f2a2a; border: 1px solid #e3ddd2; border-radius: 10px; box-shadow: 0 12px 32px #0002; text-align: left; letter-spacing: normal; text-transform: none; }
+.bell-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid #eee7dc; font-size: .9rem; }
+.bell-head .linklike { font-size: .8rem; }
+.bell-pop ul { list-style: none; margin: 0; padding: 0; }
+.bell-pop li button { display: grid; gap: 2px; width: 100%; padding: 10px 14px; border: 0; border-bottom: 1px solid #f2ede5; background: none; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.bell-pop li button:hover { background: #f8f5ef; }
+.bell-pop li.unread button { background: #fbf6ec; }
+.bell-pop li.unread b::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #c39a5f; vertical-align: middle; }
+.bell-pop b { font-size: .88rem; }
+.bell-pop span { font-size: .84rem; color: #4d5a58; }
+.bell-pop small { font-size: .75rem; color: #7c8684; }
+.bell-empty { padding: 18px 14px; margin: 0; color: #6b7472; font-size: .88rem; }
+.perm-list { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 18px; }
+/* the resort header styles its lists as a row; the notification list stays a column */
+.cx .bell-pop ul, .bell-pop ul { display: block; }
+.cx .bell-pop li, .bell-pop li { display: block; width: 100%; }

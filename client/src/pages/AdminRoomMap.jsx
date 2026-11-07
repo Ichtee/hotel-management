@@ -30,7 +30,7 @@ export default function AdminRoomMap() {
     setLoading(true);
     try {
       const [roomsRes, typesRes] = await Promise.allSettled([
-        roomApi.getRooms(),
+        roomApi.getRooms({ limit: 100 }), // the API pages by 10 by default
         roomApi.getRoomTypes()
       ]);
 
@@ -50,7 +50,7 @@ export default function AdminRoomMap() {
       if (roomsRes.status === 'fulfilled') {
         const rawRooms = Array.isArray(roomsRes.value) ? roomsRes.value : (roomsRes.value?.data || []);
         if (rawRooms.length > 0) {
-          const mapped = rawRooms.map(r => ({
+          const mapped = rawRooms.filter(r => r.isActive !== false).map(r => ({
             _id: r._id || r.id,
             no: r.roomNumber || r.no,
             floor: r.floor || (r.roomNumber ? parseInt(r.roomNumber[0], 10) : 1),
@@ -75,16 +75,18 @@ export default function AdminRoomMap() {
   // Change room status (UC30, lifecycle)
   const handleStatusChange = async (targetRoom, newStatus) => {
     const roomKey = targetRoom._id || targetRoom.no;
-    setRooms(prev => prev.map(r => (r._id === roomKey || r.no === targetRoom.no) ? { ...r, status: newStatus } : r));
-    if (selectedRoom && (selectedRoom._id === roomKey || selectedRoom.no === targetRoom.no)) {
-      setSelectedRoom(prev => ({ ...prev, status: newStatus }));
+    if (newStatus !== 'maintenance' && targetRoom.status !== 'maintenance') {
+      alert('Occupied, cleaning and available follow check-in, check-out and housekeeping. You can only put a room into Maintenance or take it out.');
+      return;
     }
-    showToast(`Room ${targetRoom.no} status updated to "${STATUS_CONFIG[newStatus]?.label}"`);
-
     try {
-      await roomApi.updateRoomStatus(roomKey, newStatus);
+      const res = await roomApi.updateRoomStatus(roomKey, newStatus);
+      const saved = res?.data?.status || newStatus;
+      setRooms(prev => prev.map(r => (r._id === roomKey || r.no === targetRoom.no) ? { ...r, status: saved } : r));
+      if (selectedRoom && (selectedRoom._id === roomKey || selectedRoom.no === targetRoom.no)) setSelectedRoom(prev => ({ ...prev, status: saved }));
+      showToast(`Room ${targetRoom.no} is now "${STATUS_CONFIG[saved]?.label || saved}"`);
     } catch (err) {
-      console.warn('Backend updateRoomStatus failed, kept local state:', err);
+      alert(err.message);
     }
   };
 
@@ -95,7 +97,7 @@ export default function AdminRoomMap() {
     if (!trimmedNo) return;
 
     if (rooms.some(r => r.no === trimmedNo)) {
-      alert(`Phòng số ${trimmedNo} đã tồn tại!`);
+      alert(`Room ${trimmedNo} already exists.`);
       return;
     }
 
@@ -108,27 +110,27 @@ export default function AdminRoomMap() {
 
     try {
       await roomApi.createRoom(payload);
-      showToast(`Phòng ${payload.roomNumber} đã được tạo thành công!`);
+      showToast(`Room ${payload.roomNumber} created`);
       setShowAddModal(false);
       setNewRoomNumber('');
       loadData();
     } catch (err) {
-      alert(`Lỗi khi tạo phòng: ${err.message}`);
+      alert(err.message);
     }
   };
 
   // Delete room (UC30)
   const handleDeleteRoom = async (targetRoom) => {
-    if (!window.confirm(`Bạn có chắc muốn xóa phòng ${targetRoom.no}?`)) return;
+    if (!window.confirm(`Deactivate room ${targetRoom.no}? It will no longer be sold; past bookings keep it.`)) return;
     try {
       if (targetRoom._id) {
         await roomApi.deleteRoom(targetRoom._id);
       }
       setRooms(prev => prev.filter(r => r.no !== targetRoom.no));
       setSelectedRoom(null);
-      showToast(`Đã xóa phòng ${targetRoom.no}`);
+      showToast(`Room ${targetRoom.no} deactivated`);
     } catch (err) {
-      alert(`Lỗi khi xóa phòng: ${err.message}`);
+      alert(err.message);
     }
   };
 
@@ -157,11 +159,11 @@ export default function AdminRoomMap() {
 
       <div className="page-head">
         <div>
-          <h1>Sơ Đồ Phòng Trực Quan (Interactive Room Map)</h1>
-          <p>Giám sát tình trạng phòng theo thời gian thực và quản lý vòng đời phòng (UC30, UC05)</p>
+          <h1>Room map</h1>
+          <p>Live status of every room. Put a room into Maintenance, add or deactivate rooms.</p>
         </div>
         <div className="head-actions">
-          <button className="btn primary" onClick={() => setShowAddModal(true)}>+ Thêm Phòng Mới</button>
+          <button className="btn primary" onClick={() => setShowAddModal(true)}>+ Add room</button>
         </div>
       </div>
 
@@ -171,7 +173,7 @@ export default function AdminRoomMap() {
         gap: '0.75rem', marginBottom: '1.25rem'
       }}>
         <div style={{ background: '#fff', padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--line)' }}>
-          <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>Tổng số phòng</span>
+          <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>Total rooms</span>
           <strong style={{ display: 'block', fontSize: '1.5rem', color: 'var(--navy)' }}>{counts.total}</strong>
         </div>
         {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
@@ -199,7 +201,7 @@ export default function AdminRoomMap() {
           ))}
         </div>
         <div className="chips" style={{ margin: 0 }}>
-          <button className={`chip ${filterStatus === 'all' ? 'on' : ''}`} onClick={() => setFilterStatus('all')}>Tất cả</button>
+          <button className={`chip ${filterStatus === 'all' ? 'on' : ''}`} onClick={() => setFilterStatus('all')}>All</button>
           {Object.entries(STATUS_CONFIG).map(([s, cfg]) => (
             <button key={s} className={`chip ${filterStatus === s ? 'on' : ''}`} onClick={() => setFilterStatus(s)}>{cfg.label}</button>
           ))}
@@ -213,8 +215,8 @@ export default function AdminRoomMap() {
         return (
           <section key={fl} className="floor" style={{ background: '#fff', padding: '1.25rem', borderRadius: '14px', border: '1px solid var(--line)', marginBottom: '1.25rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-              <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Tầng {fl}</h2>
-              <span className="muted" style={{ fontSize: '0.85rem' }}>{floorRooms.length} phòng</span>
+              <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Floor {fl}</h2>
+              <span className="muted" style={{ fontSize: '0.85rem' }}>{floorRooms.length} rooms</span>
             </div>
             <div className="rooms">
               {floorRooms.map(r => (
@@ -227,7 +229,7 @@ export default function AdminRoomMap() {
                     cursor: 'pointer',
                     outline: selectedRoom?.no === r.no ? '3px solid #ffd700' : 'none'
                   }}
-                  title={`Phòng ${r.no} (${STATUS_CONFIG[r.status]?.label})`}
+                  title={`Room ${r.no} (${STATUS_CONFIG[r.status]?.label})`}
                 >
                   <b>{r.no}</b>
                   <small>{STATUS_CONFIG[r.status]?.label || r.status}</small>
@@ -250,15 +252,15 @@ export default function AdminRoomMap() {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
               <div>
-                <h2 style={{ margin: 0, fontSize: '1.3rem' }}>Phòng {selectedRoom.no}</h2>
-                <span className="muted">Tầng {String(selectedRoom.no)[0]} · {selectedRoom.typeName || 'Standard Room'}</span>
+                <h2 style={{ margin: 0, fontSize: '1.3rem' }}>Room {selectedRoom.no}</h2>
+                <span className="muted">Floor {String(selectedRoom.no)[0]} · {selectedRoom.typeName || 'Standard Room'}</span>
               </div>
               <button onClick={() => setSelectedRoom(null)} style={{ border: 0, background: '#eee', borderRadius: '99px', width: '32px', height: '32px', cursor: 'pointer' }}>✕</button>
             </div>
 
             <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '10px', marginBottom: '1.25rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                <span style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>Trạng thái hiện tại:</span>
+                <span style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>Current status:</span>
                 <span className={`badge b-${selectedRoom.status}`}>{STATUS_CONFIG[selectedRoom.status]?.label}</span>
               </div>
               <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--muted)' }}>
@@ -267,7 +269,7 @@ export default function AdminRoomMap() {
             </div>
 
             <h4 style={{ margin: '0 0 0.5rem', fontSize: '0.9rem', color: 'var(--muted)', textTransform: 'uppercase' }}>
-              Chuyển Trạng Thái Vận Hành:
+              Change status:
             </h4>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1.25rem' }}>
               {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
@@ -302,10 +304,10 @@ export default function AdminRoomMap() {
                 style={{ color: 'var(--red)', borderColor: 'var(--red)', fontSize: '0.85rem' }}
                 onClick={() => handleDeleteRoom(selectedRoom)}
               >
-                Xóa phòng này
+                Deactivate room
               </button>
               <button className="btn primary" style={{ flex: 1 }} onClick={() => setSelectedRoom(null)}>
-                Đóng
+                Close
               </button>
             </div>
           </div>
@@ -323,15 +325,15 @@ export default function AdminRoomMap() {
               boxShadow: '0 24px 60px rgba(0,0,0,0.3)'
             }}
           >
-            <h2 style={{ margin: '0 0 0.25rem' }}>Thêm Phòng Vật Lý Mới</h2>
-            <p className="muted" style={{ margin: '0 0 1.25rem' }}>Đăng ký phòng vào sơ đồ khách sạn (UC30)</p>
+            <h2 style={{ margin: '0 0 0.25rem' }}>Add room</h2>
+            <p className="muted" style={{ margin: '0 0 1.25rem' }}>A new room starts as Available.</p>
 
             <div style={{ display: 'grid', gap: '1rem', marginBottom: '1.5rem' }}>
               <label>
-                Số Phòng
+                Room number
                 <input
                   type="text"
-                  placeholder="Ví dụ: 305, 401..."
+                  placeholder="e.g. 305"
                   value={newRoomNumber}
                   onChange={e => setNewRoomNumber(e.target.value)}
                   required
@@ -339,20 +341,20 @@ export default function AdminRoomMap() {
               </label>
 
               <label>
-                Tầng
+                Floor
                 <select value={newRoomFloor} onChange={e => setNewRoomFloor(e.target.value)}>
                   {[1, 2, 3, 4, 5, 6, 7].map(f => (
-                    <option key={f} value={f}>Tầng {f}</option>
+                    <option key={f} value={f}>Floor {f}</option>
                   ))}
                 </select>
               </label>
 
               <label>
-                Hạng Phòng
+                Room type
                 <select value={newRoomTypeId} onChange={e => setNewRoomTypeId(e.target.value)}>
                   {roomTypes.map(rt => (
                     <option key={rt.id || rt._id} value={rt.id || rt._id}>
-                      {rt.name} (${rt.price}/đêm)
+                      {rt.name}
                     </option>
                   ))}
                 </select>
@@ -360,8 +362,8 @@ export default function AdminRoomMap() {
             </div>
 
             <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-              <button type="button" className="btn" onClick={() => setShowAddModal(false)}>Hủy</button>
-              <button type="submit" className="btn primary">Tạo Phòng Mới</button>
+              <button type="button" className="btn" onClick={() => setShowAddModal(false)}>Cancel</button>
+              <button type="submit" className="btn primary">Create room</button>
             </div>
           </form>
         </div>

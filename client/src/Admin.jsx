@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { MENU } from './data.js';
 import AdminRoomMap from './pages/AdminRoomMap.jsx';
 import AdminRoomTypes from './pages/AdminRoomTypes.jsx';
-import AdminCleaningTasks from './pages/AdminCleaningTasks.jsx';
-import AdminRoomIssues from './pages/AdminRoomIssues.jsx';
 import HousekeepingTasks from './HousekeepingTasks.jsx';
 import HousekeepingAssignments from './HousekeepingAssignments.jsx';
 import RoomIssues from './RoomIssues.jsx';
@@ -11,6 +9,8 @@ import AdHocCleaningRequest from './AdHocCleaningRequest.jsx';
 import StayRequests from './StayRequests.jsx';
 import Invoices from './Invoices.jsx';
 import RoomAvailability from './RoomAvailability.jsx';
+import NotificationBell from './Notifications.jsx';
+import { AuditLog, Catalog, Reviews, StaffPermissions } from './ManagerPages.jsx';
 import './admin.css';
 import { useAuth } from './context/Auth.jsx';
 import { Badge, DataTable, Field, LineChart, Modal, Notice, PageHead, useApi } from './ui.jsx';
@@ -38,7 +38,8 @@ const Icon = ({ n, size = 18 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={ICONS[n]} /></svg>
 );
 
-const allowed = (item, perms, role) => !item[3] || (item[3].includes('manager.only') ? role === 'manager' : item[3].some((p) => perms.includes(p)));
+// A menu entry shows when the user has any of its permissions ('manager.only' = the Hotel Manager role).
+const allowed = (item, perms, role) => !item[3] || item[3].some((p) => (p === 'manager.only' ? role === 'manager' : p === 'admin.only' ? role === 'admin' : perms.includes(p)));
 
 function Sidebar({ route, open, onClose }) {
   const { user, signOut } = useAuth();
@@ -83,6 +84,7 @@ function Topbar({ onMenu }) {
     <header className="atop" ref={ref}>
       <button className="ibtn burger" aria-label="Open menu" onClick={onMenu}><Icon n="menu" /></button>
       <span className="atop-gap" />
+      <NotificationBell />
       <div className="aprofile">
         <button aria-expanded={menu} aria-haspopup="true" onClick={() => setMenu(!menu)}>
           <span className="avatar">{initials}</span><span className="who"><b>{name}</b><small>{user.roleName}</small></span>
@@ -305,29 +307,61 @@ function CustomerStatus({ customer, onClose }) {
   return <Modal title={blacklisting ? 'Blacklist customer' : 'Restore customer'} onClose={onClose}><form className="form" onSubmit={submit}><p className="full muted">{customer.customerProfile?.fullName || customer.username}</p><Field label="Reason"><input value={reason} onChange={(e) => setReason(e.target.value)} required /></Field><div className="full"><Notice error={error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : blacklisting ? 'Blacklist customer' : 'Restore customer'}</button></div></form></Modal>;
 }
 
+// UC11: the balance is split over cash, POS and bank transfer until it is 0 (BR-14: never online, BR-21).
+function SettleBalance({ booking, balance, onPaid }) {
+  const [method, setMethod] = useState('cash'); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  const [amount, setAmount] = useState(balance); const [received, setReceived] = useState('');
+  const change = Number(received) - Number(amount);
+  useEffect(() => setAmount(balance), [balance]);
+  const submit = async (e) => {
+    e.preventDefault(); const form = e.target; const f = Object.fromEntries(new FormData(form)); setSaving(true); setError(null);
+    try { await api(`/frontdesk/bookings/${booking._id}/payments`, { method: 'POST', body: { method, amount: Number(f.amount), transactionRef: method === 'cash' ? undefined : f.transactionRef } }); form.reset(); setReceived(''); onPaid(); }
+    catch (x) { setError(x); } finally { setSaving(false); }
+  };
+  return <form className="form" onSubmit={submit}>
+    <Field label="Payment method"><select value={method} onChange={(e) => setMethod(e.target.value)}><option value="cash">Cash</option><option value="pos">Card (POS)</option><option value="bank_transfer">Bank transfer</option></select></Field>
+    <Field label="Amount (VND)" error={error?.fields?.amount}><input key={balance} name="amount" type="number" min="1" max={balance} step="1" defaultValue={balance} onChange={(e) => setAmount(e.target.value)} required /></Field>
+    {method === 'cash' && <Field label="Cash received from guest (optional)"><input type="number" min="0" step="1000" value={received} onChange={(e) => setReceived(e.target.value)} /></Field>}
+    {method === 'cash' && received !== '' && <p className="full" role="status">{change >= 0 ? <>Change to give back: <strong>{money(change)}</strong></> : <>Still short by <strong>{money(-change)}</strong></>}</p>}
+    {method !== 'cash' && <Field label="Transaction reference" error={error?.fields?.transactionRef}><input name="transactionRef" required maxLength={100} /></Field>}
+    <div className="full"><Notice error={error} /></div>
+    <div className="full modal-actions"><button className="btn" disabled={saving}>{saving ? 'Recording…' : 'Record payment'}</button></div>
+  </form>;
+}
+
+// UC20: check-out once the balance is 0; a late check-out fee found at that moment is collected with the chosen method.
 function CheckOutBooking({ booking, onClose }) {
-  const detail = useApi(`/bookings/${booking._id}`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
-  if (detail.loading) return <Modal title="Check out customer" onClose={onClose}><p className="muted">Loading final bill…</p></Modal>;
+  const detail = useApi(`/bookings/${booking._id}`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false); const [lateMethod, setLateMethod] = useState('cash');
+  if (detail.loading && !detail.data) return <Modal title="Check out customer" onClose={onClose}><p className="muted">Loading final bill…</p></Modal>;
   const b = detail.data || booking; const paid = b.paidAmount || 0; const balance = Math.max(0, b.totalAmount - paid);
-  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${b._id}/check-out`, { method: 'POST', body: { inspectionConfirmed: true, paymentMethod: f.paymentMethod, transactionRef: f.transactionRef || undefined } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
-  return <Modal title={`Check out · ${b.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
-    <p className="full muted">Room {money(b.roomAmount)} · Services {money(b.serviceAmount)}{b.penaltyAmount > 0 && <> · Penalties {money(b.penaltyAmount)}</>} · Total {money(b.totalAmount)} · Paid {money(paid)}</p>
-    <p className="full"><strong>Balance due: {money(balance)}</strong></p>
-    {balance > 0 && <><Field label="Payment method"><select name="paymentMethod" defaultValue="cash"><option value="cash">Cash</option><option value="credit_card">Credit card / POS</option><option value="bank_transfer">Bank transfer</option></select></Field><Field label="Transaction reference"><input name="transactionRef" /></Field></>}
-    <label className="check full"><input type="checkbox" required /> Room inspection completed or explicitly skipped</label>
-    <div className="full"><Notice error={detail.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving}>{saving ? 'Checking out…' : 'Collect payment & check out'}</button></div>
-  </form></Modal>;
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); try { await api(`/front-desk/bookings/${b._id}/check-out`, { method: 'POST', body: { inspectionConfirmed: true, paymentMethod: lateMethod } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  return <Modal title={`Check out · ${b.bookingReference}`} onClose={onClose}>
+    <p className="muted">Room {money(b.roomAmount)} · Services {money(b.serviceAmount)}{b.feeAmount > 0 && <> · Fees {money(b.feeAmount)}</>}{b.penaltyAmount > 0 && <> · Penalties {money(b.penaltyAmount)}</>} · Total {money(b.totalAmount)} · Paid {money(paid)}</p>
+    <p><strong>{balance > 0 ? `Balance due: ${money(balance)}` : 'Fully paid'}</strong></p>
+    {balance > 0 && <SettleBalance booking={b} balance={balance} onPaid={detail.reload} />}
+    <form className="form" onSubmit={submit}>
+      <label className="check full"><input type="checkbox" required /> Room inspection completed or explicitly skipped</label>
+      <Field label="Late check-out fee, if due, paid by"><select value={lateMethod} onChange={(e) => setLateMethod(e.target.value)}><option value="cash">Cash</option><option value="pos">Card (POS)</option><option value="bank_transfer">Bank transfer</option></select></Field>
+      <div className="full"><Notice error={detail.error || error} /></div>
+      <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || balance > 0} title={balance > 0 ? 'Record the payments first' : undefined}>{saving ? 'Checking out…' : 'Check out'}</button></div>
+    </form>
+  </Modal>;
 }
 
 // UC38: record a damage / loss item, or confirm (possibly reduced) / waive one proposed by Housekeeping.
 function Penalties({ booking, onClose }) {
+  const after = booking.status === 'checked_out'; const bill = useApi(`/bookings/${booking._id}`, after);
   const list = useApi(`/frontdesk/bookings/${booking._id}/penalties`); const catalog = useApi('/frontdesk/compensation-items'); const [pick, setPick] = useState(''); const [qty, setQty] = useState(1); const [amt, setAmt] = useState(''); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
-  const act = async (path, method, body) => { setSaving(true); setError(null); try { await api(path, { method, body }); list.reload(); return true; } catch (x) { setError(x); return false; } finally { setSaving(false); } };
+  const act = async (path, method, body) => { setSaving(true); setError(null); try { await api(path, { method, body }); list.reload(); if (after) bill.reload(); return true; } catch (x) { setError(x); return false; } finally { setSaving(false); } };
   const submit = async (e) => { e.preventDefault(); const form = e.target; const f = Object.fromEntries(new FormData(form)); if (await act(`/frontdesk/bookings/${booking._id}/penalties`, 'POST', { itemName: pick && pick !== 'other' ? `${(catalog.data || []).find((i) => i._id === pick)?.name}${Number(qty) > 1 ? ` x${qty}` : ''}` : f.itemName, amount: Number(amt), description: f.description || undefined })) form.reset(); setPick(''); setQty(1); setAmt(''); };
   const confirm = (p) => { const value = window.prompt(`Confirmed amount (at most ${p.proposedAmount})`, p.proposedAmount); if (value !== null) act(`/frontdesk/penalties/${p._id}`, 'PATCH', { action: 'confirm', amount: Number(value) }); };
   const waive = (p) => { const reason = window.prompt('Reason for waiving this penalty'); if (reason) act(`/frontdesk/penalties/${p._id}`, 'PATCH', { action: 'waive', reason }); };
   return <Modal title={`Penalties · ${booking.bookingReference}`} onClose={onClose}>
     {list.loading ? <p className="muted">Loading penalties…</p> : <DataTable cols={['Item', 'Proposed', 'Charged', 'Status', '']} rows={(list.data || []).map((p) => [p.itemName + (p.afterCheckout ? ' (after check-out)' : ''), money(p.proposedAmount), p.amount == null ? '—' : money(p.amount), p.status, ['proposed', 'confirmed'].includes(p.status) ? <span className="row-actions">{p.status === 'proposed' && <button className="btn sm" disabled={saving} onClick={() => confirm(p)}>Confirm</button>}<button className="btn sm" disabled={saving} onClick={() => waive(p)}>Waive</button></span> : p.waivedReason || ''])} />}
+    {after && bill.data && bill.data.totalAmount - (bill.data.paidAmount || 0) > 0 && <>
+      <p><strong>Guest owes {money(bill.data.totalAmount - (bill.data.paidAmount || 0))} after check-out.</strong> Record the payment when it arrives; a supplementary invoice is issued.</p>
+      <SettleBalance booking={booking} balance={bill.data.totalAmount - (bill.data.paidAmount || 0)} onPaid={() => { bill.reload(); list.reload(); }} />
+    </>}
     <form className="form" onSubmit={submit}>
       <Field label="Damaged / lost item"><select value={pick} required onChange={(e) => { setPick(e.target.value); const it = (catalog.data || []).find((i) => i._id === e.target.value); setAmt(it ? String(it.price * qty) : ''); }}><option value="">Select an item…</option>{(catalog.data || []).map((i) => <option key={i._id} value={i._id}>{i.name} · {money(i.price)}</option>)}<option value="other">Other (describe)</option></select></Field>
       {pick === 'other' && <Field label="Item description"><input name="itemName" required maxLength={120} /></Field>}
@@ -396,7 +430,7 @@ function EditBooking({ booking, onClose }) {
 }
 
 function WalkInBooking({ onClose }) {
-  const types = useApi('/room-types');
+  const types = useApi('/room-types?limit=100');
   const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
   const submit = async (e) => {
     e.preventDefault(); setSaving(true); setError(null);
@@ -528,16 +562,20 @@ const PAGES = {
   '#/admin/stay-requests': StayRequests,
   '#/admin/room-availability': RoomAvailability,
   '#/admin/roomtypes': AdminRoomTypes,
-  '#/admin/cleaning': AdminCleaningTasks,
-  '#/admin/issues': AdminRoomIssues,
+  '#/admin/cleaning': HousekeepingTasks,
+  '#/admin/issues': RoomIssues,
   '#/admin/policy': DepositPolicy,
   '#/admin/cancellations': Cancellations,
-  '#/admin/refunds': Refunds
+  '#/admin/refunds': Refunds,
+  '#/admin/catalog': Catalog,
+  '#/admin/permissions': StaffPermissions,
+  '#/admin/reviews': Reviews,
+  '#/admin/audit': AuditLog
 };
 
 const Forbidden = () => <><PageHead title="No access" sub="Your role does not include this area." /><a className="btn" href="#/admin">Back to dashboard</a></>;
 
-const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/roles': 'roles.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read', '#/admin/occupancy': 'revenue.read', '#/admin/policy': 'policies.manage', '#/admin/cancellations': 'cancellations.review', '#/admin/refunds': 'refunds.handle', '#/admin/room-availability': 'rooms.search', '#/admin/cleaning': 'cleaning_tasks.own.read', '#/admin/cleaning-request': 'cleaning_tasks.ad_hoc.create', '#/admin/issues': 'room_issues.report', '#/admin/stay-requests': 'stay_requests.manage' };
+const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/roles': 'roles.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read', '#/admin/occupancy': 'revenue.read', '#/admin/policy': 'policies.manage', '#/admin/cancellations': 'cancellations.review', '#/admin/refunds': 'refunds.handle', '#/admin/room-availability': 'rooms.search', '#/admin/cleaning': 'cleaning_tasks.own.read', '#/admin/cleaning-request': 'cleaning_tasks.ad_hoc.create', '#/admin/stay-requests': 'stay_requests.manage' };
 
 export default function Admin({ route }) {
   const { user, loading } = useAuth();
@@ -545,7 +583,7 @@ export default function Admin({ route }) {
   if (loading) return <p className="muted center-msg">Loading…</p>;
   if (route === '#/admin/login') return <Login />;
   if (!user || user.scope === 'self') { if (location.hash !== '#/admin/login') location.hash = '#/admin/login'; return null; }
-  const denied = ((route === '#/admin/customers' || route === '#/admin/assignments') && user.role !== 'manager') || (NEEDS[route] && !user.permissions.includes(NEEDS[route]));
+  const denied = (['#/admin/customers', '#/admin/assignments', '#/admin/catalog', '#/admin/permissions', '#/admin/reviews', '#/admin/rooms', '#/admin/roomtypes'].includes(route) && user.role !== 'manager') || (route === '#/admin/audit' && user.role !== 'admin') || (NEEDS[route] && !user.permissions.includes(NEEDS[route]));
   const Page = denied ? Forbidden : PAGES[route] || Dashboard;
   return (
     <div className="adm">

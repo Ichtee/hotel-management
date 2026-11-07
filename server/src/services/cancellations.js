@@ -157,6 +157,27 @@ async function cancelPayment(bookingId, customerId) {
   return booking;
 }
 
+// T10 / BR-29 (every minute): a Pending booking whose 15-minute hold ended without a deposit becomes Expired,
+// so its room is bookable again. A deposit already pending at the gateway when the hold ended keeps the room
+// 15 more minutes, the same grace payments.settle gives it.
+const HOLD_GRACE = 15 * 60000;
+async function expireHolds(now = new Date()) {
+  const due = await Booking.find({ status: "pending", holdExpiresAt: { $lte: now } }).select("_id holdExpiresAt");
+  let expired = 0;
+  for (const b of due) {
+    const atGateway = await Payment.exists({ bookingId: b._id, status: "pending", createdAt: { $lt: b.holdExpiresAt } });
+    if (atGateway && now - b.holdExpiresAt < HOLD_GRACE) continue;
+    const done = await Booking.findOneAndUpdate({ _id: b._id, status: "pending" }, { $set: { status: "expired" }, $unset: { holdExpiresAt: 1 } }, { new: true });
+    if (!done) continue; // paid or abandoned meanwhile
+    // A result that still arrives for these orders is settled as a late deposit (refund case).
+    await Payment.updateMany({ bookingId: done._id, status: "pending" }, { status: "cancelled", failureReason: "Room hold expired" });
+    await restoreCoupon(done);
+    await notify("hold_expired", done.customerId, { reference: reference(done) }, { bookingId: done._id });
+    expired++;
+  }
+  return { expired };
+}
+
 // T19 / BR-42: a phone cancellation is verified with a code sent to the e-mail of the booking's customer account.
 const otpHash = (bookingId, code) => createHash("sha256").update(`${bookingId}:${code}`).digest("hex");
 async function sendOtp(booking, actorId) {
@@ -185,4 +206,4 @@ async function verifyOtp(bookingId, code) {
   await Booking.updateOne({ _id: bookingId }, { $unset: { cancellationOtp: 1 } });
 }
 
-module.exports = { estimate, request, withdraw, approve, autoApprove, cancelPayment, sendOtp, verifyOtp, reference, HOTEL_REASON };
+module.exports = { estimate, request, withdraw, approve, autoApprove, cancelPayment, expireHolds, sendOtp, verifyOtp, reference, HOTEL_REASON };

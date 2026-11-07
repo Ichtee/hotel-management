@@ -9,10 +9,12 @@ const sepay = require("../services/sepay");
 const { paidAmount, settle, announce, reconcile } = require("../services/payments");
 const { audit } = require("../services/audit");
 const { settlePaid } = require("../services/penalties");
+const Penalty = require("../models/Penalty");
+const { notify } = require("../services/notifications");
 
 const ONLINE = ["bank_transfer", "credit_card"];
 // PAYMENT_PROVIDER=sepay uses the SePay gateway; anything else uses the built-in sandbox (tests, offline demo).
-const useSepay = () => process.env.PAYMENT_PROVIDER === "sepay";
+const useSepay = () => sepay.enabled();
 const onlineMethods = () => (useSepay() ? sepay.methods() : ONLINE);
 const isStaff = (req) => req.role.permissions.includes("payments.settle");
 // BR-26: customers reach only their own bookings; front-desk staff may pay on a customer's behalf (UC13).
@@ -63,6 +65,20 @@ async function deposit(req, res) {
   res.status(201).json({ data: order(payment, booking, { holdExpiresAt: booking.holdExpiresAt }) });
 }
 
+// Bill lines are copied when the invoice is issued, so later changes never alter it.
+async function supplementaryInvoice(booking, issuedBy) {
+  const lines = (await Penalty.find({ bookingId: booking._id, status: "confirmed" }).lean()).map((p) => ({ name: p.itemName, amount: p.amount }));
+  const total = lines.reduce((sum, l) => sum + l.amount, 0);
+  if (!total) return null;
+  const invoice = await Invoice.create({
+    bookingId: booking._id, kind: "supplementary", invoiceNumber: `INV-S-${randomBytes(4).toString("hex").toUpperCase()}`,
+    issuedBy, issuedAt: new Date(), lines, subtotal: total, tax: 0, totalAmount: total, status: "paid",
+  });
+  if (booking.customerId) await notify("supplementary_invoice", booking.customerId, { number: invoice.invoiceNumber, amount: total, reference: booking.bookingReference }, { bookingId: booking._id })
+    .catch((e) => console.error("Notification failed:", e.message));
+  return invoice;
+}
+
 // Collected by the Receptionist and recorded at once (UC11).
 const DESK = ["cash", "pos", "bank_transfer"];
 // UC11: the Receptionist collects the remaining amount at check-out. BR-14: it is never paid online or through
@@ -78,7 +94,11 @@ async function finalPayment(req, res) {
   const transactionRef = method === "cash" ? undefined : v.text(req.body.transactionRef, "transactionRef", 1, 100);
   const payment = await Payment.create({ bookingId: booking._id, kind: "final", amount, method, transactionRef, status: "success", paidAt: new Date(), recordedBy: req.user._id });
   await announce(payment, true);
-  if (amount === due) await settlePaid(booking._id);
+  if (amount === due) {
+    // UC38 4b: a penalty paid after check-out gets its own supplementary invoice; the check-out invoice is not changed.
+    if (booking.status === "checked_out") await supplementaryInvoice(booking, req.user._id);
+    await settlePaid(booking._id);
+  }
   await audit(req.user._id, "payment.recorded", "payment", payment._id, { bookingId: booking._id, amount, method });
   res.status(201).json({ data: { paymentId: payment.id, status: "success", amount, remaining: due - amount } });
 }

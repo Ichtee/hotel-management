@@ -389,29 +389,6 @@ class BookingService {
   }
 
   /**
-   * Expire Room Holds Scheduled Job (BR-29: Hold expiry job)
-   * Automatically expires pending bookings past holdExpiresAt
-   */
-  async expireHolds(now = new Date()) {
-    const expiredBookings = await Booking.find({
-      status: 'pending',
-      holdExpiresAt: { $lte: now }
-    });
-
-    for (const b of expiredBookings) {
-      b.status = 'expired';
-      b.events.push({
-        actorId: b.customerId,
-        type: 'cancelled',
-        note: 'Reservation hold expired after 15 minutes without deposit confirmation (BR-29).',
-        createdAt: new Date()
-      });
-      await b.save();
-    }
-    return expiredBookings.length;
-  }
-
-  /**
    * Withdraw Cancellation Request (BR-36: Customer withdraws before receptionist review)
    */
   async withdrawCancellation(bookingId, { customerId } = {}) {

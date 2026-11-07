@@ -26,13 +26,25 @@ const events = {
   ],
   cancellation_auto_approved: (d) => ["Cancellation approved automatically", `Booking ${d.reference} was cancelled automatically. Refund due: ${money(d.amount)}.`],
   refund_completed: (d) => ["Refund sent", `We refunded ${money(d.amount)} for booking ${d.reference}. Bank transaction code: ${d.code}.`],
+  hold_expired: (d) => ["Room hold expired", `The 15-minute hold of booking ${d.reference} ended without a deposit, so the room was released.`],
+  arrival_reminder: (d) => ["See you tomorrow", `Booking ${d.reference}: check-in is tomorrow, ${d.date}, from ${d.time}.`],
+  penalty_proposed: (d) => ["Damage / loss reported", `Booking ${d.reference}: ${d.item} (${money(d.amount)}) was reported by Housekeeping. Confirm or waive it with the guest.`],
+  supplementary_invoice: (d) => ["Supplementary invoice", `Invoice ${d.number} of ${money(d.amount)} was issued for booking ${d.reference}.`],
   reconciliation: (d) => ["Payment reconciliation", `${d.settled} gateway payment(s) were settled by the daily reconciliation.`],
 };
 let transport;
+// SMTP_URL wins; otherwise the Resend API key already used for e-mail verification also sends notifications.
+const resendTransport = () => {
+  const client = require("./resendService").getResendClient();
+  return client && { sendMail: async ({ to, subject, text }) => {
+    const { error } = await client.emails.send({ from: process.env.RESEND_FROM_EMAIL || "GrandStay <onboarding@resend.dev>", to, subject, text });
+    if (error) throw new Error(error.message);
+  } };
+};
 const getTransport = () =>
   (transport ??= process.env.SMTP_URL
     ? require("nodemailer").createTransport(process.env.SMTP_URL)
-    : null);
+    : resendTransport() || null);
 // Tests (or another mail provider) can replace the transport.
 const setTransport = (t) => (transport = t);
 async function email(accountId, title, message) {

@@ -1,6 +1,7 @@
 const Room = require("../models/Room");
 const Booking = require("../models/Booking");
 const Task = require("../models/CleaningTask");
+const CheckInOutRequest = require("../models/CheckInOutRequest");
 const v = require("../utils/validation");
 const { currentShift, dayDate } = require("../utils/hotelTime");
 const { hotelDay } = require("./roomInventory");
@@ -140,11 +141,22 @@ async function createInspectionTasks(session, events, now) {
   const checkOutAt = new Date(`${today}T00:00:00+07:00`);
   checkOutAt.setTime(checkOutAt.getTime() + (hour * 60 + minute) * 60000);
   const opensAt = new Date(checkOutAt.getTime() - 30 * 60000);
-  if (now < opensAt || now >= checkOutAt) return 0;
+  const inWindow = now >= opensAt && now < checkOutAt;
+  // T18 / UC39: an approved check-out request moves the inspection to 30 minutes before the requested time.
+  const soon = await CheckInOutRequest.find({ type: "check_out", status: "approved", requestedTime: { $gt: now, $lte: new Date(now.getTime() + 30 * 60000) } })
+    .select("bookingId").session(session);
+  if (!inWindow && !soon.length) return 0;
   const start = dayDate(today), end = new Date(start.getTime() + 86400000);
-  const bookings = await Booking.find({ status: "checked_in", checkOutDate: { $gte: start, $lt: end } }).select("_id rooms").session(session);
+  const bookings = await Booking.find({ status: "checked_in", $or: [
+    ...(inWindow ? [{ checkOutDate: { $gte: start, $lt: end } }] : []),
+    { _id: { $in: soon.map((r) => r.bookingId) } },
+  ] }).select("_id rooms").session(session);
+  // A stay with an approved later check-out is inspected at its own time, not at the hotel's check-out time.
+  const later = new Set((await CheckInOutRequest.find({ type: "check_out", status: "approved", bookingId: { $in: bookings.map((b) => b._id) }, requestedTime: { $gt: new Date(now.getTime() + 30 * 60000) } })
+    .select("bookingId").session(session)).map((r) => String(r.bookingId)));
   let created = 0;
   for (const booking of bookings) for (const line of booking.rooms) {
+    if (later.has(String(booking._id))) continue;
     if (!line.roomId) continue;
     const inspectionKey = `${booking.id}:${line.roomId}`;
     if (await Task.exists({ inspectionKey }).session(session)) continue;

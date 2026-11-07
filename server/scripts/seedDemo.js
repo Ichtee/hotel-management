@@ -12,10 +12,19 @@ const Coupon = require("../src/models/Coupon");
 const HotelPolicy = require("../src/models/HotelPolicy");
 const Invoice = require("../src/models/Invoice");
 const Review = require("../src/models/Review");
-async function seedDemo() {
-  if (mongoose.connection.name !== "hotel_member1_demo")
+const Service = require("../src/models/Service");
+const HousekeepingAssignment = require("../src/models/HousekeepingAssignment");
+const { createCleaningTask } = require("../src/services/housekeepingTasks");
+const CompensationItem = require("../src/models/CompensationItem");
+async function seedDemo({ anyDatabase = false } = {}) {
+  if (!anyDatabase && mongoose.connection.name !== "hotel_member1_demo")
     throw new Error("Demo seed is restricted to hotel_member1_demo.");
   await seedRoles();
+  // UC34 catalogs the front desk picks from (UC19 services, UC38 compensation items).
+  await Service.insertMany([["Airport transfer", "Transport", 450000], ["Breakfast buffet", "Food & drink", 250000], ["Spa massage 60 min", "Wellness", 800000], ["Laundry (per bag)", "Housekeeping", 120000], ["Minibar refill", "Food & drink", 180000]]
+    .map(([name, category, unitPrice]) => ({ name, category, unitPrice })));
+  await CompensationItem.insertMany([["Bath towel", 150000], ["Bathrobe", 400000], ["Slippers", 50000], ["Key card", 100000], ["TV remote", 300000], ["Drinking glass", 80000], ["Hair dryer", 500000], ["Bed linen", 600000]]
+    .map(([name, price]) => ({ name, price })));
   const passwordHash = await hashPassword("HotelDemo123!");
   const accounts = [
     ["admin", "admin", "Duc Anh"],
@@ -213,6 +222,10 @@ async function seedOperations({ users, roomTypes, day }) {
   await stay(guests[7], rooms[3], 3, 2, "confirmed");
   await Room.updateMany({ _id: { $in: [rooms[7]._id, rooms[12]._id] } }, { status: "cleaning" });
   await Room.updateOne({ _id: rooms[14]._id }, { status: "maintenance" });
+  // UC36: Linh Pham covers floors 2-4 on every shift, so turnover tasks (UC30) reach her task list.
+  for (const shift of ["morning", "afternoon", "night"])
+    await HousekeepingAssignment.create({ staffId: users.housekeeping._id, shift, floors: [2, 3, 4], effectiveFrom: at(-30, "00:00"), effectiveTo: at(365, "00:00"), assignedBy: users.manager._id });
+  for (const room of [rooms[7], rooms[12]]) await createCleaningTask({ roomId: String(room._id), type: "turnover" });
   // A customer cancellation waiting for the Receptionist (UC35)
   const pending = await stay(["Jamie Nguyen", "0912345678"], rooms[8], 5, 2, "confirmed");
   await Booking.updateOne({ _id: pending._id }, {

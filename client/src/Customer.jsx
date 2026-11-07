@@ -8,6 +8,7 @@ import { roomApi } from './api/roomApi.js';
 import { PaymentPage, PaymentResult, SandboxGateway } from './Payments.jsx';
 import { api, money } from './api/client.js';
 import './resort.css';
+import NotificationBell from './Notifications.jsx';
 
 const NAV = [
   { label: 'Home', href: '#/' },
@@ -68,6 +69,7 @@ function SiteHeader({ route }) {
             {user ? (
               <>
                 <a className="btn gold" href="#/rooms" onClick={done}>Book now</a>
+                <NotificationBell bookingHref="#/my-bookings" />
                 <div className="dd account">
                   <button className="acct" aria-expanded={open === 'acct'} aria-haspopup="true" onClick={() => setOpen(open === 'acct' ? null : 'acct')}>
                     <span className="avatar" aria-hidden="true">{(name || 'U')[0].toUpperCase()}</span>

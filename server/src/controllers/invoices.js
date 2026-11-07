@@ -13,7 +13,7 @@ async function detail(req, res) {
   res.json({ data: invoice });
 }
 async function customerDetail(req, res) {
-  const invoice = await Invoice.findOne({ bookingId: v.id(req.params.bookingId) })
+  const invoice = await Invoice.findOne({ bookingId: v.id(req.params.bookingId), kind: "checkout" })
     .populate({ path: "bookingId", select: "customerId bookingReference guestName guestPhone checkInDate checkOutDate roomAmount serviceAmount feeAmount totalAmount services" }).lean();
   if (!invoice || String(invoice.bookingId?.customerId) !== String(req.user._id)) throw new v.HttpError(404, "Invoice not found.");
   res.json({ data: invoice });

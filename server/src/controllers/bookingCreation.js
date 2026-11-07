@@ -256,7 +256,7 @@ async function checkOut(req, res) {
   const paidAmount = payments.reduce((sum, payment) => sum + payment.amount, 0);
   const balance = Math.max(0, booking.totalAmount - paidAmount);
   if (balance) {
-    const method = v.choice(req.body.paymentMethod, "paymentMethod", ["cash", "credit_card", "bank_transfer"]);
+    const method = v.choice(req.body.paymentMethod, "paymentMethod", ["cash", "pos", "credit_card", "bank_transfer"]);
     await Payment.create({ bookingId: booking._id, kind: "final", amount: balance, method, status: "success", transactionRef: req.body.transactionRef ? v.text(req.body.transactionRef, "transactionRef", 2, 100) : undefined, paidAt: new Date(), recordedBy: req.user._id });
   }
   const roomIds = booking.rooms.map((room) => room.roomId);
@@ -265,7 +265,7 @@ async function checkOut(req, res) {
   booking.events.push({ actorId: req.user._id, type: "checked_out", note: `Checked out; final payment ${balance}` });
   await booking.save();
   await closeForBooking(booking._id);
-  const invoice = await Invoice.findOneAndUpdate({ bookingId: booking._id }, { $setOnInsert: { bookingId: booking._id, invoiceNumber: `INV-${Date.now()}`, issuedBy: req.user._id, issuedAt: new Date() }, $set: { subtotal: booking.roomAmount + booking.serviceAmount + booking.feeAmount, totalAmount: booking.totalAmount, status: "paid" } }, { new: true, upsert: true });
+  const invoice = await Invoice.findOneAndUpdate({ bookingId: booking._id, kind: "checkout" }, { $setOnInsert: { bookingId: booking._id, invoiceNumber: `INV-${Date.now()}`, issuedBy: req.user._id, issuedAt: new Date() }, $set: { subtotal: booking.roomAmount + booking.serviceAmount + booking.feeAmount, totalAmount: booking.totalAmount, status: "paid" } }, { new: true, upsert: true });
   const turnovers = await Promise.all(roomIds.map((roomId) => createCleaningTask({ roomId: String(roomId), bookingId: String(booking._id), type: "turnover" })));
   res.json({ data: { booking, invoice, paidAmount: paidAmount + balance, balance, turnoverTasks: turnovers.map((item) => item.data) } });
 }

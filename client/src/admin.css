@@ -105,7 +105,7 @@
 /* ---------- Data pages: filters, dialogs, notices ---------- */
 .filters-row { display: flex; flex-wrap: wrap; gap: .75rem; align-items: end; margin-bottom: 1rem; }
 .filters-row .grow { flex: 1; min-width: 180px; }
-.row-actions { display: inline-flex; gap: .4rem; }
+.row-actions .btn, .queue .btn { white-space: nowrap; flex-shrink: 0; }
 .btn.sm { min-height: 36px; padding: 0 .75rem; font-size: .85rem; }
 .b-suspended { background: var(--amber-bg); color: var(--amber); }
 .b-deleted { background: var(--grey-bg); color: var(--muted); }
@@ -187,5 +187,5 @@
 .rowmenu > div button { text-align: left; padding: .55rem .7rem; border: 0; border-radius: 7px; background: none; font: inherit; color: var(--text); cursor: pointer; }
 .rowmenu > div button:hover, .rowmenu > div button:focus-visible { background: #eef2f7; }
 @media (min-width: 1000px) { .table-wrap { overflow: visible; } } /* lets the row menu open past the table; small screens keep horizontal scroll */
-.qgrid { display: grid; gap: .85rem; margin-bottom: .85rem; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.qgrid { display: grid; gap: .85rem; margin-bottom: .85rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
 .qgrid .qfull { grid-column: 1 / -1; }

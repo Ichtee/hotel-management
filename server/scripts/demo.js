@@ -7,10 +7,12 @@ const { randomBytes } = require("node:crypto");
 const { createApp } = require("../src/app");
 const { seedDemo } = require("./seedDemo");
 const { startHousekeepingScheduler } = require("../src/services/housekeepingScheduler");
+const { schedule } = require("../src/services/jobs");
 // Chạy replica set tạm để hỗ trợ giao dịch của API nhân viên.
 async function main() {
   if (process.env.NODE_ENV === "production")
     throw new Error("Demo mode must not run in production.");
+  process.env.PAYMENT_PROVIDER ||= "sandbox"; // the local demo pays through the sandbox unless PAYMENT_PROVIDER=sepay is set
   // --persist keeps the data in server/data/mongo (port 27018, open it in Compass) and seeds only the first time.
   const persist = process.argv.includes("--persist");
   const dbPath = require("node:path").resolve(__dirname, "../data/mongo");
@@ -28,6 +30,7 @@ async function main() {
     clientOrigin: "http://localhost:5173",
   });
   const stopScheduler = startHousekeepingScheduler();
+  schedule(); // M3 jobs: hold expiry, auto-approval, no-shows, reminders
   const server = app.listen(3001, "127.0.0.1", () =>
     console.log(
       `Local API: http://localhost:3001. ${persist ? "Data kept in server/data/mongo (Compass: mongodb://127.0.0.1:27018/?directConnection=true)." : "Sample data only; resets on restart."} Accounts: admin@, manager@, reception@, housekeeping@, customer@demo.hotel. Password: HotelDemo123!`,

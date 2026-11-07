@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "setup": "node scripts/setup.js",
+    "seed:cloud": "node scripts/seedCloud.js",
     "demo": "node scripts/demo.js",
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",

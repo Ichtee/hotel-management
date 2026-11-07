@@ -1,0 +1,54 @@
+# Render Blueprint: the API (server/). Render asks for every `sync: false` value when the Blueprint is created.
+services:
+  - type: web
+    name: grandstay-api
+    runtime: node
+    rootDir: server
+    plan: free
+    region: singapore
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      # Vercel proxies /api to Render, so two proxies sit in front of the app.
+      - key: TRUST_PROXY
+        value: "2"
+      # Generated once by Render; keep them stable.
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: GATEWAY_SECRET
+        generateValue: true
+      - key: DATA_KEY
+        generateValue: true
+      - key: JOB_SECRET
+        generateValue: true
+      # --- Paste these ---
+      - key: MONGO_URI # MongoDB Atlas connection string, e.g. mongodb+srv://user:pass@cluster0.xxx.mongodb.net/grandstay
+        sync: false
+      - key: CLIENT_ORIGIN # the Vercel site, e.g. https://grandstay.vercel.app (no trailing slash)
+        sync: false
+      - key: PUBLIC_URL # same as CLIENT_ORIGIN
+        sync: false
+      - key: CLIENT_URL # same as CLIENT_ORIGIN (links in e-mails)
+        sync: false
+      - key: RESEND_API_KEY # https://resend.com/api-keys : verification, password reset and notification e-mails
+        sync: false
+      - key: RESEND_FROM_EMAIL # "GrandStay <onboarding@resend.dev>" until you verify a domain on Resend
+        sync: false
+      - key: RECAPTCHA_SITE_KEY # https://www.google.com/recaptcha/admin (v2 checkbox, add your vercel.app domain)
+        sync: false
+      - key: RECAPTCHA_SECRET_KEY
+        sync: false
+      - key: SEPAY_MERCHANT_ID # SePay payment gateway; SePay is used as soon as both keys are filled in
+        sync: false
+      - key: SEPAY_SECRET_KEY
+        sync: false
+      - key: SEPAY_ENV # sandbox while testing, production for real money
+        value: sandbox
+      # Without SePay keys: "true" lets a class demo pay through the built-in test gateway (no real money).
+      - key: ENABLE_SANDBOX_GATEWAY
+        value: "true"

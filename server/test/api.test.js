@@ -1036,6 +1036,139 @@ test("Member 2 booking routes need a session and never act for another customer"
   await send(admin, "post", `/api/bookings/${booking.id}/modify`, { customerId: owner, guestCount: 2 }).set("x-user-id", owner).expect((r) => assert.ok(r.status >= 400));
 });
 
+test("BR-29 hold expiry frees the room, keeps a gateway-pending deposit 15 more minutes, and tells the customer (UC13)", async () => {
+  const Notification = require("../src/models/Notification");
+  const { expireHolds } = require("../src/services/cancellations");
+  const ago = (min) => new Date(Date.now() - min * 60000);
+  const lapsed = await payBooking({ holdExpiresAt: ago(1) });
+  const atGateway = await payBooking({ holdExpiresAt: ago(5) });
+  await Payment.create({ bookingId: atGateway._id, kind: "deposit", amount: 600, method: "bank_transfer", status: "pending", createdAt: ago(7) });
+  const live = await payBooking();
+  await expireHolds();
+  assert.equal((await Booking.findById(lapsed._id)).status, "expired");
+  assert.equal((await Booking.findById(atGateway._id)).status, "pending"); // grace: the gateway may still confirm it
+  assert.equal((await Booking.findById(live._id)).status, "pending");
+  await expireHolds(new Date(Date.now() + 11 * 60000)); // the grace ended too
+  assert.equal((await Booking.findById(atGateway._id)).status, "expired");
+  assert.equal(await Payment.countDocuments({ bookingId: atGateway._id, status: "cancelled" }), 1);
+  // UC13: the customer reads only their own notifications and marks them read
+  const mine = (await customer.get("/api/notifications").expect(200)).body;
+  assert.ok(mine.data.some((n) => n.type === "hold_expired" && String(n.bookingId) === lapsed.id));
+  assert.ok(mine.meta.unread >= 2);
+  assert.equal((await staff.get("/api/notifications").expect(200)).body.data.filter((n) => n.type === "hold_expired").length, 0);
+  const one = mine.data.find((n) => n.type === "hold_expired");
+  const other = await Notification.findOne({ accountId: { $ne: one.accountId } });
+  if (other) await send(customer, "post", "/api/notifications/read", { id: other.id }).expect(200).expect((r) => assert.equal(r.body.data.updated, 0));
+  await send(customer, "post", "/api/notifications/read", { id: one._id }).expect(200);
+  assert.equal((await Notification.findById(one._id)).isRead, true);
+  await send(customer, "post", "/api/notifications/read", {}).expect(200);
+  assert.equal((await customer.get("/api/notifications").expect(200)).body.meta.unread, 0);
+});
+
+test("UC34 catalogs, UC31 -> UC38 proposed penalty, supplementary invoice after check-out, room writes need the manager", async () => {
+  const Penalty = require("../src/models/Penalty");
+  const Invoice = require("../src/models/Invoice");
+  const Room = require("../src/models/Room");
+  const RoomType = require("../src/models/RoomType");
+  // UC34: manager only, validated, no duplicate names, deactivate instead of delete
+  await staff.get("/api/catalog/services").expect(403);
+  await manager.get("/api/catalog/nothing").expect(404);
+  await send(manager, "post", "/api/catalog/compensation-items", { name: "", price: 10 }).expect(400);
+  await send(manager, "post", "/api/catalog/compensation-items", { name: "Lamp shade", price: 0 }).expect(400);
+  const shade = (await send(manager, "post", "/api/catalog/compensation-items", { name: "Lamp shade", price: 250 }).expect(201)).body.data;
+  await send(manager, "post", "/api/catalog/compensation-items", { name: "Lamp shade", price: 300 }).expect(409);
+  const spa = (await send(manager, "post", "/api/catalog/services", { name: "Spa", price: 500 }).expect(201)).body.data;
+  assert.ok((await staff.get("/api/front-desk/services").expect(200)).body.data.some((s) => s._id === spa._id));
+  await send(manager, "patch", `/api/catalog/services/${spa._id}`, { isActive: false }).expect(200);
+  assert.ok(!(await staff.get("/api/front-desk/services").expect(200)).body.data.some((s) => s._id === spa._id));
+
+  // UC31 -> UC38: a damaged item found at turnover becomes a Proposed penalty on the last checked-out stay
+  await payBooking(); // creates the room type
+  const type = await RoomType.findOne({ name: "Pay Suite" });
+  const room = await Room.create({ roomNumber: "PEN-1", roomTypeId: type._id, floor: 1 });
+  const left = await payBooking({ status: "checked_out", holdExpiresAt: undefined, actualCheckOutAt: new Date(), rooms: [{ roomTypeId: type._id, roomId: room._id, priceAtBooking: 1000 }] });
+  await Payment.create({ bookingId: left._id, kind: "final", amount: 2000, method: "cash", status: "success", paidAt: new Date() });
+  assert.ok((await staff.get("/api/room-issues/options").expect(200)).body.meta.compensationItems.some((i) => i.name === "Lamp shade"));
+  const reported = (await send(staff, "post", "/api/room-issues", { roomId: room.id, title: "Lamp shade torn", description: "Found at turnover", severity: "low", chargeItemId: shade._id }).expect(201)).body.data;
+  assert.equal(reported.penalty.status, "proposed");
+  assert.equal(reported.penalty.bookingId, left.id);
+  assert.equal(reported.penalty.afterCheckout, true);
+  await send(staff, "patch", `/api/frontdesk/penalties/${reported.penalty._id}`, { action: "confirm" }).expect(200);
+  // the guest pays it later: a supplementary invoice is issued, the check-out invoice stays as it was
+  await send(staff, "post", `/api/frontdesk/bookings/${left.id}/payments`, { method: "bank_transfer", transactionRef: "FT-77" }).expect(201);
+  const supp = await Invoice.findOne({ bookingId: left._id, kind: "supplementary" });
+  assert.equal(supp.totalAmount, 250);
+  assert.deepEqual(supp.lines.map((l) => [l.name, l.amount]), [["Lamp shade", 250]]);
+  assert.equal((await Penalty.findById(reported.penalty._id)).status, "paid");
+  assert.equal(await Invoice.countDocuments({ bookingId: left._id, kind: "checkout" }), 0);
+  // UC09: the customer sees the paid penalty and the supplementary invoice on the booking
+  const mine = (await customer.get(`/api/bookings/${left.id}`).expect(200)).body.data;
+  assert.deepEqual(mine.penalties.map((p) => [p.itemName, p.status]), [["Lamp shade", "paid"]]);
+  assert.deepEqual(mine.invoices.map((i) => [i.kind, i.totalAmount]), [["supplementary", 250]]);
+  // a quantity multiplies the compensation price; a Proposed line stays hidden from the customer
+  const two = (await send(staff, "post", "/api/room-issues", { roomId: room.id, title: "Shades", description: "Two torn", severity: "low", chargeItemId: shade._id, quantity: 2 }).expect(201)).body.data;
+  assert.equal(two.penalty.proposedAmount, 500);
+  assert.equal(two.penalty.itemName, "Lamp shade x2");
+  assert.equal((await customer.get(`/api/bookings/${left.id}`).expect(200)).body.data.penalties.length, 1);
+  await send(staff, "post", "/api/room-issues", { roomId: room.id, title: "Shades", severity: "low", chargeItemId: shade._id, quantity: 0 }).expect(400);
+
+  // M2 room writes are no longer public
+  const anon = request(app);
+  await anon.patch(`/api/rooms/${room.id}/status`).set("Origin", origin).send({ status: "maintenance" }).expect(401);
+  await anon.put(`/api/room-types/${type.id}/pricing`).set("Origin", origin).send({ seasonalPricing: [] }).expect(401);
+  await send(staff, "put", `/api/room-types/${type.id}/pricing`, { seasonalPricing: [] }).expect(403);
+  // UC25: rates are inclusive date ranges; an overlap is refused (MSG-60), a bad price or reversed dates too
+  const rate = (description, startDate, endDate, price = 1500) => ({ description, startDate, endDate, price });
+  await send(manager, "put", `/api/room-types/${type.id}/pricing`, { seasonalPricing: [rate("Tet", "2027-02-01", "2027-02-10"), rate("Late Tet", "2027-02-10", "2027-02-15")] }).expect(409);
+  await send(manager, "put", `/api/room-types/${type.id}/pricing`, { seasonalPricing: [rate("Bad", "2027-02-10", "2027-02-01")] }).expect(400);
+  await send(manager, "put", `/api/room-types/${type.id}/pricing`, { seasonalPricing: [rate("Free", "2027-02-01", "2027-02-02", 0)] }).expect(400);
+  const priced = (await send(manager, "put", `/api/room-types/${type.id}/pricing`, { seasonalPricing: [rate("Tet", "2027-02-01", "2027-02-09"), rate("Late Tet", "2027-02-10", "2027-02-15")] }).expect(200)).body.data;
+  assert.deepEqual(priced.seasonalPricing.map((r) => r.description), ["Tet", "Late Tet"]);
+  await send(manager, "put", `/api/room-types/${type.id}/pricing`, { seasonalPricing: [] }).expect(200);
+  await anon.get("/api/rooms/search").expect(200);
+});
+
+test("UC32: only the Admin reads the audit log, filtered by action and date", async () => {
+  await manager.get("/api/audit-logs").expect(403);
+  await staff.get("/api/audit-logs").expect(403);
+  const all = (await admin.get("/api/audit-logs").expect(200)).body;
+  assert.ok(all.meta.total > 0);
+  const some = (await admin.get("/api/audit-logs?action=room_issue").expect(200)).body.data;
+  assert.ok(some.length > 0 && some.every((a) => a.action.includes("room_issue")));
+  assert.equal((await admin.get("/api/audit-logs?to=2000-01-01").expect(200)).body.data.length, 0);
+  await admin.get("/api/audit-logs?from=nope").expect(400);
+});
+
+test("T18: an approved check-out request schedules the inspection 30 minutes before its own time", async () => {
+  const Room = require("../src/models/Room");
+  const RoomType = require("../src/models/RoomType");
+  const Task = require("../src/models/CleaningTask");
+  const CheckInOutRequest = require("../src/models/CheckInOutRequest");
+  const { runHousekeepingTick } = require("../src/services/housekeepingTasks");
+  await payBooking();
+  const type = await RoomType.findOne({ name: "Pay Suite" });
+  const room = await Room.create({ roomNumber: "INS-1", roomTypeId: type._id, floor: 1, status: "occupied" });
+  const stay = await payBooking({ status: "checked_in", holdExpiresAt: undefined, checkInDate: "2027-09-01", checkOutDate: "2027-09-03", rooms: [{ roomTypeId: type._id, roomId: room._id, priceAtBooking: 1000 }] });
+  const at = new Date("2027-09-03T08:00:00Z"); // 15:00 in Vietnam, after the 12:00 check-out time
+  await CheckInOutRequest.create({ bookingId: stay._id, customerId: stay.customerId, type: "check_out", requestedTime: at, status: "approved" });
+  await runHousekeepingTick(new Date(at.getTime() - 60 * 60000));
+  assert.equal(await Task.countDocuments({ bookingId: stay._id, type: "inspection" }), 0); // not yet
+  await runHousekeepingTick(new Date(at.getTime() - 20 * 60000));
+  assert.equal(await Task.countDocuments({ bookingId: stay._id, type: "inspection" }), 1);
+});
+
+test("arrival reminder: confirmed stays checking in tomorrow (Vietnam time) are reminded once", async () => {
+  const Notification = require("../src/models/Notification");
+  const { arrivalReminders } = require("../src/services/reminders");
+  const now = new Date("2027-10-09T20:00:00Z"); // 03:00 on 10 Oct in Vietnam, so "tomorrow" is 11 Oct
+  const due = await payBooking({ status: "confirmed", holdExpiresAt: undefined, checkInDate: "2027-10-11", checkOutDate: "2027-10-12" });
+  const later = await payBooking({ status: "confirmed", holdExpiresAt: undefined, checkInDate: "2027-10-12", checkOutDate: "2027-10-13" });
+  await arrivalReminders(now);
+  await arrivalReminders(now); // a second run sends nothing new
+  assert.equal(await Notification.countDocuments({ type: "arrival_reminder", bookingId: due._id }), 1);
+  assert.equal(await Notification.countDocuments({ type: "arrival_reminder", bookingId: later._id }), 0);
+});
+
 test("jobs endpoint: off without JOB_SECRET, then needs the secret", async () => {
   const saved = process.env.JOB_SECRET;
   delete process.env.JOB_SECRET;

@@ -240,7 +240,8 @@ async function testMember2Logic() {
   const nearCheckinBooking = {
     ...mockBooking,
     status: 'confirmed',
-    checkInDate: new Date(Date.now() + 24 * 3600000) // 24h away (< 48h)
+    checkInDate: new Date(Date.now() + 24 * 3600000), // 24h away (< 48h)
+    checkOutDate: new Date(Date.now() + 5 * 86400000) // relative, so the test does not expire with the calendar
   };
   Booking.findById = async () => nearCheckinBooking;
   await assert.rejects(

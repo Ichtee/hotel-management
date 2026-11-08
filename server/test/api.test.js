@@ -59,7 +59,7 @@ before(async () => {
   }
   ({ app, store } = createApp({
     mongoUri: db.getUri(),
-    sessionSecret: "integration-test-secret-more-than-32-characters",
+    jwtSecret: "integration-test-secret-more-than-32-characters",
     clientOrigin: origin,
   }));
   admin = await login("admin@example.com");

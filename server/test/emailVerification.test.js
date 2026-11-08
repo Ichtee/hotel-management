@@ -22,7 +22,7 @@ before(async () => {
   await seedRoles();
   ({ app, store } = createApp({
     mongoUri: db.getUri("verification_tests"),
-    sessionSecret: "email-verification-tests-secret-over-32-chars-long",
+    jwtSecret: "email-verification-tests-secret-over-32-chars-long",
     clientOrigin: origin,
   }));
 });

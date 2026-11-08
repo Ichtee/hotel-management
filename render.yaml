@@ -18,7 +18,7 @@ services:
       - key: TRUST_PROXY
         value: "2"
       # Generated once by Render; keep them stable.
-      - key: SESSION_SECRET
+      - key: JWT_SECRET
         generateValue: true
       - key: GATEWAY_SECRET
         generateValue: true

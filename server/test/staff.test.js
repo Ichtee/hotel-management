@@ -55,7 +55,7 @@ async function setup() {
   for (const key of ["manager", "admin", "customer"])
     await User.create({ username: key, email: `${key}@example.com`, roleId: roles[key]._id, passwordHash,
       phone: "0912345678", customerProfile: { fullName: key }, isVerified: true });
-  ({ app, store } = createApp({ mongoUri: db.getUri("staff_api_tests"), sessionSecret: "temporary-tests-secret-at-least-32-characters" }));
+  ({ app, store } = createApp({ mongoUri: db.getUri("staff_api_tests"), jwtSecret: "temporary-tests-secret-at-least-32-characters" }));
   manager = await login("manager@example.com");
   admin = await login("admin@example.com");
   customer = await login("customer@example.com");

@@ -17,8 +17,8 @@ async function start() {
   await seedRoles();
   const { app } = createApp({
     mongoUri: process.env.MONGO_URI,
-    sessionSecret:
-      process.env.SESSION_SECRET ||
+    jwtSecret:
+      process.env.JWT_SECRET || process.env.SESSION_SECRET ||
       (production ? "" : randomBytes(32).toString("hex")),
     clientOrigin: process.env.CLIENT_ORIGIN,
     production,

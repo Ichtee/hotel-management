@@ -42,7 +42,7 @@ All **demo-only** passwords: `HotelDemo123!`. Revenue, staff and promotion fixtu
 ## Use a persistent database
 
 1. Start MongoDB and copy `server/.env.example` to `server/.env`.
-2. Set `MONGO_URI`, `CLIENT_ORIGIN` and a random `SESSION_SECRET` of at least 32 characters. Generate one with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`.
+2. Set `MONGO_URI`, `CLIENT_ORIGIN` and a random `JWT_SECRET` of at least 32 characters. Generate one with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"`.
 3. For first setup, fill `ADMIN_USERNAME`, `ADMIN_NAME`, `ADMIN_EMAIL`, `ADMIN_PASSWORD`. Passwords require 10–128 characters, including a letter and a number.
 4. Run:
 
@@ -59,7 +59,7 @@ npm run dev
 
 Client: http://localhost:5173; API: http://localhost:3001. Vite proxies `/api` to the API. Keep `.env` out of Git. Normal startup seeds missing system roles but never creates demo users or sample transactions.
 
-`npm run build` builds `client/dist`. A production deployment must serve those static files with SPA fallback and proxy `/api` to `npm start --prefix server`, on the same HTTPS origin. Set `NODE_ENV=production`, `CLIENT_ORIGIN` to the exact HTTPS origin and `SESSION_SECRET`. Secure cookies require HTTPS. Step-by-step deployment to Render (API) + Vercel (web) + MongoDB Atlas: [DEPLOY.md](DEPLOY.md).
+`npm run build` builds `client/dist`. A production deployment must serve those static files with SPA fallback and proxy `/api` to `npm start --prefix server`, on the same HTTPS origin. Set `NODE_ENV=production`, `CLIENT_ORIGIN` to the exact HTTPS origin and `JWT_SECRET`. Secure cookies require HTTPS. Step-by-step deployment to Render (API) + Vercel (web) + MongoDB Atlas: [DEPLOY.md](DEPLOY.md).
 
 ## Payment gateway (SePay)
 

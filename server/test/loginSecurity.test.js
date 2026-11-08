@@ -24,7 +24,7 @@ test.before(async () => {
   await seedRoles();
   ({ app, store } = createApp({
     mongoUri: db.getUri("login_security_tests"),
-    sessionSecret: "temporary-security-secret-at-least-32-chars",
+    jwtSecret: "temporary-security-secret-at-least-32-chars",
   }));
 });
 

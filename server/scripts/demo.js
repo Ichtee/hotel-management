@@ -26,7 +26,7 @@ async function main() {
   if (!persist || !(await require("../src/models/User").exists({}))) await seedDemo();
   const { app } = createApp({
     mongoUri,
-    sessionSecret: randomBytes(32).toString("hex"),
+    jwtSecret: randomBytes(32).toString("hex"),
     clientOrigin: "http://localhost:5173",
   });
   const stopScheduler = startHousekeepingScheduler();

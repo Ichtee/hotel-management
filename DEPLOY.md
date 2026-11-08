@@ -43,7 +43,7 @@ Code phải được push lên GitHub trước, vì Render và Vercel đều l�
    | `RECAPTCHA_SITE_KEY`, `RECAPTCHA_SECRET_KEY` | key ở mục 4 |
    | `SEPAY_MERCHANT_ID`, `SEPAY_SECRET_KEY` | để trống nếu chưa có SePay |
 
-   `SESSION_SECRET`, `GATEWAY_SECRET`, `DATA_KEY` và `JOB_SECRET` do Render tự sinh, bạn không cần điền.
+   `JWT_SECRET`, `GATEWAY_SECRET`, `DATA_KEY` và `JOB_SECRET` do Render tự sinh, bạn không cần điền.
 4. Deploy. Khi xong, mở `https://<tên-service>.onrender.com/api/health`. Kết quả phải là `{"data":{"status":"ok"}}`.
 5. Nếu tên service khác `grandstay-api`, sửa URL trong **`client/vercel.json`** (dòng `destination`) rồi push lại.
 

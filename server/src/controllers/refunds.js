@@ -9,7 +9,7 @@ const { reference } = require("../services/cancellations");
 
 // The refund account number is stored encrypted (AES-256-GCM). DATA_KEY must stay stable, or saved numbers cannot be read.
 function key() {
-  const secret = process.env.DATA_KEY || process.env.SESSION_SECRET;
+  const secret = process.env.DATA_KEY || process.env.JWT_SECRET || process.env.SESSION_SECRET;
   if (!secret && process.env.NODE_ENV === "production") throw new Error("DATA_KEY is required in production.");
   return createHash("sha256").update(secret || "development-only-data-key").digest();
 }

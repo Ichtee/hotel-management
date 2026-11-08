@@ -33,7 +33,7 @@ async function setup() {
   await seedRoles();
   await Promise.all(Object.values(mongoose.models).map((m) => m.init()));
   const passwordHash = await hashPassword("ManagerTest123!");
-  ({ app, store } = createApp({ mongoUri: db.getUri("manager_operations_tests"), sessionSecret: "temporary-manager-tests-secret-over-32-characters" }));
+  ({ app, store } = createApp({ mongoUri: db.getUri("manager_operations_tests"), jwtSecret: "temporary-manager-tests-secret-over-32-characters" }));
   const agents = {};
   for (const key of ["manager", "admin", "customer", "housekeeping"]) {
     const role = await Role.findOne({ key });

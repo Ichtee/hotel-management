@@ -48,12 +48,12 @@ const PUBLIC_HOOKS = [GATEWAY_CALLBACK, "/api/payments/sepay/ipn"];
 // Khởi tạo API với xác thực và kiểm soát quyền tại backend.
 function createApp({
   mongoUri,
-  sessionSecret,
+  jwtSecret,
   clientOrigin = "http://localhost:5173",
   production = false,
 }) {
-  if (!sessionSecret || sessionSecret.length < 32)
-    throw new Error("SESSION_SECRET must contain at least 32 characters.");
+  if (!jwtSecret || jwtSecret.length < 32)
+    throw new Error("JWT_SECRET must contain at least 32 characters.");
   const app = express();
   app.disable("x-powered-by");
   if (production) app.set("trust proxy", Number(process.env.TRUST_PROXY) || 1); // 2 when Vercel proxies /api to Render
@@ -81,7 +81,7 @@ function createApp({
   app.use(express.json({ limit: "32kb" }));
 
   // SDS: stateless JWT authentication (middleware/auth.js); the secret signs the tokens.
-  app.set("jwtSecret", sessionSecret);
+  app.set("jwtSecret", jwtSecret);
   app.set("production", production);
 
   app.use("/api", (req, res, next) => {

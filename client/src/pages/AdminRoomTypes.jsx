@@ -26,13 +26,11 @@ export default function AdminRoomTypes() {
       <PageHead title="Room types" sub="Categories, capacity, amenities and base price. Seasonal rates override the base price for their dates." action="Add room type" onAction={() => setEdit({})} />
       <Notice error={list.error} ok={msg} />
       {list.loading ? <p className="muted">Loading…</p> : !list.data?.length ? <p className="empty">No room types yet.</p> : (
-        <DataTable cols={['', 'Room type', 'Bed', 'Guests', 'Base / night', 'Seasonal rates', 'Status', '']} rows={list.data.map((t) => [
+        <DataTable cols={['', 'Room type', 'Bed & guests', 'Base / night', 'Status', '']} rows={list.data.map((t) => [
           <img key="i" src={t.images?.[0] || FALLBACK_IMG} alt="" width="64" height="44" style={{ objectFit: 'cover', borderRadius: 6, display: 'block' }} />,
           <span key="n"><b>{t.name}</b>{t.description ? <small className="muted" style={{ display: 'block', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description}</small> : null}</span>,
-          <span key="b">{t.bedType || '—'}{t.roomSizeSqm ? <small className="muted" style={{ display: 'block' }}>{t.roomSizeSqm} m²</small> : null}</span>,
-          t.maxOccupancy,
-          <span key="p" style={{ whiteSpace: 'nowrap' }}>{money(t.basePrice)}</span>,
-          t.seasonalPricing?.length ? `${t.seasonalPricing.length} rate${t.seasonalPricing.length > 1 ? 's' : ''}` : 'Base price only',
+          <span key="b">{t.bedType || '—'}<small className="muted" style={{ display: 'block' }}>{t.maxOccupancy} guests{t.roomSizeSqm ? ` · ${t.roomSizeSqm} m²` : ''}</small></span>,
+          <span key="p" style={{ whiteSpace: 'nowrap' }}>{money(t.basePrice)}<small className="muted" style={{ display: 'block' }}>{t.seasonalPricing?.length ? `+ ${t.seasonalPricing.length} seasonal rate${t.seasonalPricing.length > 1 ? 's' : ''}` : 'Base price only'}</small></span>,
           t.isActive ? 'active' : 'inactive',
           <span key="a" className="row-actions">
             <button className="btn sm" onClick={() => setEdit(t)}>Edit</button>
@@ -41,7 +39,7 @@ export default function AdminRoomTypes() {
               <summary className="btn sm" aria-label="More actions">More ▾</summary>
               <div>
                 <button onClick={(e) => { e.currentTarget.closest('details').open = false; toggle(t); }}>{t.isActive ? 'Deactivate' : 'Reactivate'}</button>
-                <button onClick={(e) => { e.currentTarget.closest('details').open = false; remove(t); }}>Delete</button>
+                <button className="danger" onClick={(e) => { e.currentTarget.closest('details').open = false; remove(t); }}>Delete</button>
               </div>
             </details>
           </span>,
@@ -108,7 +106,7 @@ function SeasonalRates({ type, onClose }) {
     <p className="muted">Base price {money(type.basePrice)} / night applies on every date without a rate.</p>
     {rates.length ? <DataTable cols={['Rate', 'From', 'To', 'Price / night', '']} rows={rates.map((r, i) => [
       r.description || 'Custom', dateLabel(r.startDate), dateLabel(r.endDate), money(r.price),
-      <button key={i} className="btn sm" disabled={saving} onClick={() => remove(r)}>Delete</button>,
+      <button key={i} className="btn sm danger" disabled={saving} onClick={() => remove(r)}>Delete</button>,
     ])} /> : <p className="empty">No seasonal rates.</p>}
     <form className="form-grid" onSubmit={add} style={{ marginTop: '1rem' }}>
       <div className="full"><Field label="Rate name (e.g. Tet holiday, Summer 2027)"><input name="description" required maxLength={100} /></Field></div>

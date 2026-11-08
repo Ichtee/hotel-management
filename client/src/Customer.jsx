@@ -310,11 +310,12 @@ function Rooms({ q }) {
       </div>
       <SearchBar key={route0(q)} q={q} />
       <div className="c-layout">
-        <aside className="panel filters" aria-label="Filters">
-          <h2>Filters</h2>
+        {/* On a phone the filters start folded so the rooms come first; on a wide screen they start open. */}
+        <details className="panel filters" open={window.matchMedia('(min-width: 1000px)').matches}>
+          <summary><h2>Filters</h2></summary>
           <label>Max price: {money(price)}<input type="range" min="1000000" max="10000000" step="500000" value={price} onChange={(e) => setPrice(+e.target.value)} /></label>
           <label>Category<select value={cat} onChange={(e) => setCat(e.target.value)}><option value="all">All</option><option value="standard">Standard</option><option value="suite">Suites</option></select></label>
-        </aside>
+        </details>
         <div>
           <p className="muted">
             {list.length} room type(s) available for {guests} guest(s)
@@ -450,7 +451,7 @@ function Checkout({ q, user }) {
             <p className="muted">Pay the deposit online now to confirm your booking. The room is held for 15 minutes while you pay. The rest is paid at the front desk when you check out.</p>
           </fieldset>
           <div className="full"><h2>Cancellation &amp; refund policy</h2><PolicyText p={policies} /></div>
-          <label className="check full"><input type="checkbox" name="consent" required /> I agree to the processing of my personal data (<a href="#/offers" target="_blank" rel="noreferrer">privacy notice</a>)</label>
+          <label className="check full"><input type="checkbox" name="consent" required /><span className="consent-text">I agree to the processing of my personal data (<a href="#/offers" target="_blank" rel="noreferrer">privacy notice</a>) *</span></label>
           <div className="full"><Captcha onToken={setToken} resetKey={tries} /></div>
           {error && <p className="note bad-note full" role="alert">{error}</p>}
           <button className="btn primary" type="submit" disabled={saving}>{saving ? 'Creating booking…' : 'Continue to deposit payment'}</button>

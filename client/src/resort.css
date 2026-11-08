@@ -148,7 +148,9 @@
 /* One primary action as a button, the rest as quiet text links on one line */
 .cx .trip .end { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: .25rem 1.4rem; }
 .cx .trip .end > strong { flex-basis: 100%; text-align: right; font: 600 1.25rem var(--sans); color: var(--navy); }
-.cx .trip .end .btn:not(.primary) { min-height: 40px; padding: 0; border: 0; border-bottom: 1px solid transparent; background: none; color: var(--navy); }
+.cx .trip .end .btn:not(.primary) { min-height: 44px; padding: 0; border: 0; border-bottom: 1px solid transparent; background: none; color: var(--navy); text-transform: none; letter-spacing: 0; font-size: .92rem; font-weight: 600; }
+/* A destructive action never looks like the others. */
+.cx .trip .end .btn.danger { color: var(--red); } .cx .trip .end .btn.danger:hover { color: var(--red); border-bottom-color: var(--red); background: none; }
 .cx .trip .end .btn:not(.primary):hover { border-bottom-color: var(--gold); color: var(--gold-ink); }
 @media (min-width: 720px) { .cx .trip { grid-template-columns: 64px 1fr minmax(0, 46%); } }
 .cx .chip.on { background: var(--navy); border-color: var(--navy); }

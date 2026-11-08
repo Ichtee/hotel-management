@@ -83,7 +83,7 @@ textarea { font: inherit; min-height: 88px; padding: .55rem .7rem; }
 .track { height: 10px; background: var(--grey-bg); border-radius: 99px; overflow: hidden; } .fill { height: 100%; }
 .queue li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .75rem 0; border-bottom: 1px solid var(--line); }
 .queue small { display: block; color: var(--muted); }
-.s-available { background: #2e9e63; } .s-occupied { background: var(--navy-2); } .s-cleaning { background: #e0a030; } .s-maintenance { background: var(--red); }
+.s-available { background: #1f7a4c; } /* white text reaches 4.5:1 */ .s-occupied { background: var(--navy-2); } .s-cleaning { background: #e0a030; } .s-maintenance { background: var(--red); }
 .legend { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-bottom: 1rem; text-transform: capitalize; font-size: .9rem; }
 .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: .4rem; }
 .floor { margin-bottom: 1.5rem; }
@@ -235,7 +235,7 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; }
 .details dt { color: var(--muted); } .details dd { margin: 0; text-align: right; }
 .lines { display: grid; gap: .4rem; margin-top: .75rem; }
 .lines li { display: flex; justify-content: space-between; gap: .5rem 1rem; flex-wrap: wrap; padding-top: .4rem; border-top: 1px solid var(--line); font-size: .9rem; }
-.lines li span:first-child { text-transform: capitalize; }
+.lines li span:first-child { text-transform: none; } /* free text (notes, item names) must keep its own capitals */
 .empty { text-align: center; padding: 2.5rem 1rem; background: #fff; border: 1px dashed var(--line); border-radius: 14px; display: grid; gap: .75rem; justify-items: center; }
 .empty h2 { margin: 0; }
 .skel-card { height: 96px; border-radius: 14px; background: linear-gradient(90deg, var(--grey-bg) 25%, #f6f8fa 50%, var(--grey-bg) 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite linear; }
@@ -314,3 +314,49 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; }
 /* the resort header styles its lists as a row; the notification list stays a column */
 .cx .bell-pop ul, .bell-pop ul { display: block; }
 .cx .bell-pop li, .bell-pop li { display: block; width: 100%; }
+/* Collapsible filters (<details>): the summary is a full-width 44px target with an open/closed arrow. */
+details.filters > summary { display: flex; align-items: center; justify-content: space-between; min-height: 44px; cursor: pointer; list-style: none; }
+details.filters > summary::-webkit-details-marker { display: none; }
+details.filters > summary::after { content: "▾"; font-size: 1rem; color: var(--muted); transition: transform .2s; }
+details.filters[open] > summary::after { transform: rotate(180deg); }
+details.filters > label { display: block; margin-top: 1rem; }
+@media (prefers-reduced-motion: reduce) { details.filters > summary::after { transition: none; } }
+.check .consent-text { margin-left: 0; color: var(--text); font-size: .95rem; line-height: 1.4; }
+
+/* ---- Task screens (ui.jsx Modal): a task replaces the page content instead of floating over it ---- */
+#main.has-screen > :not(.screen) { display: none !important; }
+.screen { width: 100%; max-width: 920px; margin: 0 auto; padding-bottom: 2.5rem; }
+.screen-head { display: grid; justify-items: start; gap: .75rem; margin-bottom: 1.25rem; }
+.screen-head h1 { margin: 0; font-size: clamp(1.5rem, 2.4vw, 2rem); line-height: 1.2; outline: none; }
+.btn.back { min-height: 40px; padding: 0 .9rem; gap: .4rem; color: var(--muted); }
+.btn.back:hover { color: var(--navy); }
+.screen-body { background: var(--card, #fff); border: 1px solid var(--line); border-radius: 14px; padding: clamp(1rem, 2.5vw, 1.75rem); }
+.screen .form, .screen .form-grid { max-width: none; }
+.screen-body > p:first-child { margin-top: 0; }
+/* One place for the form buttons: bottom right, secondary first, primary last (the action that saves). */
+.modal-actions { display: flex; justify-content: flex-end; align-items: center; gap: .75rem; flex-wrap: wrap; margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line); }
+.modal-actions .btn { min-width: 120px; }
+@media (max-width: 600px) { .modal-actions { flex-direction: column-reverse; align-items: stretch; } .modal-actions .btn { width: 100%; } }
+.cx .screen { max-width: 960px; padding: 2.5rem 1rem 4rem; }
+.cx .screen-body { border-radius: 2px; background: var(--card); }
+
+/* ---- Production polish (UI review) ---- */
+/* `font: 1rem inherit` is invalid, so controls fell back to the browser's 13px: inherit the app font at 16px. */
+input, select, textarea { font: inherit; font-size: 1rem; }
+/* The page action stays top right however long the subtitle is; it moves under the title only on small screens. */
+.page-head { flex-wrap: nowrap; align-items: flex-start; }
+.page-head > div:first-child { flex: 1; min-width: 0; }
+.page-head .head-actions { flex-shrink: 0; }
+@media (max-width: 640px) { .page-head { flex-wrap: wrap; } }
+.table-wrap td:last-child:has(.btn) { white-space: nowrap; text-align: right; }
+.btn.sm.danger { background: #fff; }
+.nw { white-space: nowrap; }
+.pay-row { display: flex; justify-content: flex-end; }
+
+/* Printing an invoice (or any task screen) prints only the screen content, not the app shell. */
+@media print {
+  .side, .atop, .topbar, .site-foot, .skip, .scrim, .screen-head .btn.back, .modal-actions, .pay-row { display: none !important; }
+  body, .adm, .amain, .acontent, #main, .screen, .screen-body { background: #fff !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; max-width: none !important; }
+  .table-wrap { border: 1px solid #ccc; }
+}
+.form > .modal-actions, .form > p { grid-column: 1 / -1; }

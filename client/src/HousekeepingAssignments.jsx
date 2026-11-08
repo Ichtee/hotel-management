@@ -21,7 +21,7 @@ export default function HousekeepingAssignments() {
   return <>
     <PageHead title="Housekeeping assignments" sub="Assign responsibility by room or floor and shift. Open tasks are automatically reassigned when a plan changes." action="New assignment" onAction={() => setCreating(true)} />
     <Notice error={error || plans.error || options.error} />
-    {plans.loading || options.loading ? <p className="muted">Loading assignments...</p> : <DataTable cols={['Staff member', 'Shift', 'Responsibility', 'Effective period', '']} rows={(plans.data || []).map((plan) => [labelFor(plan.staffId), plan.shift, roomScope(plan), `${dateLabel(plan.effectiveFrom)} - ${dateLabel(plan.effectiveTo)}`, <button className="btn sm" onClick={() => revoke(plan)}>Revoke</button>])} />}
+    {plans.loading || options.loading ? <p className="muted">Loading assignments...</p> : <DataTable cols={['Staff member', 'Shift', 'Responsibility', 'Effective period', '']} rows={(plans.data || []).map((plan) => [labelFor(plan.staffId), plan.shift, roomScope(plan), `${dateLabel(plan.effectiveFrom)} - ${dateLabel(plan.effectiveTo)}`, <button className="btn sm danger" onClick={() => revoke(plan)}>Revoke</button>])} />}
     {!plans.loading && !plans.error && !(plans.data || []).length && <p className="muted center-msg">No active assignments. Create one so cleaning tasks can be assigned automatically.</p>}
     {creating && <CreateAssignment staff={staff} rooms={rooms} onClose={() => setCreating(false)} onSaved={() => { setCreating(false); plans.reload(); }} />}
   </>;

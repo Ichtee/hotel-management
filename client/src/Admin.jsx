@@ -246,13 +246,11 @@ function Bookings() {
       </div>
       <Notice error={live.error || notice?.error} ok={notice?.ok} />
       <DataTable
-        cols={['Code', 'Guest', 'Room', 'Check-in', 'Check-out', 'Total', 'Status', '']}
+        cols={['Booking', 'Guest', 'Stay', 'Total', 'Status', '']}
         rows={bookingsList.map((b) => [
-          b.bookingReference || b._id.slice(-8).toUpperCase(),
+          <span key="c" className="nw"><b>{b.bookingReference || b._id.slice(-8).toUpperCase()}</b><small className="muted" style={{ display: 'block' }}>{roomOf(b)}</small></span>,
           b.guestName || '—',
-          roomOf(b),
-          dateLabel(b.checkInDate),
-          dateLabel(b.checkOutDate),
+          <span key="s" className="nw">{dateLabel(b.checkInDate)} → {dateLabel(b.checkOutDate)}</span>,
           money(b.totalAmount),
           b.status,
           <RowActions key={b._id} actions={[
@@ -303,7 +301,7 @@ function CustomerAccounts() {
   return <><PageHead title="Customer accounts" sub="Search customers and manage the blacklist" />
     <form className="chips" onSubmit={(e) => e.preventDefault()}><input aria-label="Search customers" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Name, username or email" /><select aria-label="Customer status" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="suspended">Blacklisted</option></select></form>
     <Notice error={list.error} />
-    <DataTable cols={['Name', 'Username', 'Email', 'Phone', 'Status', '']} rows={(list.data || []).map((u) => [u.customerProfile?.fullName || '—', u.username, u.email, u.phone || '—', u.status, <button key={u._id} className="btn sm" onClick={() => setSelected(u)}>{u.status === 'active' ? 'Blacklist' : 'Restore'}</button>])} />
+    <DataTable cols={['Name', 'Username', 'Email', 'Phone', 'Status', '']} rows={(list.data || []).map((u) => [u.customerProfile?.fullName || '—', u.username, u.email, u.phone || '—', u.status, <button key={u._id} className={`btn sm${u.status === 'active' ? ' danger' : ''}`} onClick={() => setSelected(u)}>{u.status === 'active' ? 'Blacklist' : 'Restore'}</button>])} />
     {selected && <CustomerStatus customer={selected} onClose={() => { setSelected(null); list.reload(); }} />}
   </>;
 }
@@ -332,7 +330,7 @@ function SettleBalance({ booking, balance, onPaid }) {
     {method === 'cash' && received !== '' && <p className="full" role="status">{change >= 0 ? <>Change to give back: <strong>{money(change)}</strong></> : <>Still short by <strong>{money(-change)}</strong></>}</p>}
     {method !== 'cash' && <Field label="Transaction reference" error={error?.fields?.transactionRef}><input name="transactionRef" required maxLength={100} /></Field>}
     <div className="full"><Notice error={error} /></div>
-    <div className="full modal-actions"><button className="btn" disabled={saving}>{saving ? 'Recording…' : 'Record payment'}</button></div>
+    <div className="full pay-row"><button className="btn primary" disabled={saving}>{saving ? 'Recording…' : 'Record payment'}</button></div>
   </form>;
 }
 
@@ -369,7 +367,7 @@ function CheckOutBooking({ booking, onClose }) {
     <form className="form" onSubmit={submit}>
       {!inspected && <label className="check full"><input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} /> The guest cannot wait: skip the inspection (closed as "Skipped at check-out"; damage found later is handled with the guest)</label>}
       <div className="full"><Notice error={error} /></div>
-      <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || bill.balance > 0 || bill.proposedPenalties > 0 || (!inspected && !skip)} title={bill.balance > 0 ? 'Record the payments first' : undefined}>{saving ? 'Checking out…' : 'Complete check-out'}</button></div>
+      <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || bill.balance > 0 || bill.proposedPenalties > 0 || (!inspected && !skip)} title={bill.balance > 0 ? 'Record the payments first' : undefined}>{saving ? 'Checking out…' : 'Complete check-out'}</button></div>
     </form>
   </Modal>;
 }
@@ -383,7 +381,7 @@ function Penalties({ booking, onClose }) {
   const confirm = (p) => { const value = window.prompt(`Confirmed amount (at most ${p.proposedAmount})`, p.proposedAmount); if (value !== null) act(`/frontdesk/penalties/${p._id}`, 'PATCH', { action: 'confirm', amount: Number(value) }); };
   const waive = (p) => { const reason = window.prompt('Reason for waiving this penalty'); if (reason) act(`/frontdesk/penalties/${p._id}`, 'PATCH', { action: 'waive', reason }); };
   return <Modal title={`Penalties · ${booking.bookingReference}`} onClose={onClose}>
-    {list.loading ? <p className="muted">Loading penalties…</p> : <DataTable cols={['Item', 'Proposed', 'Charged', 'Status', '']} rows={(list.data || []).map((p) => [p.itemName + (p.afterCheckout ? ' (after check-out)' : ''), money(p.proposedAmount), p.amount == null ? '—' : money(p.amount), p.status, ['proposed', 'confirmed'].includes(p.status) ? <span className="row-actions">{p.status === 'proposed' && <button className="btn sm" disabled={saving} onClick={() => confirm(p)}>Confirm</button>}<button className="btn sm" disabled={saving} onClick={() => waive(p)}>Waive</button></span> : p.waivedReason || ''])} />}
+    {list.loading ? <p className="muted">Loading penalties…</p> : <DataTable cols={['Item', 'Proposed', 'Charged', 'Status', '']} rows={(list.data || []).map((p) => [p.itemName + (p.afterCheckout ? ' (after check-out)' : ''), money(p.proposedAmount), p.amount == null ? '—' : money(p.amount), p.status, ['proposed', 'confirmed'].includes(p.status) ? <span className="row-actions">{p.status === 'proposed' && <button className="btn sm" disabled={saving} onClick={() => confirm(p)}>Confirm</button>}<button className="btn sm danger" disabled={saving} onClick={() => waive(p)}>Waive</button></span> : p.waivedReason || ''])} />}
     {after && bill.data && bill.data.totalAmount - (bill.data.paidAmount || 0) > 0 && <>
       <p><strong>Guest owes {money(bill.data.totalAmount - (bill.data.paidAmount || 0))} after check-out.</strong> Record the payment when it arrives; a supplementary invoice is issued.</p>
       <SettleBalance booking={booking} balance={bill.data.totalAmount - (bill.data.paidAmount || 0)} onPaid={() => { bill.reload(); list.reload(); }} />
@@ -407,8 +405,8 @@ function AddService({ booking, onClose }) {
     <Field label="Service"><select name="serviceId" required disabled={services.loading}><option value="">Select a service</option>{services.data?.map((s) => <option key={s._id} value={s._id}>{s.name} · {money(s.unitPrice)}</option>)}</select></Field>
     <Field label="Quantity"><input name="quantity" type="number" min="1" max="100" defaultValue="1" required /></Field>
     <div className="full"><Notice error={services.error || detail.error || error} /></div>
-    <div className="full">{detail.data?.services?.length > 0 && <DataTable cols={['Recorded service', 'Amount', 'Status', '']} rows={detail.data.services.map((line) => [line.name, money(line.amount), line.status || 'active', line.status !== 'voided' ? <button type="button" className="btn sm" onClick={() => voidLine(line)}>Void</button> : ''])} />}</div>
-    <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || services.loading}>{saving ? 'Adding…' : 'Add service'}</button></div>
+    <div className="full">{detail.data?.services?.length > 0 && <DataTable cols={['Recorded service', 'Amount', 'Status', '']} rows={detail.data.services.map((line) => [line.name, money(line.amount), line.status || 'active', line.status !== 'voided' ? <button type="button" className="btn sm danger" onClick={() => voidLine(line)}>Void</button> : ''])} />}</div>
+    <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || services.loading}>{saving ? 'Adding…' : 'Add service'}</button></div>
   </form></Modal>;
 }
 
@@ -431,7 +429,7 @@ function ChangeRoom({ booking, onClose }) {
     <Field label={byType ? 'Available room type' : 'Available room'}><select value={pick} onChange={(e) => setPick(e.target.value)} required disabled={options.loading}><option value="">{byType ? 'Select a room type' : 'Select a room'}</option>{options.data?.map((o) => <option key={o._id} value={o._id}>{byType ? o.roomType.name : `Room ${o.roomNumber} · ${o.roomType?.name}`}{diff(o)}</option>)}</select></Field>
     {chosen?.lower && <label className="check full"><input type="checkbox" checked={agrees} onChange={(e) => setAgrees(e.target.checked)} required /> The guest agrees to the lower-priced room type</label>}
     {byType && booking.couponCode && <label className="check full"><input type="checkbox" checked={dropCoupon} onChange={(e) => setDropCoupon(e.target.checked)} /> If the coupon {booking.couponCode} no longer applies, the guest agrees to continue without the discount</label>}
-    <div className="full"><Notice error={options.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || options.loading || !options.data?.length}>{saving ? 'Saving…' : 'Confirm change'}</button></div>
+    <div className="full"><Notice error={options.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || options.loading || !options.data?.length}>{saving ? 'Saving…' : 'Confirm change'}</button></div>
   </form></Modal>;
 }
 
@@ -445,7 +443,7 @@ function CheckInBooking({ booking, onClose }) {
     {pre && <p className="full note">Pre-filled from the guest's check-in request: verify it against the original ID document.</p>}
     <Field label="Available room"><select name="roomId" required><option value="">Select a room</option>{rooms.data?.map((r) => <option key={r._id} value={r._id}>Room {r.roomNumber} · Floor {r.floor}</option>)}</select></Field>
     <Field label="Number of guests"><input name="guestCount" type="number" min="1" defaultValue={pre?.guestCount || booking.rooms?.[0]?.guestCount || 1} required /></Field><Field label="ID / passport number"><input name="idDocumentNo" defaultValue={pre?.idDocumentNo || ''} required /></Field>
-    <div className="full"><Notice error={rooms.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || !rooms.data?.length}>{saving ? 'Checking in…' : 'Confirm check-in'}</button></div>
+    <div className="full"><Notice error={rooms.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || !rooms.data?.length}>{saving ? 'Checking in…' : 'Confirm check-in'}</button></div>
   </form></Modal>;
 }
 
@@ -463,7 +461,7 @@ function CancelBooking({ booking, onClose }) {
     <p className="full muted">Check that the ID document matches the name of the person who made the booking. For a request by phone use Cancellations (code sent by e-mail).</p>
     <label className="check full"><input type="checkbox" checked={hotel} onChange={(e) => setHotel(e.target.checked)} /> The hotel cannot provide the room (100% refund, approved at once)</label>
     <Field label={hotel ? 'Reason (optional)' : 'Cancellation reason'}><input name="reason" required={!hotel} maxLength={500} /></Field>
-    <div className="full"><Notice error={error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Confirm cancellation'}</button></div>
+    <div className="full"><Notice error={error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Confirm cancellation'}</button></div>
   </form></Modal>;
 }
 
@@ -482,7 +480,7 @@ function EditBooking({ booking, onClose }) {
 }
 
 function WalkInBooking({ onClose }) {
-  const types = useApi('/room-types?limit=100');
+  const types = useApi('/public/room-types'); // active room types; /room-types is the Hotel Manager's catalogue
   const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
   const submit = async (e) => {
     e.preventDefault(); setSaving(true); setError(null);

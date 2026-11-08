@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from './api/client.js';
 
 export const Badge = ({ v, pre }) => <span className={`badge b-${v}`}>{pre}{String(v).replace('_', ' ')}</span>;
@@ -16,18 +17,45 @@ export const Field = ({ label, error, children }) => (
   <label className={error ? 'has-err' : ''}>{label}{children}{error && <small className="err">{error}</small>}</label>
 );
 
-// Native <dialog>: focus trap, Esc and inert background come for free.
+// A task opens as its own screen in the page area (no overlay): the page behind is hidden, the header shows "Back",
+// and the browser Back button returns to the list. One history entry is pushed per screen and removed when it closes.
+let screens = 0;
 export function Modal({ title, onClose, children }) {
-  const ref = useRef(null);
-  useEffect(() => { ref.current?.showModal(); }, []);
-  return (
-    <dialog ref={ref} className="modal" onClose={onClose} onClick={(e) => e.target === ref.current && onClose()}>
-      <div className="modal-card">
-        <div className="phead"><h2>{title}</h2><button className="ibtn" aria-label="Close" onClick={onClose}>✕</button></div>
-        {children}
+  const [id] = useState(() => ++screens);
+  const close = useRef(onClose); close.current = onClose;
+  const host = typeof document !== 'undefined' ? document.getElementById('main') : null;
+  const heading = useRef(null);
+  const alive = useRef(false); const pushed = useRef(false);
+  useEffect(() => {
+    alive.current = true;
+    const scrollY = window.scrollY;
+    host?.classList.add('has-screen'); window.scrollTo(0, 0); heading.current?.focus();
+    if (!pushed.current) { history.pushState({ screen: id }, ''); pushed.current = true; }
+    const back = () => close.current();
+    const esc = (e) => { if (e.key === 'Escape') close.current(); };
+    window.addEventListener('popstate', back); window.addEventListener('keydown', esc);
+    return () => {
+      alive.current = false;
+      window.removeEventListener('popstate', back); window.removeEventListener('keydown', esc);
+      // Deferred: React strict mode unmounts and remounts once in development; only a real close drops our history entry.
+      setTimeout(() => {
+        if (alive.current) return;
+        if (!host?.querySelector('.screen')) host?.classList.remove('has-screen');
+        if (history.state?.screen === id) history.back(); // closed by a button, not by Back
+        window.scrollTo(0, scrollY);
+      }, 0);
+    };
+  }, []);
+  const screen = (
+    <section className="screen" aria-labelledby={`screen-${id}`}>
+      <div className="screen-head">
+        <button type="button" className="btn back" onClick={onClose}><span aria-hidden="true">←</span> Back</button>
+        <h1 id={`screen-${id}`} tabIndex={-1} ref={heading}>{title}</h1>
       </div>
-    </dialog>
+      <div className="screen-body">{children}</div>
+    </section>
   );
+  return host ? createPortal(screen, host) : screen;
 }
 
 // Fetches a list endpoint and reloads when the path or params change.
@@ -46,13 +74,15 @@ export function useApi(path, enabled = true) {
 export function DataTable({ cols, rows }) {
   const words = /^(confirmed|cancellation_requested|checked_in|checked_out|cancelled|pending|assigned|active|inactive|paid|completed|skipped|done|in_progress|open|resolved|high|medium|low|normal|urgent|published|suspended|deleted|approved|rejected|refunded|expired|no_show|unpaid|deposit_paid|fully_paid)$/;
   const figures = /^[\d\s.,:/₫$%+\-–→]+$/; // dates, times and amounts must not wrap
+  // "30 Jan 2027" and codes such as BK-MW7Q-10E2 must not break over two lines either
+  const tight = (c) => figures.test(c) || /^\d{1,2} [A-Za-z]{3,4} \d{4}$/.test(c) || /^[A-Z0-9]+(-[A-Z0-9]+)*$/.test(c);
   return (
     <div className="table-wrap">
       <table>
         <thead><tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i}>{r.map((c, j) => <td key={j} className={typeof c === 'string' && figures.test(c) ? 'nw' : undefined}>{typeof c === 'string' && words.test(c) ? <Badge v={c} /> : c}</td>)}</tr>
+            <tr key={i}>{r.map((c, j) => <td key={j} className={typeof c === 'string' && tight(c) ? 'nw' : undefined}>{typeof c === 'string' && words.test(c) ? <Badge v={c} /> : c}</td>)}</tr>
           ))}
         </tbody>
       </table>

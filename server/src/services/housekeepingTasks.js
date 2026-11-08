@@ -74,13 +74,14 @@ async function createTaskInSession(input, session, events, now) {
 
 // Điểm tích hợp cho module check-out, đổi phòng, kiểm tra và yêu cầu vệ sinh.
 async function createCleaningTask(input, { now = new Date() } = {}) {
-  v.keys(input, ["roomId", "bookingId", "type", "requestContent", "priority", "preferredTime", "requestedBy", "assignTo"]);
+  v.keys(input, ["roomId", "bookingId", "type", "requestContent", "priority", "preferredTime", "requestedBy", "assignTo", "inspectionKey"]);
   const data = { roomId: v.id(String(input.roomId), "roomId"), type: v.choice(input.type, "type", ["turnover", "ad_hoc", "inspection"]) };
   if (input.bookingId !== undefined) data.bookingId = v.id(String(input.bookingId), "bookingId");
   if (input.requestContent !== undefined) data.requestContent = v.text(input.requestContent, "requestContent", 1, 1000);
   if (input.priority !== undefined) data.priority = v.choice(input.priority, "priority", ["normal", "urgent"]);
   if (input.preferredTime !== undefined) data.preferredTime = input.preferredTime;
   if (input.requestedBy !== undefined) data.requestedBy = input.requestedBy;
+  if (input.inspectionKey !== undefined) data.inspectionKey = String(input.inspectionKey); // unique: one inspection per stay and room
   const result = await hotelTransaction(async (session) => {
     const events = [];
     if (data.bookingId && !await Booking.exists({ _id: data.bookingId, "rooms.roomId": data.roomId }).session(session))

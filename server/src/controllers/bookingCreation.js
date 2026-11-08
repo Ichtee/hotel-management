@@ -358,17 +358,24 @@ async function voidService(req, res) {
 // BR-44 / BR-47: after the standard check-out time of the check-out date the late check-out fee is posted, after 18:00 one
 // extra night at the rate of that night instead; once per stay, without changing the check-out date. Leaving early costs
 // nothing extra (BR-39).
-async function postLateCharge(booking, now = new Date()) {
-  if (booking.feeLines.some((l) => l.type === "late_check_out" || l.type === "extra_night")) return 0;
+// The charge due now, if any (pure: nothing is written).
+async function lateCharge(booking, now = new Date()) {
+  if (booking.feeLines.some((l) => l.type === "late_check_out" || l.type === "extra_night")) return null;
   const policy = await currentCancellationPolicy();
-  if (now <= at(booking.checkOutDate, policy?.checkOutTime || "12:00")) return 0;
+  if (now <= at(booking.checkOutDate, policy?.checkOutTime || "12:00")) return null;
   const extraNight = now > at(booking.checkOutDate, "18:00");
   const amount = extraNight ? priceAt(await RoomType.findById(booking.rooms[0].roomTypeId), booking.checkOutDate) : policy?.lateCheckOutFee || 0;
-  if (!amount) return 0;
-  booking.feeLines.push({ type: extraNight ? "extra_night" : "late_check_out", amount, postedAt: now });
-  booking.feeAmount += amount; booking.totalAmount += amount;
-  booking.events.push({ actorId: booking.checkedInBy || booking.createdBy, type: "modified", note: `${extraNight ? "Extra night" : "Late check-out fee"} posted: ${amount}` });
-  return amount;
+  return amount ? { type: extraNight ? "extra_night" : "late_check_out", amount, postedAt: now } : null;
+}
+// One atomic update, so two parallel calls (a double click, React strict mode) post the charge once; the caller re-reads the booking.
+async function postLateCharge(booking, now = new Date()) {
+  const line = await lateCharge(booking, now);
+  if (!line) return 0;
+  const done = await Booking.updateOne(
+    { _id: booking._id, "feeLines.type": { $nin: ["late_check_out", "extra_night"] } },
+    { $push: { feeLines: line }, $inc: { feeAmount: line.amount, totalAmount: line.amount } },
+  );
+  return done.modifiedCount ? line.amount : 0;
 }
 async function checkOutBill(booking) {
   const [paid, task, proposed] = await Promise.all([
@@ -387,18 +394,22 @@ async function startCheckOut(req, res) {
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   if (booking.status !== "checked_in") throw new v.HttpError(409, "Only a checked-in booking can be checked out.");
-  if (!(await Task.exists({ bookingId: booking._id, type: "inspection" })) && booking.rooms[0].roomId)
-    await createCleaningTask({ roomId: String(booking.rooms[0].roomId), bookingId: String(booking._id), type: "inspection", requestContent: "Inspect the room at check-out: minibar, equipment, linen, keys." });
-  if (await postLateCharge(booking)) await booking.save();
-  res.json({ data: await checkOutBill(booking) });
+  if (!(await Task.exists({ bookingId: booking._id, type: "inspection" })) && booking.rooms[0].roomId) {
+    // The same key as the scheduler's, so a parallel call (or the 30-minute job) can never add a second inspection.
+    try { await createCleaningTask({ roomId: String(booking.rooms[0].roomId), bookingId: String(booking._id), type: "inspection", inspectionKey: `${booking.id}:${booking.rooms[0].roomId}`, requestContent: "Inspect the room at check-out: minibar, equipment, linen, keys." }); }
+    catch (error) { if (error.code !== 11000) throw error; }
+  }
+  await postLateCharge(booking);
+  res.json({ data: await checkOutBill(await Booking.findById(booking._id)) });
 }
 // UC20 steps 5-7: only with the whole balance paid (UC11), the reported damage decided and the inspection done or skipped (BR-20).
 async function checkOut(req, res) {
   v.keys(req.body, ["skipInspection"]);
-  const booking = await Booking.findById(v.id(req.params.id));
+  let booking = await Booking.findById(v.id(req.params.id));
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   if (booking.status !== "checked_in") throw new v.HttpError(409, "Only a checked-in booking can be checked out.");
-  if (await postLateCharge(booking)) await booking.save();
+  await postLateCharge(booking);
+  booking = await Booking.findById(booking._id); // the charge was written atomically
   if (await Penalty.exists({ bookingId: booking._id, status: "proposed" })) throw new v.HttpError(409, "Confirm or waive the damage / loss items reported by Housekeeping first.");
   const balance = Math.max(0, booking.totalAmount - (await paidAmount(booking._id)));
   if (balance) throw new v.HttpError(409, `Check-out cannot be completed while ${balance.toLocaleString("en-US")} VND is unpaid. Record the payment first.`);
@@ -457,4 +468,4 @@ async function generateInvoice(req, res) {
   if (!booking || booking.status !== "checked_out") throw new v.HttpError(409, "An invoice is generated only after check-out.");
   res.status(201).json({ data: await issueInvoice(booking, req.user._id) });
 }
-module.exports = { create, roomTypes, createWalkIn, modifyWalkIn, modifyOwn, availableRooms, checkIn, changeRoomOptions, changeRoom, services, addService, voidService, startCheckOut, checkOut, generateInvoice, postLateCharge };
+module.exports = { create, roomTypes, createWalkIn, modifyWalkIn, modifyOwn, availableRooms, checkIn, changeRoomOptions, changeRoom, services, addService, voidService, startCheckOut, checkOut, generateInvoice, lateCharge };

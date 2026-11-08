@@ -24,7 +24,7 @@ export function Catalog() {
       {list.loading ? <p className="muted">Loading…</p> : !list.data?.length ? <p className="empty">No entries yet.</p> : (
         <DataTable cols={['Name', tab === 'services' ? 'Unit price' : 'Compensation price', 'Status', '']} rows={list.data.map((e) => [
           e.name, money(e.price), e.isActive ? 'active' : 'inactive',
-          <span key="a" style={{ display: 'flex', gap: 6 }}><button className="btn sm" onClick={() => setEdit(e)}>Edit</button><button className="btn sm" onClick={() => toggle(e)}>{e.isActive ? 'Deactivate' : 'Reactivate'}</button></span>,
+          <span key="a" className="row-actions"><button className="btn sm" onClick={() => setEdit(e)}>Edit</button><button className={`btn sm${e.isActive ? ' danger' : ''}`} onClick={() => toggle(e)}>{e.isActive ? 'Deactivate' : 'Reactivate'}</button></span>,
         ])} />
       )}
       <p className="muted" style={{ marginTop: '.75rem' }}>An entry already used on a booking keeps its recorded amount; deactivating only hides it from new bills.</p>
@@ -153,7 +153,7 @@ export function AuditLog() {
   return (
     <>
       <PageHead title="Audit log" sub="Sensitive operations recorded by the system. Read-only." />
-      <form className="filters" onSubmit={filter} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end', marginBottom: '1rem' }}>
+      <form className="filters-row" onSubmit={filter}>
         <Field label="Actor (name or e-mail)"><input name="actor" /></Field>
         <Field label="Action"><input name="action" placeholder="e.g. refund" /></Field>
         <Field label="Target"><input name="targetType" placeholder="e.g. booking" /></Field>
@@ -165,7 +165,7 @@ export function AuditLog() {
       {list.loading ? <p className="muted">Loading…</p> : !list.data?.length ? <p className="empty">No records match.</p> : (
         <DataTable cols={['Time', 'Actor', 'Action', 'Target', 'Detail']} rows={list.data.map((a) => [
           new Date(a.createdAt).toLocaleString('en-GB'), who(a), a.action, `${a.targetType}${a.targetId ? ` · …${String(a.targetId).slice(-6)}` : ''}`,
-          <small key="d" className="muted" style={{ display: 'block', maxWidth: 360, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.detail ? JSON.stringify(a.detail) : ''}>{a.detail ? JSON.stringify(a.detail) : '—'}</small>,
+          <small key="d" className="muted" style={{ display: 'block', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.detail ? JSON.stringify(a.detail) : ''}>{a.detail ? JSON.stringify(a.detail) : '—'}</small>,
         ])} />
       )}
       {total > 50 && <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: '.75rem' }}>

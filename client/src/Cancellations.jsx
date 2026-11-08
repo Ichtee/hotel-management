@@ -26,9 +26,11 @@ export function Cancellations() {
       <Notice error={err} ok={msg} />
       <Loading s={list} empty="No cancellation requests are waiting." />
       {list.data?.length > 0 && (
-        <DataTable cols={['Booking', 'Booker', 'Stay', 'Requested', 'Channel', 'Reason', 'Deposit paid', 'Refund', '']} rows={list.data.map((b) => [
-          b.bookingReference, <Booker key="p" p={b.booker} />, `${dateLabel(b.checkInDate)} – ${dateLabel(b.checkOutDate)}`, dateLabel(b.cancellation.requestedAt),
-          b.cancellation.channel === 'online' ? 'Online' : `Front desk (${b.cancellation.verifyMethod === 'otp' ? 'OTP' : 'ID'})`, b.cancellation.reason || '—',
+        <DataTable cols={['Booking', 'Booker', 'Requested', 'Reason', 'Deposit paid', 'Refund', '']} rows={list.data.map((b) => [
+          <span key="r" className="nw"><b>{b.bookingReference}</b><small className="muted" style={{ display: 'block' }}>{dateLabel(b.checkInDate)} – {dateLabel(b.checkOutDate)}</small></span>,
+          <Booker key="p" p={b.booker} />,
+          <span key="q" className="nw">{dateLabel(b.cancellation.requestedAt)}<small className="muted" style={{ display: 'block' }}>{b.cancellation.channel === 'online' ? 'Online' : `Front desk (${b.cancellation.verifyMethod === 'otp' ? 'OTP' : 'ID'})`}</small></span>,
+          b.cancellation.reason || '—',
           money(b.depositPaid), money(b.cancellation.refundableAmount),
           <span key="a" className="row-actions"><button className="btn sm primary" onClick={() => approve(b)}>Approve</button><button className="btn sm" onClick={() => withdraw(b)}>Withdraw</button></span>,
         ])} />

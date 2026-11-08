@@ -12,6 +12,13 @@ export default function Invoices() {
 function InvoiceDetail({ id, onClose }) {
   const invoice = useApi(`/frontdesk/invoices/${id}`); const i = invoice.data; const b = i?.bookingId;
   return <Modal title="Invoice" onClose={onClose}><div id="invoice-print">
-    {invoice.loading ? <p>Loading invoice...</p> : invoice.error ? <Notice error={invoice.error} /> : <><h3>{i.invoiceNumber}</h3><p>{b?.guestName || 'Guest'} · {b?.guestPhone || ''}</p><p className="muted">Stay: {dateLabel(b?.checkInDate)} - {dateLabel(b?.checkOutDate)}</p><DataTable cols={['Item', 'Amount']} rows={i.kind === 'supplementary' ? [...(i.lines || []).map((l) => [`Damage / loss: ${l.name}`, money(l.amount)]), ['Total paid', money(i.totalAmount)]] : [["Room charges", money(b?.roomAmount)], ["Additional services", money(b?.serviceAmount)], ...(b?.feeAmount ? [["Late check-out fee", money(b.feeAmount)]] : []), ...(b?.services || []).map((s) => [`${s.name} x${s.quantity}`, money(s.amount)]), ["Total paid", money(i.totalAmount)]]} /></>}
+    {invoice.loading ? <p>Loading invoice...</p> : invoice.error ? <Notice error={invoice.error} /> : <>
+      {i.hotelName && <p><b>{i.hotelName}</b>{i.hotelAddress ? <><br /><span className="muted">{i.hotelAddress}</span></> : null}</p>}
+      <h3>{i.invoiceNumber}{i.kind === 'supplementary' ? ' (supplementary)' : ''}</h3><p>{b?.guestName || 'Guest'} · {b?.guestPhone || ''}</p><p className="muted">Stay: {dateLabel(b?.checkInDate)} - {dateLabel(b?.checkOutDate)} · issued {dateLabel(i.issuedAt)}</p>
+      {/* BR-21: the bill lines were copied when the invoice was generated; older invoices fall back to the booking totals */}
+      <DataTable cols={['Item', 'Amount']} rows={i.lines?.length
+        ? [...i.lines.map((l) => [i.kind === 'supplementary' ? `Damage / loss: ${l.name}` : l.name.replace(/Night of (\d{4}-\d{2}-\d{2})/, (_, d) => `Night of ${dateLabel(d)}`), money(l.amount)]), ['Total', money(i.totalAmount)], ...(i.kind === 'supplementary' ? [] : [['Paid (deposit and front desk)', money(i.paidAmount ?? i.totalAmount)], ['Balance', money(i.balance ?? 0)]])]
+        : [['Room charges', money(b?.roomAmount)], ['Additional services', money(b?.serviceAmount)], ...(b?.feeAmount ? [['Fees', money(b.feeAmount)]] : []), ...(b?.services || []).map((s) => [`${s.name} x${s.quantity}`, money(s.amount)]), ['Total paid', money(i.totalAmount)]]} />
+    </>}
   </div><div className="modal-actions"><button className="btn" onClick={onClose}>Close</button><button className="btn primary" onClick={() => window.print()} disabled={!i}>Print</button></div></Modal>;
 }

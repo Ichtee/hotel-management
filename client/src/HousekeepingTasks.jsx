@@ -30,7 +30,7 @@ export default function HousekeepingTasks() {
         <DataTable
           cols={['Room', 'Task', 'Priority', 'Scheduled', 'Status', '']}
           rows={(tasks.data || []).map((task) => [
-            task.roomId ? `Room ${task.roomId.roomNumber} - Floor ${task.roomId.floor}` : 'Room unavailable',
+            task.roomId ? <span className="nw"><b>Room {task.roomId.roomNumber}</b><small className="muted" style={{ display: 'block' }}>Floor {task.roomId.floor}</small></span> : 'Room unavailable',
             task.preferredTime ? `${taskName(task)} · at ${new Date(task.preferredTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' })}` : taskName(task),
             <Badge v={task.priority} />,
             dateLabel(task.scheduledDate || task.createdAt),

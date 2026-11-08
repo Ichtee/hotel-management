@@ -171,7 +171,7 @@ export function Users() {
           u.customerProfile?.fullName || '—', u.username, u.email, roleName(u.role), u.status,
           <span className="row-actions" key={u._id}>
             <button className="btn sm" onClick={() => setEdit(u)}>Edit</button>
-            {u.role !== 'admin' && <button className="btn sm" onClick={() => toggle(u)}>{u.status === 'active' ? 'Suspend' : 'Activate'}</button>}
+            {u.role !== 'admin' && <button className={`btn sm${u.status === 'active' ? ' danger' : ''}`} onClick={() => toggle(u)}>{u.status === 'active' ? 'Suspend' : 'Activate'}</button>}
           </span>
         ])} />
       )}
@@ -241,7 +241,7 @@ export function Roles() {
           r.name + (r.isSystem ? ' (system)' : ''), r.key, r.scope, r.permissions.length ? r.permissions.join(', ') : '—', r.isActive ? 'active' : 'inactive',
           <span className="row-actions" key={r._id}>
             <button className="btn sm" onClick={() => setEdit(r)}>Edit</button>
-            {!r.isSystem && <button className="btn sm" onClick={() => remove(r)}>Delete</button>}
+            {!r.isSystem && <button className="btn sm danger" onClick={() => remove(r)}>Delete</button>}
           </span>
         ])} />
       )}
@@ -307,8 +307,8 @@ export function Coupons() {
           `${c.usageCount} / ${c.usageLimit}`, `${dateLabel(c.startDate)} – ${dateLabel(c.endDate)}`, c.isActive ? 'active' : 'inactive',
           <span className="row-actions" key={c._id}>
             <button className="btn sm" onClick={() => setEdit(c)}>Edit</button>
-            <button className="btn sm" onClick={() => act(() => api(`/promotions/${c._id}`, { method: 'PATCH', body: { isActive: !c.isActive } }))}>{c.isActive ? 'Disable' : 'Enable'}</button>
-            <button className="btn sm" onClick={() => confirm(`Delete ${c.code}?`) && act(() => api(`/promotions/${c._id}`, { method: 'DELETE' }))}>Delete</button>
+            <button className={`btn sm${c.isActive ? ' danger' : ''}`} onClick={() => act(() => api(`/promotions/${c._id}`, { method: 'PATCH', body: { isActive: !c.isActive } }))}>{c.isActive ? 'Disable' : 'Enable'}</button>
+            <button className="btn sm danger" onClick={() => confirm(`Delete ${c.code}?`) && act(() => api(`/promotions/${c._id}`, { method: 'DELETE' }))}>Delete</button>
           </span>
         ])} />
       )}
@@ -407,71 +407,24 @@ export function Occupancy() {
       <Loading s={rep} />
       {d && (
         <>
+          {/* BR-27: occupied room-nights / available room-nights; inactive rooms and rooms in Maintenance are not available */}
           <div className="kpis">
-            <div className="kpi">
-              <p>Average Occupancy</p>
-              <strong style={{ color: '#059669' }}>{d.totals.averageOccupancyRate}%</strong>
-              <small>{d.from} → {d.to}</small>
-            </div>
-            <div className="kpi">
-              <p>Occupied Room-Nights</p>
-              <strong>{d.totals.totalOccupiedNights}</strong>
-              <small>Sold guest nights</small>
-            </div>
-            <div className="kpi">
-              <p>Sellable Room-Nights</p>
-              <strong>{d.totals.totalSellableNights}</strong>
-              <small>Available capacity</small>
-            </div>
-            <div className="kpi">
-              <p>Maintenance Nights</p>
-              <strong style={{ color: '#dc2626' }}>{d.totals.totalMaintenanceNights}</strong>
-              <small>Blocked from sale</small>
-            </div>
+            <div className="kpi"><p>Occupancy rate</p><strong>{pctFmt(d.totals.rate)}</strong><small className="muted">{d.from} → {d.to}</small></div>
+            <div className="kpi"><p>Occupied room-nights</p><strong>{d.totals.occupiedRoomNights}</strong><small className="muted">Checked-in and checked-out stays</small></div>
+            <div className="kpi"><p>Available room-nights</p><strong>{d.totals.availableRoomNights}</strong><small className="muted">Active rooms not in Maintenance</small></div>
           </div>
 
           <section className="panel">
-            <div className="phead"><h2>Daily Occupancy Rate (%)</h2></div>
+            <div className="phead"><h2>Daily occupancy rate</h2></div>
             {d.series.length > 1 ? (
-              <LineChart
-                labels={labels}
-                cur={d.series.map((r) => r.occupancyRate)}
-                format={pctFmt}
-                summary={`Daily occupancy from ${d.from} to ${d.to}, average ${d.totals.averageOccupancyRate}%`}
-              />
+              <LineChart labels={labels} cur={d.series.map((r) => r.rate)} format={pctFmt} summary={`Daily occupancy from ${d.from} to ${d.to}, average ${pctFmt(d.totals.rate)}`} />
             ) : (
               <p className="muted">Choose a longer range to see an occupancy trend.</p>
             )}
           </section>
 
-          {d.roomTypeBreakdown?.length > 0 && (
-            <>
-              <h2 className="mt">Room Type Breakdown</h2>
-              <DataTable
-                cols={['Room Type', 'Total Rooms', 'Sellable Nights', 'Occupied Nights', 'Occupancy Rate']}
-                rows={d.roomTypeBreakdown.map((rt) => [
-                  rt.roomType,
-                  rt.totalRooms,
-                  rt.sellableNights,
-                  rt.occupiedNights,
-                  <strong key={rt.roomType}>{rt.occupancyRate}%</strong>
-                ])}
-              />
-            </>
-          )}
-
-          <h2 className="mt">Daily Details</h2>
-          <DataTable
-            cols={['Date', 'Physical Rooms', 'Maintenance', 'Sellable', 'Occupied', 'Occupancy Rate']}
-            rows={d.series.map((r) => [
-              r.date,
-              r.totalRooms,
-              r.maintenanceRooms > 0 ? <span style={{ color: '#dc2626' }}>{r.maintenanceRooms}</span> : '0',
-              r.sellableRooms,
-              r.occupiedRooms,
-              <strong key={r.date}>{r.occupancyRate}%</strong>
-            ])}
-          />
+          <h2 className="mt">Daily details</h2>
+          <DataTable cols={['Date', 'Available room-nights', 'Occupied room-nights', 'Occupancy rate']} rows={d.series.map((r) => [r.date, String(r.availableRoomNights), String(r.occupiedRoomNights), pctFmt(r.rate)])} />
         </>
       )}
     </>

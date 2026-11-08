@@ -1418,18 +1418,20 @@ test("SRS v2.5 UC20 / BR-47 / BR-22: check-out needs the balance paid and the in
   await Room.updateOne({ _id: Std.rooms[1]._id }, { status: "occupied" });
   const late = await srsBooking(me._id, Std, { checkInDate: vnDay(-3), checkOutDate: vnDay(-1), roomAmount: 2000, totalAmount: 2000, status: "checked_in" });
   await Booking.updateOne({ _id: late._id }, { "rooms.0.roomId": Std.rooms[1]._id });
-  const lateBill = (await send(staff, "post", `/api/front-desk/bookings/${late.id}/check-out/start`).expect(200)).body.data;
+  // two parallel calls (a double click, React strict mode) post the charge and the inspection once
+  const [lateBill] = (await Promise.all([1, 2].map(() => send(staff, "post", `/api/front-desk/bookings/${late.id}/check-out/start`).expect(200)))).map((r) => r.body.data);
+  assert.equal(await require("../src/models/CleaningTask").countDocuments({ bookingId: late._id, type: "inspection" }), 1);
   assert.deepEqual(lateBill.feeLines.map((f) => [f.type, f.amount]), [["extra_night", 1000]]);
   await send(staff, "post", `/api/front-desk/bookings/${late.id}/check-out/start`).expect(200);
   assert.equal((await Booking.findById(late.id)).totalAmount, 3000);
   // Between the standard check-out time and 18:00 the late check-out fee of the policy applies.
-  const { postLateCharge } = require("../src/controllers/bookingCreation");
+  const { lateCharge } = require("../src/controllers/bookingCreation");
   const { currentCancellationPolicy } = require("../src/services/policies");
   const policy = await currentCancellationPolicy();
   const day = vnDay(5);
   const fresh = new Booking({ checkOutDate: day, feeLines: [], feeAmount: 0, totalAmount: 0, rooms: [{ roomTypeId: Std._id, priceAtBooking: 1000 }] });
   const afterStandard = vnAt(day, policy?.checkOutTime || "12:00"); afterStandard.setMinutes(afterStandard.getMinutes() + 30);
-  assert.equal(await postLateCharge(fresh, afterStandard), policy?.lateCheckOutFee || 0);
+  assert.equal((await lateCharge(fresh, afterStandard))?.amount ?? 0, policy?.lateCheckOutFee || 0);
 });
 
 test("SRS v2.5 UC18 / BR-38: an upgrade is always charged; a lower-priced room needs nothing better free (MSG-68); before check-in the room type changes", async () => {

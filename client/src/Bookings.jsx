@@ -555,7 +555,7 @@ export function MyBookings() {
                     {canModifyOrCancel && (
                       <>
                         <button className="btn" onClick={() => setModifying(b)}>Modify</button>
-                        <button className="btn" onClick={() => setCancelling(b)}>
+                        <button className="btn danger" onClick={() => (b.status === 'pending' ? setCancelling(b) : (setOpen(b._id), setCancelFor(b._id)))}>
                           {b.status === 'pending' ? 'Abandon hold' : 'Cancel'}
                         </button>
                       </>
@@ -625,5 +625,15 @@ export function MyBookings() {
 
 function CustomerInvoice({ invoice, onClose }) {
   const b = invoice.bookingId;
-  return <Modal title={`Invoice ${invoice.invoiceNumber}`} onClose={onClose}><p>{b.bookingReference} · {dateLabel(b.checkInDate)} - {dateLabel(b.checkOutDate)}</p><DataTable cols={['Item', 'Amount']} rows={[["Room charges", money(b.roomAmount)], ["Additional services", money(b.serviceAmount)], ...(b.feeAmount ? [["Stay fees", money(b.feeAmount)]] : []), ...(b.services || []).filter((s) => s.status !== 'voided').map((s) => [`${s.name} x${s.quantity}`, money(s.amount)]), ["Total paid", money(invoice.totalAmount)]]} /><div className="modal-actions"><button className="btn" onClick={onClose}>Close</button><button className="btn primary" onClick={() => window.print()}>Print</button></div></Modal>;
+  // BR-21: the lines copied when the invoice was issued; older invoices fall back to the booking totals.
+  const rows = invoice.lines?.length
+    ? [...invoice.lines.map((l) => [l.name.replace(/Night of (\d{4}-\d{2}-\d{2})/, (_, d) => `Night of ${dateLabel(d)}`), money(l.amount)]), ['Total', money(invoice.totalAmount)], ['Paid', money(invoice.paidAmount ?? invoice.totalAmount)], ['Balance', money(invoice.balance ?? 0)]]
+    : [['Room charges', money(b.roomAmount)], ['Additional services', money(b.serviceAmount)], ['Total paid', money(invoice.totalAmount)]];
+  return <Modal title={`Invoice ${invoice.invoiceNumber}`} onClose={onClose}>
+    {invoice.hotelName && <p><b>{invoice.hotelName}</b>{invoice.hotelAddress ? ` · ${invoice.hotelAddress}` : ''}</p>}
+    <p>{b.bookingReference} · {dateLabel(b.checkInDate)} - {dateLabel(b.checkOutDate)} · issued {dateLabel(invoice.issuedAt)}</p>
+    <div id="invoice-print"><DataTable cols={['Item', 'Amount']} rows={rows} /></div>
+    <div className="modal-actions"><button className="btn" onClick={onClose}>Close</button><button className="btn primary" onClick={() => window.print()}>Print</button></div>
+  </Modal>;
 }
+

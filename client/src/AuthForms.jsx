@@ -403,7 +403,7 @@ export function Register({ onDone, hint }) {
           error={fe('confirmPassword')}
         />
       </div>
-      <label className="check full"><input type="checkbox" name="consent" required /> I agree to the processing of my personal data (<a href="#/offers" target="_blank" rel="noreferrer">privacy notice</a>) <span className="req" aria-hidden="true">*</span></label>
+      <label className="check full"><input type="checkbox" name="consent" required /><span className="consent-text">I agree to the processing of my personal data (<a href="#/offers" target="_blank" rel="noreferrer">privacy notice</a>) *</span></label>
       {fe('consent') && <p className="full note bad-note" role="alert">{fe('consent')}</p>}
       <div className="full"><Notice error={err && !err.fields ? err : null} /></div>
       <button className="btn primary wide full" type="submit">Create account</button>

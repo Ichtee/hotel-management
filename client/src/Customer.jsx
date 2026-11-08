@@ -9,6 +9,7 @@ import { PaymentPage, PaymentResult, SandboxGateway } from './Payments.jsx';
 import { api, money } from './api/client.js';
 import './resort.css';
 import NotificationBell from './Notifications.jsx';
+import { Notice } from './ui.jsx';
 
 const NAV = [
   { label: 'Home', href: '#/' },
@@ -499,7 +500,7 @@ function Auth({ note }) {
       {resetSuccess && <p role="status" className="note ok-note">{resetSuccess}</p>}
       {note && <p className="note">{note}</p>}
       {mode === 'login' && <SignIn onDone={done} onForgot={() => { setMode('forgot'); setResetSuccess(null); }} />}
-      {mode === 'register' && <Register onDone={done} />}
+      {mode === 'register' && <Register onDone={(email) => { setMode('login'); setResetSuccess(`Account created. We sent a verification link to ${email}. Open it, then sign in.`); }} />}
       {mode === 'forgot' && (
         <ForgotPassword
           onDone={() => {
@@ -509,6 +510,24 @@ function Auth({ note }) {
           onCancel={() => setMode('login')}
         />
       )}
+    </AuthShell>
+  );
+}
+
+// Target of the link in the verification email: #/verify-email?token=…&email=…
+function VerifyEmail({ token, email }) {
+  const [state, setState] = useState({ busy: true });
+  useEffect(() => {
+    api('/auth/verify-email', { method: 'POST', body: { token: token || '', ...(email ? { email } : {}) } })
+      .then((r) => setState({ ok: r.data.message }))
+      .catch((x) => setState({ error: x }));
+  }, [token, email]);
+  return (
+    <AuthShell>
+      <h1>Email verification</h1>
+      {state.busy ? <p className="muted">Verifying your email…</p> : <Notice error={state.error} ok={state.ok} />}
+      {state.error && <p className="muted">If the link expired, try signing in and choose "Resend verification email".</p>}
+      <p><a className="btn primary" href="#/login">Go to sign in</a></p>
     </AuthShell>
   );
 }
@@ -548,6 +567,7 @@ export default function Customer({ route }) {
   else if (path === '#/confirmation') page = <Confirmation q={q} />;
   else if (path === '#/my-bookings') page = <MyBookings />;
   else if (path === '#/login') page = <Auth />;
+  else if (path === '#/verify-email') page = <VerifyEmail token={q.token} email={q.email} />;
   else page = <Home />;
 
   return (

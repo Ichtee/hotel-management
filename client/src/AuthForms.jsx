@@ -88,12 +88,17 @@ export function SignIn({ onDone, hint, onForgot }) {
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const [token, setToken] = useState(''); const [tries, setTries] = useState(0);
+  const [unverified, setUnverified] = useState(null); const [resent, setResent] = useState(null);
   const submit = async (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
-    setBusy(true);
+    setBusy(true); setResent(null);
     try { await signIn({ email: f.email, password: f.password, captchaToken: token || undefined }); setErr(null); onDone(); }
-    catch (x) { setErr(x); setBusy(false); setTries((t) => t + 1); } // a token is single-use
+    catch (x) { setErr(x); setUnverified(x.code === 'EMAIL_NOT_VERIFIED' ? f.email : null); setBusy(false); setTries((t) => t + 1); } // a token is single-use
+  };
+  const resend = async () => {
+    try { setResent({ ok: (await api('/auth/resend-verification', { method: 'POST', body: { email: unverified } })).data.message }); }
+    catch (x) { setResent({ error: x }); }
   };
   return (
     <form className="form one" onSubmit={submit}>
@@ -113,6 +118,8 @@ export function SignIn({ onDone, hint, onForgot }) {
       )}
       <Captcha onToken={setToken} resetKey={tries} />
       <Notice error={err} />
+      {unverified && <p><button type="button" className="btn sm" onClick={resend}>Resend verification email</button></p>}
+      {resent && <Notice error={resent.error} ok={resent.ok} />}
       <button className="btn primary wide" type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
       {hint}
     </form>
@@ -269,7 +276,6 @@ const RULES = [['10+ characters', (p) => p.length >= 10], ['A letter', (p) => /[
 export function Register({ onDone, hint }) {
   const [err, setErr] = useState(null);
   const [pw, setPw] = useState('');
-  const { signIn } = useAuth();
   const fe = (k) => err?.fields?.[k];
   const submit = async (e) => {
     e.preventDefault();
@@ -322,8 +328,8 @@ export function Register({ onDone, hint }) {
 
     try {
       await api('/auth/register', { method: 'POST', body: f });
-      await signIn({ email: f.email, password: f.password });
-      onDone();
+      onDone(f.email); // the account must verify its email before it can sign in
+
     } catch (x) {
       setErr(x);
     }

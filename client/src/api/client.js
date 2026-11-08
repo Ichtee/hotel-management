@@ -22,6 +22,7 @@ export async function api(path, { body, method = "GET", signal } = {}) {
       result.error?.message || "Request failed. Please try again.",
     );
     error.fields = result.error?.fields;
+    error.code = result.error?.code;
     error.status = res.status;
     throw error;
   }

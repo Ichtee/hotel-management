@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from './context/Auth.jsx';
-import { AuthShell, AuthTabs, SignIn, Register, ForgotPassword } from './AuthForms.jsx';
+import { AuthShell, AuthTabs, SignIn, Register, ForgotPassword, Captcha } from './AuthForms.jsx';
 import { Profile } from './AdminPages.jsx';
 import { ROOM_TYPES } from './data.js';
 import { MyBookings } from './Bookings.jsx';
@@ -400,24 +400,28 @@ function Checkout({ q, user }) {
   const currentUser = user || authUser;
 
   const { room: r, loading: checkoutLoading } = useRoomType(q.room);
+  const policies = usePolicies();
   const nights = nightsBetween(q.in, q.out);
   const total = nights * (r?.price || 0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [token, setToken] = useState(''); const [tries, setTries] = useState(0);
+  // UC06 steps 3-5: contact data (pre-filled from the profile), privacy consent (CR-21) and CAPTCHA (BR-29).
   const confirm = async (e) => {
     e.preventDefault();
-
+    const f = Object.fromEntries(new FormData(e.target));
     setSaving(true);
     setError('');
 
     try {
       const created = await api('/bookings', { method: 'POST', body: {
         roomTypeId: r._id, checkInDate: q.in, checkOutDate: q.out,
-        guestCount: Number(q.guests), couponCode: q.coupon || undefined
+        guestCount: Number(q.guests), couponCode: q.coupon || undefined,
+        fullName: f.fullName, email: f.email, phone: f.phone, consent: f.consent === 'on', captchaToken: token || undefined,
       } });
       // A pending booking goes straight to the deposit payment (UC10); one with nothing to pay is already confirmed.
       location.hash = created.data.status === 'pending' ? `#/pay/${created.data._id}?kind=deposit` : `#/confirmation?${new URLSearchParams({ ref: created.data.bookingReference })}`;
-    } catch (err) { setError(err.message || 'Unable to create your booking.'); }
+    } catch (err) { setError(err.message || 'Unable to create your booking.'); setTries((t) => t + 1); }
     finally { setSaving(false); }
   };
 
@@ -440,12 +444,14 @@ function Checkout({ q, user }) {
           <h2 className="full">Guest details</h2>
           <label>Full name<input name="fullName" required autoComplete="name" defaultValue={currentUser?.customerProfile?.fullName || currentUser?.fullName || ''} /></label>
           <label>Email<input name="email" type="email" required autoComplete="email" defaultValue={currentUser?.email || ''} /></label>
-          <label>Phone<input name="phone" type="tel" required autoComplete="tel" defaultValue={currentUser?.phone || ''} /></label>
-          <label>Special requests<input name="specialRequests" placeholder="Late arrival, high floor, quiet room…" /></label>
+          <label>Phone<input name="phone" type="tel" required autoComplete="tel" pattern="([0-9]{10,11}|\+[0-9]{8,15})" title="10–11 digits, or + and 8–15 digits with the country code." defaultValue={currentUser?.phone || ''} /></label>
           <fieldset className="full">
             <legend>Payment</legend>
             <p className="muted">Pay the deposit online now to confirm your booking. The room is held for 15 minutes while you pay. The rest is paid at the front desk when you check out.</p>
           </fieldset>
+          <div className="full"><h2>Cancellation &amp; refund policy</h2><PolicyText p={policies} /></div>
+          <label className="check full"><input type="checkbox" name="consent" required /> I agree to the processing of my personal data (<a href="#/offers" target="_blank" rel="noreferrer">privacy notice</a>)</label>
+          <div className="full"><Captcha onToken={setToken} resetKey={tries} /></div>
           {error && <p className="note bad-note full" role="alert">{error}</p>}
           <button className="btn primary" type="submit" disabled={saving}>{saving ? 'Creating booking…' : 'Continue to deposit payment'}</button>
         </form>
@@ -457,7 +463,9 @@ function Checkout({ q, user }) {
             <div><dt>Room</dt><dd>{money(nights * r.price)}</dd></div>
             {q.coupon && <div><dt>Promo code</dt><dd>{q.coupon}</dd></div>}
             <div className="tot"><dt>{q.coupon ? 'Total before discount' : 'Total'}</dt><dd>{money(total)}</dd></div>
+            {policies?.depositPercent != null && <div><dt>Deposit to pay now ({policies.depositPercent}%)</dt><dd>{money(Math.round((total * policies.depositPercent) / 100))}</dd></div>}
           </dl>
+          <p className="muted">Seasonal rates and the promo code are applied to every night when the booking is created.</p>
         </aside>
       </div>
     </div>

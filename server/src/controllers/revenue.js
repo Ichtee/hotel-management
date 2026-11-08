@@ -35,7 +35,7 @@ async function revenue(req, res) {
     Payment.aggregate([
       {
         $match: {
-          status: "success",
+          status: { $in: ["success", "refunded"] }, // BR-27: Paid or Refunded; refunds are subtracted below
           currency: "VND",
           paidAt: { $gte: start, $lt: end },
         },
@@ -61,7 +61,7 @@ async function revenue(req, res) {
       { $unwind: "$payment" },
       {
         $match: {
-          "payment.status": "success",
+          "payment.status": { $in: ["success", "refunded"] },
           "payment.currency": "VND",
           $expr: { $eq: ["$bookingId", "$payment.bookingId"] },
         },

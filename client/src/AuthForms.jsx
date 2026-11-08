@@ -67,7 +67,7 @@ function PasswordField({ label, name, error, autoComplete, onChange, minLength, 
 }
 
 // Google reCAPTCHA v2 checkbox; the site key comes from the server (Google's test key when none is configured).
-function Captcha({ onToken, resetKey }) {
+export function Captcha({ onToken, resetKey }) {
   const box = useRef(null); const widget = useRef(null);
   useEffect(() => {
     let alive = true;
@@ -310,10 +310,10 @@ export function Register({ onDone, hint }) {
     }
 
     const phone = (f.phone || '').trim();
-    if (!/^\d{10,11}$/.test(phone)) {
+    if (!/^(\d{10,11}|\+\d{8,15})$/.test(phone)) { // CR-04
       setErr({
-        message: 'Phone must contain 10–11 digits.',
-        fields: { phone: 'Phone must contain 10–11 digits.' }
+        message: 'Phone number must have 10 to 11 digits, or + and 8 to 15 digits with the country code.',
+        fields: { phone: 'Phone number must have 10 to 11 digits, or + and 8 to 15 digits with the country code.' }
       });
       return;
     }
@@ -327,7 +327,7 @@ export function Register({ onDone, hint }) {
     }
 
     try {
-      await api('/auth/register', { method: 'POST', body: f });
+      await api('/auth/register', { method: 'POST', body: { ...f, consent: f.consent === 'on' } }); // CR-21
       onDone(f.email); // the account must verify its email before it can sign in
 
     } catch (x) {
@@ -371,10 +371,10 @@ export function Register({ onDone, hint }) {
           type="tel"
           autoComplete="tel"
           placeholder="0912345678"
-          pattern="[0-9]{10,11}"
-          minLength={10}
-          maxLength={11}
-          title="Phone must contain 10–11 digits."
+          pattern="([0-9]{10,11}|\+[0-9]{8,15})"
+          minLength={9}
+          maxLength={16}
+          title="10–11 digits, or + and 8–15 digits with the country code."
           required
         />
       </Field>
@@ -403,6 +403,8 @@ export function Register({ onDone, hint }) {
           error={fe('confirmPassword')}
         />
       </div>
+      <label className="check full"><input type="checkbox" name="consent" required /> I agree to the processing of my personal data (<a href="#/offers" target="_blank" rel="noreferrer">privacy notice</a>) <span className="req" aria-hidden="true">*</span></label>
+      {fe('consent') && <p className="full note bad-note" role="alert">{fe('consent')}</p>}
       <div className="full"><Notice error={err && !err.fields ? err : null} /></div>
       <button className="btn primary wide full" type="submit">Create account</button>
       {hint && <div className="full">{hint}</div>}

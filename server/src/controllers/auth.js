@@ -3,24 +3,13 @@ const User = require("../models/User");
 const Role = require("../models/Role");
 const v = require("../utils/validation");
 const { hashPassword, verifyPassword } = require("../utils/password");
-const { publicUser } = require("../middleware/auth");
+const { publicUser, issueToken, clearToken, tokenClaims } = require("../middleware/auth");
 const { sendVerificationEmail } = require("../services/resendService");
 const { verifyCaptcha, getSiteKey } = require("../services/captchaService");
 const AuditLog = require("../models/AuditLog");
 const MAX_FAILED_LOGINS = 5;
 const LOCK_MS = 15 * 60 * 1000;
-// Phiên hết hạn khi không hoạt động: 30 phút với Customer, 15 phút với nhân viên (SRS 4.2.4).
-const idleMs = (role) => (role.key === "customer" ? 30 : 15) * 60 * 1000;
-// Tạo mã phiên mới để tránh tái sử dụng phiên cũ.
-const regenerate = (req) =>
-  new Promise((resolve, reject) =>
-    req.session.regenerate((e) => (e ? reject(e) : resolve())),
-  );
-// Lưu phiên trước khi trả phản hồi đăng nhập.
-const save = (req) =>
-  new Promise((resolve, reject) =>
-    req.session.save((e) => (e ? reject(e) : resolve())),
-  );
+const VERIFY_MS = 24 * 3600 * 1000; // BR-42: a verification link is valid 24 hours
 // Đăng ký tài khoản khách hàng với dữ liệu đã kiểm tra.
 async function register(req, res) {
   v.keys(req.body, [
@@ -30,8 +19,10 @@ async function register(req, res) {
     "password",
     "confirmPassword",
     "phone",
+    "consent",
   ]);
   const { body } = req;
+  if (body.consent !== true) v.fail("Privacy consent is required.", "consent"); // CR-21, MSG-04
   if (
     body.confirmPassword !== undefined &&
     body.password !== body.confirmPassword
@@ -50,17 +41,19 @@ async function register(req, res) {
     throw new v.HttpError(409, "Registration is currently unavailable.");
   const rawToken = randomBytes(32).toString("hex");
   const tokenHash = createHash("sha256").update(rawToken).digest("hex");
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+  const expiresAt = new Date(Date.now() + VERIFY_MS);
 
   const user = await User.create({
     ...data,
     passwordHash: await hashPassword(body.password),
     roleId: role._id,
     isVerified: false,
+    consentAt: new Date(),
     emailVerification: {
       tokenHash,
       expiresAt,
       lastSentAt: new Date(),
+      sentAt: [new Date()],
     },
   });
 
@@ -183,17 +176,12 @@ async function login(req, res) {
     throw err;
   }
 
-  // 6. Successful login: reset failed counters and issue session
-  await regenerate(req);
-  req.session.userId = user.id;
-  req.session.authVersion = user.authVersion || 0;
-  req.session.roleAuthVersion = role.authVersion || 0;
-  req.session.cookie.maxAge = idleMs(role);
+  // 6. Successful login: reset failed counters and issue the JWT (SDS)
   user.lastLogin = new Date();
   user.failedLogins = 0;
   user.lockedUntil = undefined;
   await user.save();
-  await save(req);
+  issueToken(req, res, user, role);
   res.json({ data: publicUser(user, role) });
 }
 
@@ -260,12 +248,11 @@ function captchaConfig(req, res) {
     },
   });
 }
-// Hủy phiên và cookie đăng nhập.
+// SDS b.1: logout increases the tokenVersion, so every token of the account stops working, then clears the cookie.
 async function logout(req, res) {
-  await new Promise((resolve, reject) =>
-    req.session.destroy((e) => (e ? reject(e) : resolve())),
-  );
-  res.clearCookie("hotel.sid", { path: "/" });
+  const claims = tokenClaims(req);
+  if (claims) await User.updateOne({ _id: claims.sub, authVersion: claims.ver }, { $inc: { authVersion: 1 } });
+  clearToken(req, res);
   res.json({ data: { message: "Signed out." } });
 }
 // Trả hồ sơ của tài khoản đang đăng nhập.
@@ -274,9 +261,26 @@ async function profile(req, res) {
 }
 // Chỉ cập nhật các trường hồ sơ cá nhân được phép.
 async function updateProfile(req, res) {
-  v.keys(req.body, ["fullName", "phone", "address", "dateOfBirth"]);
+  v.keys(req.body, ["fullName", "phone", "address", "dateOfBirth", "email"]);
   const b = req.body;
   const u = req.user;
+  let message;
+  // UC03 4b: a Customer changes the e-mail through a link sent to the new address; staff e-mails are changed by
+  // the person who manages the account (BR-24).
+  if (b.email !== undefined && v.email(b.email) !== u.email) {
+    if (req.role.key !== "customer") v.fail("The e-mail of a staff account is changed by the person who manages it.", "email");
+    const email = v.email(b.email);
+    if (await User.exists({ $or: [{ email }, { pendingEmail: email }], _id: { $ne: u._id } })) throw new v.HttpError(409, "This email is already registered."); // MSG-14
+    const rawToken = randomBytes(32).toString("hex");
+    u.pendingEmail = email;
+    u.emailVerification = { tokenHash: createHash("sha256").update(rawToken).digest("hex"), expiresAt: new Date(Date.now() + VERIFY_MS), lastSentAt: new Date(), sentAt: [new Date()] };
+    try {
+      await sendVerificationEmail({ email, fullName: u.customerProfile?.fullName || u.username, token: rawToken });
+    } catch (error) {
+      console.error("[ChangeEmail] Failed to send email:", error.message);
+    }
+    message = "A verification e-mail has been sent. The link is valid for 24 hours."; // MSG-73
+  }
   if (b.fullName !== undefined)
     u.customerProfile.fullName = v.text(b.fullName, "fullName", 2, 50);
   if (b.phone !== undefined)
@@ -293,7 +297,7 @@ async function updateProfile(req, res) {
     }
   }
   await u.save();
-  res.json({ data: publicUser(u, req.role) });
+  res.json({ data: { ...publicUser(u, req.role), pendingEmail: u.pendingEmail }, ...(message ? { message } : {}) });
 }
 // Đổi mật khẩu bằng cập nhật có điều kiện, tránh ghi đè lần thu hồi phiên khác.
 async function changePassword(req, res) {
@@ -304,7 +308,7 @@ async function changePassword(req, res) {
   const u = await User.findById(req.user.id).select(
     "+passwordHash +authVersion",
   );
-  if (!u || u.status !== "active" || (u.authVersion || 0) !== req.session.authVersion)
+  if (!u || u.status !== "active" || (u.authVersion || 0) !== tokenClaims(req)?.ver)
     throw new v.HttpError(401, "Your session has ended. Please sign in.");
   if (!(await verifyPassword(current, u.passwordHash)))
     v.fail("Current password is incorrect.", "currentPassword");
@@ -318,12 +322,7 @@ async function changePassword(req, res) {
     { new: true, runValidators: true },
   ).select("+authVersion");
   if (!updated) throw new v.HttpError(409, "The account changed. Please sign in again.");
-  const roleAuthVersion = req.session.roleAuthVersion || 0;
-  await regenerate(req);
-  req.session.userId = updated.id;
-  req.session.authVersion = updated.authVersion;
-  req.session.roleAuthVersion = roleAuthVersion;
-  await save(req);
+  issueToken(req, res, updated, req.role); // this device keeps working; the other tokens carry the old version
   res.json({
     data: { message: "Password changed. Other sessions have been signed out." },
   });
@@ -415,7 +414,8 @@ async function verifyEmail(req, res) {
   const email = req.body.email ? v.email(req.body.email) : undefined;
   const tokenHash = createHash("sha256").update(token).digest("hex");
 
-  const query = email ? { email } : { "emailVerification.tokenHash": tokenHash };
+  // UC03 4b: the link of an e-mail change is sent to the new address, which is still pendingEmail.
+  const query = email ? { $or: [{ email }, { pendingEmail: email }] } : { "emailVerification.tokenHash": tokenHash };
   const user = await User.findOne(query).select(
     "+emailVerification.tokenHash +emailVerification.expiresAt"
   );
@@ -423,8 +423,9 @@ async function verifyEmail(req, res) {
   if (!user) {
     throw new v.HttpError(400, "Invalid verification link or account not found.");
   }
+  const changingEmail = Boolean(user.pendingEmail) && (!email || email === user.pendingEmail);
 
-  if (user.isVerified) {
+  if (user.isVerified && !changingEmail) {
     return res.json({
       data: { message: "Your email has already been verified. You can now sign in." },
     });
@@ -450,6 +451,12 @@ async function verifyEmail(req, res) {
   }
 
   user.isVerified = true;
+  if (changingEmail) {
+    // The login e-mail is replaced only now; until here the old one stayed valid (UC03 4b).
+    if (await User.exists({ email: user.pendingEmail, _id: { $ne: user._id } })) throw new v.HttpError(409, "This email is already registered."); // MSG-14
+    user.email = user.pendingEmail;
+    user.pendingEmail = undefined;
+  }
   user.set("emailVerification", undefined);
   await user.save();
 
@@ -462,7 +469,7 @@ async function resendVerification(req, res) {
   v.keys(req.body, ["email"]);
   const email = v.email(req.body.email);
   const user = await User.findOne({ email }).select(
-    "+emailVerification.tokenHash +emailVerification.expiresAt +emailVerification.lastSentAt"
+    "+emailVerification.tokenHash +emailVerification.expiresAt +emailVerification.lastSentAt +emailVerification.sentAt"
   );
 
   if (!user) {
@@ -491,12 +498,17 @@ async function resendVerification(req, res) {
     }
   }
 
+  // BR-42: at most 3 verification e-mails per hour for the same account (MSG-81).
+  const lastHour = (user.emailVerification?.sentAt || []).filter((t) => Date.now() - t < 3600 * 1000);
+  if (lastHour.length >= 3) throw new v.HttpError(429, "Too many requests. Please try again later.");
+
   const rawToken = randomBytes(32).toString("hex");
   const tokenHash = createHash("sha256").update(rawToken).digest("hex");
   user.emailVerification = {
     tokenHash,
-    expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    expiresAt: new Date(Date.now() + VERIFY_MS),
     lastSentAt: new Date(),
+    sentAt: [...lastHour, new Date()],
   };
   await user.save();
 

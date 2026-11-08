@@ -31,6 +31,16 @@ const events = {
   penalty_proposed: (d) => ["Damage / loss reported", `Booking ${d.reference}: ${d.item} (${money(d.amount)}) was reported by Housekeeping. Confirm or waive it with the guest.`],
   supplementary_invoice: (d) => ["Supplementary invoice", `Invoice ${d.number} of ${money(d.amount)} was issued for booking ${d.reference}.`],
   reconciliation: (d) => ["Payment reconciliation", `${d.settled} gateway payment(s) were settled by the daily reconciliation.`],
+  stay_request_submitted: (d) => [
+    `${d.type === "check_in" ? "Check-in" : "Check-out"} request`,
+    `Booking ${d.reference} sent a ${d.type === "check_in" ? "check-in" : "check-out"} request${d.auto ? " (approved automatically)" : " waiting for your decision"}.`,
+  ],
+  stay_request_decided: (d) => [
+    `${d.type === "check_in" ? "Check-in" : "Check-out"} request ${d.approved ? "approved" : "rejected"}`,
+    d.approved
+      ? `Your ${d.type === "check_in" ? "early check-in" : "late check-out"} request for booking ${d.reference} was approved.${d.fee ? ` A fee of ${money(d.fee)} is charged only if it really takes place.` : ""}`
+      : `Your ${d.type === "check_in" ? "check-in" : "check-out"} request for booking ${d.reference} was rejected.${d.note ? ` ${d.note}` : ""}`,
+  ],
 };
 let transport;
 // SMTP_URL wins; otherwise the Resend API key already used for e-mail verification also sends notifications.

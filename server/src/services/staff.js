@@ -30,11 +30,11 @@ async function staffRole(key, session, requireActive = true) {
   return role;
 }
 
-// Thu hồi phân công còn hiệu lực và giữ nguyên task đang làm hoặc đã hoàn tất.
+// UC22 3b / BR-41: thu hồi phân công còn hiệu lực; task Assigned hoặc In Progress về Pending, task đã đóng giữ nguyên.
 async function releaseResponsibilities(userId, req, reason, session) {
   const now = new Date();
   const tasks = await CleaningTask.updateMany(
-    { assignedTo: userId, status: { $in: ["assigned", "pending"] } },
+    { assignedTo: userId, status: { $in: ["assigned", "pending", "in_progress"] } },
     { $set: { status: "pending" }, $unset: { assignedTo: 1, assignedBy: 1, assignmentId: 1, assignmentDate: 1, assignmentShift: 1 } },
     { session },
   );
@@ -45,8 +45,7 @@ async function releaseResponsibilities(userId, req, reason, session) {
     { $set: { isActive: false, revokedAt: now, revokedBy: req.user._id, revocationReason: reason } },
     { session },
   );
-  const inProgress = await CleaningTask.countDocuments({ assignedTo: userId, status: "in_progress" }).session(session);
-  return { pendingTasks: tasks.modifiedCount, revokedAssignments: plans.modifiedCount, inProgressTasks: inProgress };
+  return { pendingTasks: tasks.modifiedCount, revokedAssignments: plans.modifiedCount };
 }
 
 // Gửi cảnh báo sau khi lưu; lỗi thông báo không hủy thay đổi tài khoản.
@@ -59,7 +58,7 @@ async function notifyResponsibilityChange(user, changes) {
       accountId: manager._id,
       type: "staff_responsibility_released",
       title: "Housekeeping responsibility needs review",
-      message: `${user.customerProfile.fullName}: ${changes.pendingTasks} tasks returned to Pending, ${changes.revokedAssignments} assignments revoked; ${changes.inProgressTasks} In Progress tasks kept unchanged.`,
+      message: `${user.customerProfile.fullName}: ${changes.pendingTasks} open tasks returned to Pending and ${changes.revokedAssignments} assignments revoked. Give the rooms to other staff in the responsibility plan.`,
     })));
     return true;
   } catch {

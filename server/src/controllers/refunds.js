@@ -99,19 +99,16 @@ async function record(req, res) {
     await Refund.updateOne({ _id: refund._id }, { failureReason: "The related payment could not be identified." });
     throw new v.HttpError(409, "The related payment could not be identified. The refund cannot be processed."); // MSG-43
   }
-  // A payment is never refunded beyond its amount, even by two receptionists at once.
-  const counted = await Payment.updateOne(
-    { _id: payment._id, status: "success", $expr: { $lte: [{ $add: [{ $ifNull: ["$refundedAmount", 0] }, refund.amount] }, "$amount"] } },
-    { $inc: { refundedAmount: refund.amount } },
-  );
-  if (!counted.modifiedCount) throw new v.HttpError(409, "The booking has been cancelled and is not eligible for a refund."); // MSG-42
+  // BR-17: the whole deposit is refunded once; Paid -> Refunded is atomic, even for two receptionists at once.
+  const counted = await Payment.updateOne({ _id: payment._id, status: "success" }, { $set: { status: "refunded" } });
+  if (!counted.modifiedCount) throw new v.HttpError(409, "No refund is due for this booking."); // MSG-42
   const done = await Refund.findOneAndUpdate(
     { _id: refund._id, status: "requested" },
     { $set: { status: "completed", bankTransactionCode: code, note, processedBy: req.user._id, processedAt: new Date(), gateway: "bank_transfer" }, $unset: { failureReason: 1 } },
     { new: true },
   );
   if (!done) {
-    await Payment.updateOne({ _id: payment._id }, { $inc: { refundedAmount: -refund.amount } });
+    await Payment.updateOne({ _id: payment._id }, { $set: { status: "success" } });
     throw new v.HttpError(409, "This refund was already recorded.");
   }
   const booking = await Booking.findById(refund.bookingId._id).select("bookingReference customerId");

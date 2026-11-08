@@ -90,8 +90,10 @@ function Details({ id, startCancel, onChanged }) {
       <section>
         <h3>Charges</h3>
         <dl>
-          <Row k="Rooms">{money(b.roomAmount)}</Row>
+          {b.nightlyRates?.length ? b.nightlyRates.map((n) => <Row key={n.date} k={`Night of ${dateLabel(n.date)}`}>{money(n.price)}</Row>) : <Row k="Rooms">{money(b.roomAmount)}</Row>}
+          {(b.feeLines || []).map((f, i) => <Row key={i} k={{ early_check_in: 'Early check-in fee', late_check_out: 'Late check-out fee', extra_night: 'Extra night (after 18:00)' }[f.type]}>{money(f.amount)}</Row>)}
           {b.serviceAmount > 0 && <Row k="Services">{money(b.serviceAmount)}</Row>}
+          {b.penaltyAmount > 0 && <Row k="Damage / loss">{money(b.penaltyAmount)}</Row>}
           {b.discountAmount > 0 && <Row k="Discount">−{money(b.discountAmount)}</Row>}
           <Row k="Total"><strong>{money(b.totalAmount)}</strong></Row>
         </dl>
@@ -130,6 +132,19 @@ function Details({ id, startCancel, onChanged }) {
           <p>Sent {dateLabel(b.cancellation.requestedAt)} · {b.cancellation.refundableAmount > 0 ? `refund of ${money(b.cancellation.refundableAmount)} once approved` : 'no refund under the policy'}.</p>
           <p className="muted">The front desk approves it within 24 hours; the room stays held until then.</p>
           <button className="btn" onClick={() => act(`/bookings/${id}/withdraw-cancellation`, 'POST', 'Withdraw the cancellation request and keep this booking?')}>Withdraw request</button>
+        </section>
+      )}
+      {b.requests?.length > 0 && (
+        <section>
+          <h3>Check-in / check-out requests</h3>
+          <ul className="lines" aria-label="Requests">
+            {b.requests.map((r) => (
+              <li key={r._id}>
+                <span>{r.type === 'check_in' ? 'Check-in' : 'Check-out'} at {new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' }).format(new Date(r.requestedTime))}{r.earlyOrLate ? ` · ${r.type === 'check_in' ? 'early check-in' : 'late check-out'}${r.quotedFee ? ` (fee ${money(r.quotedFee)} if it takes place)` : ''}` : ''}{r.responseNote ? ` · ${r.responseNote}` : ''}</span>
+                <span><Badge v={r.status} />{['pending', 'approved'].includes(r.status) && <button className="btn sm" onClick={() => act(`/bookings/${id}/requests/${r._id}`, 'DELETE', 'Withdraw this request?')}>Withdraw</button>}</span>
+              </li>
+            ))}
+          </ul>
         </section>
       )}
       {b.penalties?.length > 0 && (
@@ -172,11 +187,13 @@ function Details({ id, startCancel, onChanged }) {
   );
 }
 
-// Modal for modifying reservation dates & requests
+// UC07: the stay dates, the number of guests and the contact data; the room type stays the same (cancel and book again).
 function ModifyModal({ booking, onClose, onSaved }) {
   const [inDate, setInDate] = useState(inputDate(booking.checkInDate));
   const [outDate, setOutDate] = useState(inputDate(booking.checkOutDate));
-  const [requests, setRequests] = useState('');
+  const [guests, setGuests] = useState(booking.rooms?.[0]?.guestCount || 1);
+  const [name, setName] = useState(booking.guestName || '');
+  const [phone, setPhone] = useState(booking.guestPhone || '');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -197,7 +214,9 @@ function ModifyModal({ booking, onClose, onSaved }) {
         body: {
           checkInDate: inDate,
           checkOutDate: outDate,
-          specialRequests: requests
+          guestCount: Number(guests),
+          ...(name.trim() ? { fullName: name.trim() } : {}),
+          ...(phone.trim() ? { phone: phone.trim() } : {}),
         }
       });
       onSaved(`Reservation ${booking.bookingReference || ''} updated successfully.`);
@@ -211,8 +230,9 @@ function ModifyModal({ booking, onClose, onSaved }) {
   return (
     <Modal title={`Modify reservation ${booking.bookingReference || ''}`} onClose={onClose}>
       <form className="form" onSubmit={submit}>
-        <p className="muted" style={{ marginBottom: '1rem' }}>
-          Select new dates for your stay. Availability and price will be recalculated automatically.
+        <p className="muted full">
+          Availability and price are recalculated. The deposit already paid does not change: any difference is paid at check-out.
+          Dates can be changed only while a cancellation would still be refunded in full.
         </p>
         <Field label="Check-in date">
           <input
@@ -237,14 +257,9 @@ function ModifyModal({ booking, onClose, onSaved }) {
             Duration: <strong>{nights} night{nights === 1 ? '' : 's'}</strong>
           </p>
         </div>
-        <Field label="Special requests (optional)">
-          <textarea
-            rows="2"
-            value={requests}
-            onChange={(e) => setRequests(e.target.value)}
-            placeholder="High floor, quiet room, early arrival notice…"
-          />
-        </Field>
+        <Field label="Guests"><input type="number" min="1" max="10" value={guests} onChange={(e) => setGuests(e.target.value)} required /></Field>
+        <Field label="Guest full name"><input value={name} onChange={(e) => setName(e.target.value)} minLength={2} maxLength={80} /></Field>
+        <Field label="Phone"><input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} pattern="([0-9]{10,11}|\+[0-9]{8,15})" /></Field>
         <div className="full">
           <Notice error={err} />
         </div>
@@ -425,6 +440,38 @@ function ReviewModal({ booking, onClose, onSaved }) {
   );
 }
 
+// UC39: before arriving, a check-in request with the pre-registration data; during the stay, a check-out request.
+// A request without early check-in / late check-out is approved at once (BR-44).
+function StayRequestModal({ booking, type, onClose, onSaved }) {
+  const isIn = type === 'check_in';
+  const day = inputDate(isIn ? booking.checkInDate : booking.checkOutDate);
+  const [err, setErr] = useState(null); const [saving, setSaving] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); setSaving(true); setErr(null);
+    try {
+      const body = { type, requestedTime: `${day}T${f.time}:00+07:00`, note: f.note || '', ...(isIn ? { numberOfGuests: Number(f.numberOfGuests), mainGuestName: f.mainGuestName, mainGuestIdNumber: f.mainGuestIdNumber } : {}) };
+      const r = await api(`/bookings/${booking._id}/requests`, { method: 'POST', body });
+      onSaved(r.data.status === 'approved' ? `${r.message} No early check-in / late check-out was asked, so it is approved.` : r.message);
+    } catch (x) { setErr(x); setSaving(false); }
+  };
+  return (
+    <Modal title={`${isIn ? 'Check-in' : 'Check-out'} request · ${booking.bookingReference || ''}`} onClose={onClose}>
+      <form className="form" onSubmit={submit}>
+        <p className="muted full">{isIn ? 'Tell the front desk when you arrive so the room is ready. Check-in is from 14:00; an earlier time is an early check-in request.' : 'Tell the front desk when you leave so the bill is ready. Check-out is until 12:00; a later time (until 18:00) is a late check-out request.'} A fee applies only if it really takes place.</p>
+        <Field label={`${isIn ? 'Expected arrival' : 'Planned check-out'} time on ${dateLabel(day)}`}><input name="time" type="time" defaultValue={isIn ? '14:00' : '12:00'} required /></Field>
+        {isIn && <>
+          <Field label="Number of guests"><input name="numberOfGuests" type="number" min="1" max="10" defaultValue={booking.rooms?.[0]?.guestCount || 1} required /></Field>
+          <Field label="Main guest full name"><input name="mainGuestName" defaultValue={booking.guestName || ''} minLength={2} maxLength={80} required /></Field>
+          <Field label="Main guest ID / passport number"><input name="mainGuestIdNumber" minLength={3} maxLength={40} required /></Field>
+        </>}
+        <Field label="Note (optional)"><input name="note" maxLength={1000} /></Field>
+        <div className="full"><Notice error={err} /></div>
+        <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Sending…' : 'Send request'}</button></div>
+      </form>
+    </Modal>
+  );
+}
+
 // UC10: a customer's own bookings, split into upcoming and past.
 export function MyBookings() {
   const [tab, setTab] = useState('upcoming');
@@ -438,12 +485,7 @@ export function MyBookings() {
   const [invoice, setInvoice] = useState(null);
   const s = useApi('/bookings?limit=100');
   const changed = (m) => { setMsg(m); setOpen(null); s.reload(); };
-  const requestStayChange = async (booking, type) => {
-    const requestedTime = window.prompt(`Requested ${type.replace('_', ' ')} time (YYYY-MM-DDTHH:mm):`, new Date().toISOString().slice(0, 16));
-    if (!requestedTime) return;
-    const note = window.prompt('Optional note for the front desk:', '') || '';
-    try { await api(`/bookings/${booking._id}/requests`, { method: 'POST', body: { type, requestedTime, note } }); setMsg('Your request was sent to the front desk.'); s.reload(); } catch (error) { setMsg(error.message); }
-  };
+  const [requesting, setRequesting] = useState(null); // { booking, type }
   const viewInvoice = async (booking) => { try { setInvoice((await api(`/bookings/${booking._id}/invoice`)).data); } catch (error) { setMsg(error.message); } };
   const all = s.data || [];
   const isUp = (b) => UPCOMING.includes(b.status);
@@ -528,8 +570,8 @@ export function MyBookings() {
                         Write review
                       </button>
                     )}
-                    {b.status === 'confirmed' && <button className="btn" onClick={() => requestStayChange(b, 'check_in')}>Request early check-in</button>}
-                    {b.status === 'checked_in' && <button className="btn" onClick={() => requestStayChange(b, 'check_out')}>Request late check-out</button>}
+                    {b.status === 'confirmed' && <button className="btn" onClick={() => setRequesting({ booking: b, type: 'check_in' })}>Check-in request</button>}
+                    {b.status === 'checked_in' && <button className="btn" onClick={() => setRequesting({ booking: b, type: 'check_out' })}>Check-out request</button>}
                     {b.status === 'checked_out' && <button className="btn" onClick={() => viewInvoice(b)}>View invoice</button>}
                   </div>
                 </article>
@@ -576,6 +618,7 @@ export function MyBookings() {
         />
       )}
       {invoice && <CustomerInvoice invoice={invoice} onClose={() => setInvoice(null)} />}
+      {requesting && <StayRequestModal booking={requesting.booking} type={requesting.type} onClose={() => setRequesting(null)} onSaved={(m) => { setRequesting(null); changed(m); }} />}
     </div>
   );
 }

@@ -161,19 +161,19 @@ async function responsibilities(staffId) {
   return { tasks, plan, past };
 }
 
-test("UC22 deactivation or role change releases Assigned tasks, preserves In Progress and assignment history", async () => {
+test("UC22 deactivation or role change returns Assigned and In Progress tasks to Pending, keeps closed tasks and assignment history", async () => {
   for (const patch of [{ status: "suspended", reason: "On leave" }, { role: "receptionist" }]) {
     const staff = await employee("housekeeping");
     const { tasks, plan, past } = await responsibilities(staff.id);
     const result = await send(manager, "patch", `/api/staff/${staff.id}`, patch).expect(200);
-    assert.deepEqual(result.body.meta.responsibility, { pendingTasks: 2, revokedAssignments: 1, inProgressTasks: 1 });
+    assert.deepEqual(result.body.meta.responsibility, { pendingTasks: 3, revokedAssignments: 1 }); // BR-41 (SRS v2.5)
     assert.equal(result.body.meta.notificationStored, true);
-    for (const task of tasks.slice(0, 2)) {
+    for (const task of tasks.slice(0, 3)) {
       const saved = await CleaningTask.findById(task._id);
       assert.equal(saved.status, "pending");
       assert.equal(saved.assignedTo, undefined);
     }
-    for (const task of tasks.slice(2)) {
+    for (const task of tasks.slice(3)) {
       const saved = await CleaningTask.findById(task._id);
       assert.equal(saved.status, task.status);
       assert.equal(String(saved.assignedTo), staff.id);

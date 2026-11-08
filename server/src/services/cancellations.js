@@ -22,9 +22,9 @@ const NOT_ALLOWED = "This booking can no longer be cancelled."; // MSG-34
 const WRONG_OTP = "The verification code is incorrect or has expired. Please request a new code."; // MSG-83
 const reference = (b) => b.bookingReference || String(b._id).slice(-8).toUpperCase();
 
-// Verified deposits, newest first; what the hotel still holds is amount - refundedAmount.
+// Verified deposits not refunded yet, newest first (BR-17: a deposit is refunded whole, once).
 const deposits = (bookingId) => Payment.find({ bookingId, kind: "deposit", status: "success" }).sort({ paidAt: -1 });
-const held = (p) => p.amount - (p.refundedAmount || 0);
+const held = (p) => p.amount;
 
 // BR-32 / BR-37: the refundable amount if the request were made at `now`.
 async function estimate(booking, { now = new Date(), hotelCaused = false } = {}) {
@@ -82,16 +82,17 @@ async function request(booking, { actorId, channel, verifyMethod, reason, hotelC
   return { booking: updated, refundableAmount };
 }
 
-// UC08 2b: the customer withdraws the request until it is approved; the booking is Confirmed again.
-async function withdraw(bookingId, customerId) {
+// UC08 2b / UC35 1a: the request is withdrawn until it is approved, by the customer online (customerId) or by the
+// Receptionist at the customer's request (no customerId); the booking is Confirmed again (BR-36).
+async function withdraw(bookingId, actorId, { customerId } = {}) {
   const booking = await Booking.findOneAndUpdate(
-    { _id: bookingId, customerId, status: "cancellation_requested" },
+    { _id: bookingId, ...(customerId ? { customerId } : {}), status: "cancellation_requested" },
     { $set: { status: "confirmed" }, $unset: { cancellation: 1 } },
     { new: true },
   );
   if (!booking) throw new v.HttpError(409, "There is no cancellation request waiting for review.");
-  await audit(customerId, "cancellation.withdrawn", "booking", booking._id);
-  await notifyRole("cancellation_withdrawn", "receptionist", { reference: reference(booking) }, { bookingId: booking._id });
+  await audit(actorId, "cancellation.withdrawn", "booking", booking._id, { by: customerId ? "customer" : "receptionist" });
+  if (customerId) await notifyRole("cancellation_withdrawn", "receptionist", { reference: reference(booking) }, { bookingId: booking._id });
   return booking;
 }
 

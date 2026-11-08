@@ -40,8 +40,13 @@ async function requestOnline(req, res) {
   outcome(res, await c.request(booking, { actorId: req.user._id, channel: "online", verifyMethod: "login", reason: reasonOf(req.body.reason, false) }));
 }
 async function withdraw(req, res) {
-  const booking = await c.withdraw(v.id(req.params.id), req.user._id);
+  const booking = await c.withdraw(v.id(req.params.id), req.user._id, { customerId: req.user._id });
   res.json({ data: { _id: booking._id, status: booking.status }, message: MSG.withdrawn });
+}
+// UC35 1a: the Receptionist withdraws a request at the customer's request (e.g. one recorded at the front desk).
+async function withdrawAtDesk(req, res) {
+  const booking = await c.withdraw(v.id(req.params.id), req.user._id);
+  res.json({ data: { _id: booking._id, status: booking.status }, message: "The cancellation request was withdrawn. The booking is active again." });
 }
 async function cancelPayment(req, res) {
   const booking = await c.cancelPayment(v.id(req.params.id), req.user._id);
@@ -118,4 +123,13 @@ async function approve(req, res) {
     message: amount > 0 ? "Cancellation approved. The booking is waiting for refund." : "The booking has been cancelled and is not eligible for a refund.",
   });
 }
-module.exports = { estimate, requestOnline, withdraw, cancelPayment, lookup, sendOtp, record, listing, approve };
+// UC16 from the booking row: the ID document was checked at the desk; the bank account is asked later, in UC21 (BR-17).
+async function recordAtDesk(req, res) {
+  v.keys(req.body, ["reason", "hotelCaused"]);
+  const hotelCaused = req.body.hotelCaused === undefined ? false : v.boolean(req.body.hotelCaused, "hotelCaused");
+  const booking = await Booking.findById(v.id(req.params.id));
+  if (!booking) throw new v.HttpError(404, "Booking not found.");
+  const reason = hotelCaused ? reasonOf(req.body.reason, false) || c.HOTEL_REASON : reasonOf(req.body.reason, true);
+  outcome(res, await c.request(booking, { actorId: req.user._id, channel: "front_desk", verifyMethod: hotelCaused ? "hotel" : "id_document", reason, hotelCaused }));
+}
+module.exports = { estimate, requestOnline, withdraw, withdrawAtDesk, recordAtDesk, cancelPayment, lookup, sendOtp, record, listing, approve };

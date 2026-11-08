@@ -210,6 +210,12 @@ function Bookings() {
   const [addingService, setAddingService] = useState(null);
   const [checkingOut, setCheckingOut] = useState(null);
   const [penalizing, setPenalizing] = useState(null);
+  const [notice, setNotice] = useState(null);
+  // UC20 7a: generate the invoice again after a failure (an existing invoice is returned as it is).
+  const generateInvoice = async (b) => {
+    try { setNotice({ ok: `Invoice ${(await api(`/front-desk/bookings/${b._id}/invoice`, { method: 'POST' })).data.invoiceNumber} is ready.` }); }
+    catch (x) { setNotice({ error: x }); }
+  };
 
   const statusParam = f !== 'all' ? `&status=${f}` : '';
   const searchParam = search ? `&reference=${encodeURIComponent(search)}` : '';
@@ -238,7 +244,7 @@ function Bookings() {
           style={{ padding: '0.45rem 0.8rem', borderRadius: '8px', border: '1px solid var(--line)', minWidth: '240px' }}
         />
       </div>
-      <Notice error={live.error} />
+      <Notice error={live.error || notice?.error} ok={notice?.ok} />
       <DataTable
         cols={['Code', 'Guest', 'Room', 'Check-in', 'Check-out', 'Total', 'Status', '']}
         rows={bookingsList.map((b) => [
@@ -252,11 +258,12 @@ function Bookings() {
           <RowActions key={b._id} actions={[
             b.status === 'confirmed' && ['Check in', () => setCheckingIn(b)],
             b.status === 'checked_in' && ['Check out', () => setCheckingOut(b)],
-            ['pending', 'confirmed'].includes(b.status) && ['Edit', () => setEditing(b)],
-            b.status === 'checked_in' && ['Change room', () => setChangingRoom(b)],
+            ['pending', 'confirmed', 'checked_in', 'checked_out'].includes(b.status) && [b.status === 'checked_in' ? 'Extend / edit' : 'Edit', () => setEditing(b)],
+            ['confirmed', 'checked_in'].includes(b.status) && [b.status === 'confirmed' ? 'Change room type' : 'Change room', () => setChangingRoom(b)],
             b.status === 'checked_in' && ['Add service', () => setAddingService(b)],
             ['checked_in', 'checked_out'].includes(b.status) && ['Penalties', () => setPenalizing(b)],
-            ['pending', 'confirmed'].includes(b.status) && ['Cancel', () => setCancelling(b)],
+            b.status === 'checked_out' && ['Generate invoice', () => generateInvoice(b)],
+            b.status === 'confirmed' && ['Cancel', () => setCancelling(b)],
           ].filter(Boolean)} />
         ])}
       />
@@ -329,21 +336,40 @@ function SettleBalance({ booking, balance, onPaid }) {
   </form>;
 }
 
-// UC20: check-out once the balance is 0; a late check-out fee found at that moment is collected with the chosen method.
+const FEE_LABEL = { early_check_in: 'Early check-in fee', late_check_out: 'Late check-out fee', extra_night: 'Extra night (after 18:00)' };
+// UC20: opening it requests the urgent room inspection and posts the late check-out fee (or one extra night after 18:00,
+// BR-47); check-out needs the whole balance paid (UC11) and the inspection done or skipped (BR-20, BR-22).
 function CheckOutBooking({ booking, onClose }) {
-  const detail = useApi(`/bookings/${booking._id}`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false); const [lateMethod, setLateMethod] = useState('cash');
-  if (detail.loading && !detail.data) return <Modal title="Check out customer" onClose={onClose}><p className="muted">Loading final bill…</p></Modal>;
-  const b = detail.data || booking; const paid = b.paidAmount || 0; const balance = Math.max(0, b.totalAmount - paid);
-  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); try { await api(`/front-desk/bookings/${b._id}/check-out`, { method: 'POST', body: { inspectionConfirmed: true, paymentMethod: lateMethod } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
-  return <Modal title={`Check out · ${b.bookingReference}`} onClose={onClose}>
-    <p className="muted">Room {money(b.roomAmount)} · Services {money(b.serviceAmount)}{b.feeAmount > 0 && <> · Fees {money(b.feeAmount)}</>}{b.penaltyAmount > 0 && <> · Penalties {money(b.penaltyAmount)}</>} · Total {money(b.totalAmount)} · Paid {money(paid)}</p>
-    <p><strong>{balance > 0 ? `Balance due: ${money(balance)}` : 'Fully paid'}</strong></p>
-    {balance > 0 && <SettleBalance booking={b} balance={balance} onPaid={detail.reload} />}
+  const [bill, setBill] = useState(null); const [error, setError] = useState(null); const [saving, setSaving] = useState(false); const [skip, setSkip] = useState(false); const [done, setDone] = useState(null);
+  const load = () => api(`/front-desk/bookings/${booking._id}/check-out/start`, { method: 'POST' }).then((r) => setBill(r.data)).catch(setError);
+  useEffect(() => { load(); }, [booking._id]);
+  const submit = async (e) => {
+    e.preventDefault(); if (!window.confirm(`Are you sure you want to complete the check-out of ${booking.bookingReference}?`)) return; // MSG-09
+    setSaving(true); setError(null);
+    try { const r = await api(`/front-desk/bookings/${booking._id}/check-out`, { method: 'POST', body: skip ? { skipInspection: true } : {} }); setDone(r); }
+    catch (x) { setError(x); load(); } finally { setSaving(false); }
+  };
+  if (done) return <Modal title={`Checked out · ${booking.bookingReference}`} onClose={onClose}>
+    <Notice ok={done.message} error={done.warning} />
+    {done.data.invoice && <p>Invoice <strong>{done.data.invoice.invoiceNumber}</strong> · {money(done.data.invoice.totalAmount)}. Print it from Invoices.</p>}
+    <div className="modal-actions"><button className="btn primary" onClick={onClose}>Close</button></div>
+  </Modal>;
+  if (!bill) return <Modal title="Check out customer" onClose={onClose}>{error ? <Notice error={error} /> : <p className="muted">Requesting the room inspection and preparing the final bill…</p>}</Modal>;
+  const inspected = bill.inspection?.status === 'completed';
+  return <Modal title={`Check out · ${booking.bookingReference}`} onClose={onClose}>
+    <dl className="sum">
+      {bill.feeLines.map((f, i) => <div key={i}><dt>{FEE_LABEL[f.type]}</dt><dd>{money(f.amount)}</dd></div>)}
+      <div><dt>Total</dt><dd>{money(bill.totalAmount)}</dd></div>
+      <div><dt>Paid (deposit and front desk)</dt><dd>{money(bill.paidAmount)}</dd></div>
+      <div className="tot"><dt>Balance due</dt><dd><strong>{money(bill.balance)}</strong></dd></div>
+    </dl>
+    <p role="status">Room inspection: <Badge v={bill.inspection?.status || 'pending'} />{bill.inspection?.assignedTo ? ` · ${bill.inspection.assignedTo}` : ' · no staff responsible yet'} <button type="button" className="btn sm" onClick={load}>Refresh</button></p>
+    {bill.proposedPenalties > 0 && <p className="note bad-note">{bill.proposedPenalties} damage / loss item(s) reported by Housekeeping: confirm or waive them in Penalties first.</p>}
+    {bill.balance > 0 && <SettleBalance booking={booking} balance={bill.balance} onPaid={load} />}
     <form className="form" onSubmit={submit}>
-      <label className="check full"><input type="checkbox" required /> Room inspection completed or explicitly skipped</label>
-      <Field label="Late check-out fee, if due, paid by"><select value={lateMethod} onChange={(e) => setLateMethod(e.target.value)}><option value="cash">Cash</option><option value="pos">Card (POS)</option><option value="bank_transfer">Bank transfer</option></select></Field>
-      <div className="full"><Notice error={detail.error || error} /></div>
-      <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || balance > 0} title={balance > 0 ? 'Record the payments first' : undefined}>{saving ? 'Checking out…' : 'Check out'}</button></div>
+      {!inspected && <label className="check full"><input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} /> The guest cannot wait: skip the inspection (closed as "Skipped at check-out"; damage found later is handled with the guest)</label>}
+      <div className="full"><Notice error={error} /></div>
+      <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || bill.balance > 0 || bill.proposedPenalties > 0 || (!inspected && !skip)} title={bill.balance > 0 ? 'Record the payments first' : undefined}>{saving ? 'Checking out…' : 'Complete check-out'}</button></div>
     </form>
   </Modal>;
 }
@@ -386,34 +412,58 @@ function AddService({ booking, onClose }) {
   </form></Modal>;
 }
 
+// UC18: during the stay a room of the same or a higher-priced type (an upgrade is always charged); before check-in the
+// room type. A lower-priced type is listed only when nothing better is free, and needs the guest's agreement (BR-38).
 function ChangeRoom({ booking, onClose }) {
   const options = useApi(`/front-desk/bookings/${booking._id}/change-room-options`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
-  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${booking._id}/change-room`, { method: 'POST', body: f }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
-  return <Modal title={`Change room · ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
-    <Field label="Available room"><select name="newRoomId" required disabled={options.loading}><option value="">Select a room</option>{options.data?.map((r) => <option key={r._id} value={r._id}>Room {r.roomNumber} · {r.roomType?.name} · {money(r.roomType?.basePrice)}</option>)}</select></Field>
-    <Field label="Reason"><select name="cause" defaultValue="hotel"><option value="hotel">Hotel relocation / free upgrade or downgrade</option><option value="guest">Guest-requested same room / upgrade</option></select></Field>
-    <div className="full"><Notice error={options.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || options.loading || !options.data?.length}>{saving ? 'Changing…' : 'Confirm room change'}</button></div>
+  const [pick, setPick] = useState(''); const [agrees, setAgrees] = useState(false); const [dropCoupon, setDropCoupon] = useState(false);
+  const byType = options.data && options.meta?.mode === 'room_type';
+  const chosen = (options.data || []).find((o) => o._id === pick);
+  const submit = async (e) => {
+    e.preventDefault(); setSaving(true); setError(null);
+    try { await api(`/front-desk/bookings/${booking._id}/change-room`, { method: 'POST', body: { [byType ? 'newRoomTypeId' : 'newRoomId']: pick, ...(chosen?.lower ? { guestAgrees: agrees } : {}), ...(dropCoupon ? { dropCoupon: true } : {}) } }); onClose(); }
+    catch (x) { setError(x); } finally { setSaving(false); }
+  };
+  const diff = (o) => (o.difference > 0 ? ` · +${money(o.difference)}` : o.difference < 0 ? ` · −${money(-o.difference)}` : ' · same price');
+  return <Modal title={`${byType ? 'Change room type' : 'Change room'} · ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
+    <p className="full muted">{byType ? 'Before check-in the room type changes for the whole stay; the deposit does not change. The room itself is chosen at check-in.' : 'The remaining nights are charged at the new room type; the old room goes to cleaning.'}</p>
+    {options.meta?.onlyLower && <p className="full note">No room of the booked or a higher-priced type is free: only lower-priced types are offered.</p>}
+    <Field label={byType ? 'Available room type' : 'Available room'}><select value={pick} onChange={(e) => setPick(e.target.value)} required disabled={options.loading}><option value="">{byType ? 'Select a room type' : 'Select a room'}</option>{options.data?.map((o) => <option key={o._id} value={o._id}>{byType ? o.roomType.name : `Room ${o.roomNumber} · ${o.roomType?.name}`}{diff(o)}</option>)}</select></Field>
+    {chosen?.lower && <label className="check full"><input type="checkbox" checked={agrees} onChange={(e) => setAgrees(e.target.checked)} required /> The guest agrees to the lower-priced room type</label>}
+    {byType && booking.couponCode && <label className="check full"><input type="checkbox" checked={dropCoupon} onChange={(e) => setDropCoupon(e.target.checked)} /> If the coupon {booking.couponCode} no longer applies, the guest agrees to continue without the discount</label>}
+    <div className="full"><Notice error={options.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || options.loading || !options.data?.length}>{saving ? 'Saving…' : 'Confirm change'}</button></div>
   </form></Modal>;
 }
 
+// UC17: an approved check-in request pre-fills the guests and the ID number, which are checked against the document.
 function CheckInBooking({ booking, onClose }) {
   const rooms = useApi(`/front-desk/bookings/${booking._id}/available-rooms`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  const pre = rooms.meta?.request;
   const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${booking._id}/check-in`, { method: 'POST', body: { ...f, guestCount: Number(f.guestCount) } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  if (rooms.loading) return <Modal title={`Check in ${booking.bookingReference}`} onClose={onClose}><p className="muted">Loading rooms…</p></Modal>;
   return <Modal title={`Check in ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
-    <Field label="Available room"><select name="roomId" required disabled={rooms.loading}><option value="">Select a room</option>{rooms.data?.map((r) => <option key={r._id} value={r._id}>Room {r.roomNumber} · Floor {r.floor}</option>)}</select></Field>
-    <Field label="Number of guests"><input name="guestCount" type="number" min="1" defaultValue={booking.rooms?.[0]?.guestCount || 1} required /></Field><Field label="ID / passport number"><input name="idDocumentNo" required /></Field>
-    <div className="full"><Notice error={rooms.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || rooms.loading || !rooms.data?.length}>{saving ? 'Checking in…' : 'Confirm check-in'}</button></div>
+    {pre && <p className="full note">Pre-filled from the guest's check-in request: verify it against the original ID document.</p>}
+    <Field label="Available room"><select name="roomId" required><option value="">Select a room</option>{rooms.data?.map((r) => <option key={r._id} value={r._id}>Room {r.roomNumber} · Floor {r.floor}</option>)}</select></Field>
+    <Field label="Number of guests"><input name="guestCount" type="number" min="1" defaultValue={pre?.guestCount || booking.rooms?.[0]?.guestCount || 1} required /></Field><Field label="ID / passport number"><input name="idDocumentNo" defaultValue={pre?.idDocumentNo || ''} required /></Field>
+    <div className="full"><Notice error={rooms.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving || !rooms.data?.length}>{saving ? 'Checking in…' : 'Confirm check-in'}</button></div>
   </form></Modal>;
 }
 
+// UC16 at the desk: the ID document is checked here; the bank account for a refund is asked later, in UC21 (BR-17).
 function CancelBooking({ booking, onClose }) {
-  const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
-  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${booking._id}/cancel`, { method: 'POST', body: { ...f, verificationMethod: 'front_desk_id' } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  const [error, setError] = useState(null); const [saving, setSaving] = useState(false); const [hotel, setHotel] = useState(false); const [done, setDone] = useState(null);
+  const submit = async (e) => {
+    e.preventDefault(); if (!window.confirm(`Are you sure you want to cancel ${booking.bookingReference}?`)) return; // MSG-09
+    setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target));
+    try { setDone((await api(`/front-desk/bookings/${booking._id}/cancel`, { method: 'POST', body: hotel ? { hotelCaused: true, ...(f.reason ? { reason: f.reason } : {}) } : { reason: f.reason } })).message); }
+    catch (x) { setError(x); } finally { setSaving(false); }
+  };
+  if (done) return <Modal title={`Cancel ${booking.bookingReference}`} onClose={onClose}><Notice ok={done} /><p className="muted">A paid deposit is reviewed in Cancellations; a refund is then handled in Refunds, where the customer's bank account is entered.</p><div className="modal-actions"><button className="btn primary" onClick={onClose}>Close</button></div></Modal>;
   return <Modal title={`Cancel ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
-    <p className="full muted">Verify the guest's ID document at the front desk before confirming cancellation.</p>
-    <Field label="Cancellation reason"><input name="reason" required /></Field>
-    <Field label="Refund bank (if deposit was paid)"><input name="bank" /></Field><Field label="Refund account number"><input name="accountNumber" /></Field><Field label="Account holder name"><input name="accountHolderName" /></Field>
-    <div className="full"><Notice error={error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving}>{saving ? 'Cancelling…' : 'Confirm cancellation'}</button></div>
+    <p className="full muted">Check that the ID document matches the name of the person who made the booking. For a request by phone use Cancellations (code sent by e-mail).</p>
+    <label className="check full"><input type="checkbox" checked={hotel} onChange={(e) => setHotel(e.target.checked)} /> The hotel cannot provide the room (100% refund, approved at once)</label>
+    <Field label={hotel ? 'Reason (optional)' : 'Cancellation reason'}><input name="reason" required={!hotel} maxLength={500} /></Field>
+    <div className="full"><Notice error={error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Back</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Confirm cancellation'}</button></div>
   </form></Modal>;
 }
 
@@ -421,9 +471,11 @@ function EditBooking({ booking, onClose }) {
   const detail = useApi(`/bookings/${booking._id}`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
   if (detail.loading) return <Modal title="Modify booking" onClose={onClose}><p className="muted">Loading booking…</p></Modal>;
   const b = detail.data || booking; const checkedOut = b.status === 'checked_out';
-  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${b._id}`, { method: 'PATCH', body: { fullName: f.fullName, phone: f.phone, idDocumentNo: f.idDocumentNo, ...(checkedOut ? {} : { checkInDate: f.checkInDate, checkOutDate: f.checkOutDate, guestCount: Number(f.guestCount) }) } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
-  return <Modal title="Modify booking" onClose={onClose}><form className="form" onSubmit={submit}>
-    <Field label="Guest full name"><input name="fullName" defaultValue={b.guestName} required /></Field><Field label="Phone"><input name="phone" defaultValue={b.guestPhone} required /></Field><Field label="ID / passport number"><input name="idDocumentNo" defaultValue={b.guestIdDocumentNo} required /></Field>
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${b._id}`, { method: 'PATCH', body: { fullName: f.fullName, phone: f.phone, ...(f.idDocumentNo ? { idDocumentNo: f.idDocumentNo } : {}), ...(checkedOut ? {} : { ...(b.status === 'checked_in' ? {} : { checkInDate: f.checkInDate }), checkOutDate: f.checkOutDate, guestCount: Number(f.guestCount) }), ...(f.dropCoupon ? { dropCoupon: true } : {}) } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  return <Modal title={b.status === 'checked_in' ? 'Extend or edit stay' : 'Modify booking'} onClose={onClose}><form className="form" onSubmit={submit}>
+    {!checkedOut && <p className="full muted">{b.status === 'checked_in' ? 'Extra nights are priced at the rate of each night and need no deposit.' : 'The deposit already paid does not change; the difference is paid at check-out.'}</p>}
+    {!checkedOut && b.couponCode && <label className="check full"><input type="checkbox" name="dropCoupon" /> If the coupon {b.couponCode} no longer applies to the new stay, the guest agrees to continue without the discount</label>}
+    <Field label="Guest full name"><input name="fullName" defaultValue={b.guestName} required /></Field><Field label="Phone"><input name="phone" defaultValue={b.guestPhone} required /></Field>{['checked_in', 'checked_out'].includes(b.status) && <Field label="ID / passport number"><input name="idDocumentNo" defaultValue={b.guestIdDocumentNo} required /></Field>}
     {!checkedOut && <><Field label="Check-in"><input name="checkInDate" type="date" defaultValue={b.checkInDate?.slice(0, 10)} required disabled={b.status === 'checked_in'} /></Field><Field label="Check-out"><input name="checkOutDate" type="date" defaultValue={b.checkOutDate?.slice(0, 10)} required /></Field><Field label="Guests"><input name="guestCount" type="number" min="1" defaultValue={b.rooms?.[0]?.guestCount || 1} required /></Field></>}
     <div className="full"><Notice error={detail.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
   </form></Modal>;
@@ -483,12 +535,12 @@ function Payments() {
   const [status, setStatus] = useState('');
   const list = useApi(`/frontdesk/payments${status ? `?status=${status}` : ''}`);
   const rows = list.data || [];
-  const received = rows.filter((p) => p.status === 'success').reduce((a, p) => a + p.amount - (p.refundedAmount || 0), 0);
+  const received = rows.filter((p) => p.status === 'success').reduce((a, p) => a + p.amount, 0); // a refunded deposit is no longer held
   return (
     <>
       <PageHead title="Payments" sub="Deposits paid online and balances collected at the front desk" />
       <div className="chips" role="group" aria-label="Filter by status">
-        {[['', 'All'], ['success', 'Paid'], ['pending', 'Pending'], ['failed', 'Failed']].map(([v, l]) => <button key={l} className={status === v ? 'chip on' : 'chip'} aria-pressed={status === v} onClick={() => setStatus(v)}>{l}</button>)}
+        {[['', 'All'], ['success', 'Paid'], ['pending', 'Pending'], ['failed', 'Failed'], ['refunded', 'Refunded']].map(([v, l]) => <button key={l} className={status === v ? 'chip on' : 'chip'} aria-pressed={status === v} onClick={() => setStatus(v)}>{l}</button>)}
       </div>
       <Notice error={list.error} />
       {list.loading ? <p className="muted">Loading…</p> : rows.length === 0 ? <p className="empty">No payments yet.</p> : <>

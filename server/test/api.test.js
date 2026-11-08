@@ -136,6 +136,7 @@ test("bootstrap refuses to overwrite an existing administrator", async () => {
 });
 test("registration validates fields, hashes credentials, ignores no privileged input, rejects duplicates", async () => {
   await send(request(app), "post", "/api/auth/register", {
+    consent: true,
     username: "newguest",
     email: "new@example.com",
     fullName: "New Guest",
@@ -145,6 +146,7 @@ test("registration validates fields, hashes credentials, ignores no privileged i
   }).expect(400);
   // Missing phone is rejected
   await send(request(app), "post", "/api/auth/register", {
+    consent: true,
     username: "newguest",
     email: "new@example.com",
     fullName: "New Guest",
@@ -152,6 +154,7 @@ test("registration validates fields, hashes credentials, ignores no privileged i
   }).expect(400);
   // Password and confirmPassword mismatch is rejected
   await send(request(app), "post", "/api/auth/register", {
+    consent: true,
     username: "newguest",
     email: "new@example.com",
     fullName: "New Guest",
@@ -160,6 +163,7 @@ test("registration validates fields, hashes credentials, ignores no privileged i
     phone: "0912345678",
   }).expect(400);
   const result = await send(request(app), "post", "/api/auth/register", {
+    consent: true,
     username: "newguest",
     email: "NEW@example.com",
     fullName: "New Guest",
@@ -174,6 +178,7 @@ test("registration validates fields, hashes credentials, ignores no privileged i
   );
   assert.notEqual(saved.passwordHash, password);
   await send(request(app), "post", "/api/auth/register", {
+    consent: true,
     username: "different",
     email: "new@example.com",
     fullName: "New Guest",
@@ -181,6 +186,7 @@ test("registration validates fields, hashes credentials, ignores no privileged i
     phone: "0912345678",
   }).expect(409);
   await send(request(app), "post", "/api/auth/register", {
+    consent: true,
     username: "bad",
     email: "bad",
     fullName: "X",
@@ -207,6 +213,18 @@ test("authentication rejects bad passwords, missing sessions and foreign origins
   const agent = await login("customer@example.com");
   await send(agent, "post", "/api/auth/logout").expect(200);
   await agent.get("/api/auth/me").expect(401);
+  // SDS b.1: logout increases the tokenVersion, so every other session of the account ends too.
+  await customer.get("/api/auth/me").expect(401);
+  customer = await login("customer@example.com");
+  // A forged, re-signed or "none" token is refused.
+  const jwt = require("../src/utils/jwt");
+  const token = /hotel\.token=([^;]+)/.exec(res.headers["set-cookie"][0])[1];
+  const [h, , sig] = token.split(".");
+  const forged = `${h}.${Buffer.from(JSON.stringify({ sub: "x", ver: 0, exp: 9999999999 })).toString("base64url")}.${sig}`;
+  const none = `${Buffer.from('{"alg":"none","typ":"JWT"}').toString("base64url")}.${token.split(".")[1]}.`;
+  for (const bad of [forged, none, jwt.sign({ sub: "x" }, "another-secret-of-more-than-32-characters", 60000), jwt.sign({ sub: "x" }, "s", -1000)])
+    await request(app).get("/api/auth/me").set("Cookie", `hotel.token=${bad}`).expect(401);
+  assert.equal(jwt.verify(jwt.sign({ sub: "u" }, "k", 60000), "k").sub, "u");
 });
 test("BR-42: 5 consecutive failed logins lock the account for 15 minutes and are audited", async () => {
   const AuditLog = require("../src/models/AuditLog");
@@ -225,7 +243,7 @@ test("BR-42: 5 consecutive failed logins lock the account for 15 minutes and are
   await attempt(password).expect(200);
 });
 test("SRS 4.2.4: sessions expire after 15 min idle for staff and 30 min for customers, renewed on activity", async () => {
-  // express-session sends Expires, not Max-Age: round the remaining lifetime to minutes.
+  // The token cookie carries Expires: round the remaining lifetime to minutes.
   const maxAge = (res) => Math.round((Date.parse(/Expires=([^;]+)/.exec(res.headers["set-cookie"][0])[1]) - Date.now()) / 60000) * 60;
   const staffLogin = await send(request(app), "post", "/api/auth/login", { email: "staff@example.com", password }).expect(200);
   assert.equal(maxAge(staffLogin), 15 * 60);
@@ -280,6 +298,7 @@ test("password whitespace is preserved at login and password change", async () =
   const agent = request.agent(app);
   const spaced = "  SpacesMatter123!  ";
   await send(agent, "post", "/api/auth/register", {
+    consent: true,
     username: "spaced",
     email: "spaced@example.com",
     fullName: "Spaced Password",
@@ -579,7 +598,7 @@ test("booking history and details expose only the customer's own bookings with p
   assert.ok(ids.includes(mineBooking.id) && ids.includes(cancelled.id));
   assert.ok(!ids.includes(foreign.id));
   const row = list.body.data.find((b) => b._id === mineBooking.id);
-  assert.equal(row.paymentStatus, "partial");
+  assert.equal(row.paymentStatus, "deposit_paid"); // SRS 2.6
   assert.equal(row.paidAmount, 600);
   assert.equal(row.rooms[0].roomTypeId.name, "History Suite");
   assert.equal(row.events, undefined);
@@ -619,7 +638,8 @@ test("online booking: held 15 minutes for the deposit (BR-29), no pay-at-hotel o
   const Room = require("../src/models/Room");
   const type = await RoomType.create({ name: "Checkout Suite", basePrice: 1000, maxOccupancy: 2 });
   await Room.create({ roomNumber: "CO-1", roomTypeId: type._id, floor: 1 });
-  const body = { roomTypeId: type.id, checkInDate: "2027-08-10", checkOutDate: "2027-08-12", guestCount: 2 };
+  const body = { roomTypeId: type.id, checkInDate: "2027-08-10", checkOutDate: "2027-08-12", guestCount: 2, consent: true };
+  await send(customer, "post", "/api/bookings", { ...body, consent: undefined }).expect(400); // CR-21
   for (const paymentOption of ["hotel", "full"])
     await send(customer, "post", "/api/bookings", { ...body, paymentOption }).expect(400);
   const booking = (await send(customer, "post", "/api/bookings", body).expect(201)).body.data;
@@ -714,7 +734,7 @@ test("BR-14: the balance is paid only at the front desk, never online; the recep
   assert.equal(cash.remaining, 0);
   assert.equal(String((await Payment.findById(cash.paymentId)).recordedBy), String((await User.findOne({ email: "staff@example.com" }))._id));
   const detail = (await customer.get(`/api/bookings/${booking.id}`).expect(200)).body.data;
-  assert.equal(detail.paymentStatus, "paid");
+  assert.equal(detail.paymentStatus, "fully_paid"); // SRS 2.6
   assert.equal(detail.paidAmount, 2000);
   await send(staff, "post", desk, { method: "cash" }).expect(409); // nothing is left to pay
 });
@@ -1249,7 +1269,7 @@ test("UC21: the receptionist enters the customer's bank account, notes contact a
   const done = (await send(staff, "post", url, { bankTransactionCode: "FT26110100001", note: "Sent" }).expect(200)).body;
   assert.equal(done.data.status, "completed");
   assert.match(done.message, /Refund recorded/);
-  assert.equal((await Payment.findById(stored.paymentId)).refundedAmount, 600);
+  assert.equal((await Payment.findById(stored.paymentId)).status, "refunded"); // BR-17: whole deposit, once
   await send(staff, "post", url, { bankTransactionCode: "FT2" }).expect(409);
   assert.match((await Notification.findOne({ type: "refund_completed", bookingId: booking._id })).message, /FT26110100001/);
   assert.ok((await staff.get("/api/frontdesk/refunds?status=completed").expect(200)).body.data.some((x) => x._id === r._id));
@@ -1303,6 +1323,174 @@ test("T17: the daily reconciliation settles SePay orders whose IPN never arrived
 });
 
 // Runs last: it changes the customer password, which ends the shared customer session.
+// ---- SRS v2.5 / SDS v5 (08/11/2026) business rules ----
+const vnDay = (offset = 0) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh" }).format(new Date(Date.now() + offset * 864e5));
+const vnAt = (day, time) => new Date(`${day}T${time}:00+07:00`);
+async function srsUser(username, role) {
+  await User.create({ username, email: `${username}@example.com`, passwordHash: await hashPassword(password), roleId: await roleId(role), phone: "0912345678", customerProfile: { fullName: username }, isVerified: true });
+  return login(`${username}@example.com`);
+}
+async function srsRooms(prefix, prices) {
+  const RoomType = require("../src/models/RoomType");
+  const Room = require("../src/models/Room");
+  const types = {};
+  for (const [name, price] of Object.entries(prices)) {
+    types[name] = await RoomType.create({ name: `${prefix} ${name}`, basePrice: price, maxOccupancy: 2 });
+    types[name].rooms = await Room.create([1, 2].map((i) => ({ roomNumber: `${prefix}-${name}-${i}`, roomTypeId: types[name]._id, floor: 9 })));
+  }
+  return types;
+}
+const srsBooking = (customerId, type, extra) => Booking.create({
+  customerId, createdBy: customerId, rooms: [{ roomTypeId: type._id, roomId: type.rooms[0]._id, priceAtBooking: type.basePrice, guestCount: 1 }],
+  policySnapshot: { depositValue: 30, cancellationTiers: tiers([48, 100], [0, 0]) }, bookingReference: `SRS-${new mongoose.Types.ObjectId()}`, ...extra,
+});
+
+test("SRS v2.5 UC06 / UC07: consent and 3 unpaid bookings (MSG-79); a modification keeps the Confirmed deposit (BR-40) and the full-refund rule (BR-46, MSG-78)", async () => {
+  const guest = await srsUser("srs25guest", "customer");
+  const me = await User.findOne({ username: "srs25guest" });
+  const { Std } = await srsRooms("M25", { Std: 1000 });
+  for (let i = 0; i < 3; i++) await srsBooking(me._id, Std, { checkInDate: "2027-09-01", checkOutDate: "2027-09-02", roomAmount: 1000, totalAmount: 1000, status: "pending", holdExpiresAt: new Date(Date.now() + 600000) });
+  const create = { roomTypeId: Std.id, checkInDate: "2027-09-20", checkOutDate: "2027-09-22", guestCount: 1, consent: true };
+  assert.match((await send(guest, "post", "/api/bookings", create).expect(409)).body.error.message, /3 unpaid bookings/);
+  await Booking.updateMany({ customerId: me._id, status: "pending" }, { status: "expired" });
+
+  // A Confirmed booking with a paid deposit: longer stay at once, the deposit is unchanged, the customer is notified.
+  const b = await srsBooking(me._id, Std, { checkInDate: "2027-09-10", checkOutDate: "2027-09-12", roomAmount: 2000, totalAmount: 2000, depositRequired: 1500, status: "confirmed",
+    nightlyRates: [{ date: "2027-09-10", roomTypeId: Std._id, price: 1500 }, { date: "2027-09-11", roomTypeId: Std._id, price: 500 }] });
+  await Payment.create({ bookingId: b._id, kind: "deposit", amount: 1500, method: "bank_transfer", status: "success", paidAt: new Date() });
+  const longer = (await send(guest, "post", `/api/bookings/${b.id}/modify`, { checkOutDate: "2027-09-13" }).expect(200)).body.data;
+  assert.deepEqual([longer.totalAmount, longer.depositRequired], [3000, 1500]);
+  assert.deepEqual(longer.nightlyRates.map((n) => n.price), [1500, 500, 1000]); // SDS b.10: kept nights keep their own price (BR-35)
+  assert.ok(await require("../src/models/Notification").exists({ type: "booking_modified", bookingId: b._id }));
+  // The total may not fall below the deposit already paid: cancel instead.
+  await send(guest, "post", `/api/bookings/${b.id}/modify`, { checkInDate: "2027-09-12", checkOutDate: "2027-09-13" }).expect(409);
+  await send(guest, "post", `/api/bookings/${b.id}/modify`, { idDocumentNo: "123" }).expect(400); // no ID in UC07
+
+  // Within 48 h the cancellation would not be refunded in full, so the dates are locked (MSG-78).
+  const soon = await srsBooking(me._id, Std, { checkInDate: vnDay(1), checkOutDate: vnDay(2), roomAmount: 1000, totalAmount: 1000, depositRequired: 300, status: "confirmed" });
+  await Payment.create({ bookingId: soon._id, kind: "deposit", amount: 300, method: "bank_transfer", status: "success", paidAt: new Date() });
+  assert.match((await send(guest, "post", `/api/bookings/${soon.id}/modify`, { checkOutDate: vnDay(3) }).expect(409)).body.error.message, /can no longer be changed/);
+
+  // A Pending Payment booking cannot change while its payment is at the gateway (BR-40).
+  const pending = await srsBooking(me._id, Std, { checkInDate: "2027-09-15", checkOutDate: "2027-09-16", roomAmount: 1000, totalAmount: 1000, depositRequired: 300, status: "pending", holdExpiresAt: new Date(Date.now() + 600000) });
+  await Payment.create({ bookingId: pending._id, kind: "deposit", amount: 300, method: "bank_transfer", status: "pending" });
+  await send(guest, "post", `/api/bookings/${pending.id}/modify`, { checkOutDate: "2027-09-17" }).expect(409);
+});
+
+test("SRS v2.5 UC16 / UC35 1a: the front desk records a request without a bank account and withdraws it at the customer's request", async () => {
+  const me = await User.findOne({ username: "srs25guest" });
+  const { Std } = await srsRooms("C25", { Std: 1000 });
+  const b = await srsBooking(me._id, Std, { checkInDate: "2027-11-10", checkOutDate: "2027-11-12", roomAmount: 2000, totalAmount: 2000, depositRequired: 600, status: "confirmed" });
+  await Payment.create({ bookingId: b._id, kind: "deposit", amount: 600, method: "bank_transfer", status: "success", paidAt: new Date() });
+  const asked = (await send(staff, "post", `/api/front-desk/bookings/${b.id}/cancel`, { reason: "Change of plans" }).expect(200)).body.data;
+  assert.deepEqual([asked.status, asked.refundableAmount], ["cancellation_requested", 600]);
+  assert.equal((await Booking.findById(b.id)).cancellation.verifyMethod, "id_document");
+  await send(customer, "post", `/api/frontdesk/cancellations/${b.id}/withdraw`).expect(403);
+  assert.equal((await send(staff, "post", `/api/frontdesk/cancellations/${b.id}/withdraw`).expect(200)).body.data.status, "confirmed");
+  assert.ok(await require("../src/models/AuditLog").exists({ action: "cancellation.withdrawn", targetId: b._id }));
+});
+
+test("SRS v2.5 UC20 / BR-47 / BR-22: check-out needs the balance paid and the inspection done or skipped; after 18:00 an extra night is posted", async () => {
+  const me = await User.findOne({ username: "srs25guest" });
+  const Room = require("../src/models/Room");
+  const Task = require("../src/models/CleaningTask");
+  const { Std } = await srsRooms("O25", { Std: 1000 });
+  await Room.updateOne({ _id: Std.rooms[0]._id }, { status: "occupied" });
+  const stay = await srsBooking(me._id, Std, { checkInDate: vnDay(-1), checkOutDate: vnDay(3), roomAmount: 4000, totalAmount: 4000, depositRequired: 1200, status: "checked_in" });
+  await Payment.create({ bookingId: stay._id, kind: "deposit", amount: 1200, method: "bank_transfer", status: "success", paidAt: new Date() });
+  const bill = (await send(staff, "post", `/api/front-desk/bookings/${stay.id}/check-out/start`).expect(200)).body.data;
+  assert.equal(bill.balance, 2800);
+  assert.ok(bill.inspection, "an inspection task is requested");
+  const url = `/api/front-desk/bookings/${stay.id}/check-out`;
+  assert.match((await send(staff, "post", url).expect(409)).body.error.message, /unpaid/); // BR-20
+  await send(staff, "post", `/api/frontdesk/bookings/${stay.id}/payments`, { method: "cash" }).expect(201);
+  assert.match((await send(staff, "post", url).expect(409)).body.error.message, /inspection/);
+  const done = (await send(staff, "post", url, { skipInspection: true }).expect(200)).body;
+  assert.equal(done.data.booking.status, "checked_out");
+  assert.match(done.data.invoice.invoiceNumber, /^INV-\d{8}-\d{4}$/);
+  const nights = done.data.invoice.lines.filter((l) => l.name.startsWith("Night of"));
+  assert.deepEqual([nights.length, nights.reduce((sum, l) => sum + l.amount, 0)], [4, 4000]); // room charge of every night (UC11)
+  const inspection = await Task.findOne({ bookingId: stay._id, type: "inspection" });
+  assert.deepEqual([inspection.status, inspection.notes], ["completed", "Skipped at check-out"]);
+  assert.equal((await Room.findById(Std.rooms[0]._id)).status, "cleaning");
+
+  // The guest is still in the room after 18:00 on the check-out date: one extra night instead of the late fee, once.
+  await Room.updateOne({ _id: Std.rooms[1]._id }, { status: "occupied" });
+  const late = await srsBooking(me._id, Std, { checkInDate: vnDay(-3), checkOutDate: vnDay(-1), roomAmount: 2000, totalAmount: 2000, status: "checked_in" });
+  await Booking.updateOne({ _id: late._id }, { "rooms.0.roomId": Std.rooms[1]._id });
+  const lateBill = (await send(staff, "post", `/api/front-desk/bookings/${late.id}/check-out/start`).expect(200)).body.data;
+  assert.deepEqual(lateBill.feeLines.map((f) => [f.type, f.amount]), [["extra_night", 1000]]);
+  await send(staff, "post", `/api/front-desk/bookings/${late.id}/check-out/start`).expect(200);
+  assert.equal((await Booking.findById(late.id)).totalAmount, 3000);
+  // Between the standard check-out time and 18:00 the late check-out fee of the policy applies.
+  const { postLateCharge } = require("../src/controllers/bookingCreation");
+  const { currentCancellationPolicy } = require("../src/services/policies");
+  const policy = await currentCancellationPolicy();
+  const day = vnDay(5);
+  const fresh = new Booking({ checkOutDate: day, feeLines: [], feeAmount: 0, totalAmount: 0, rooms: [{ roomTypeId: Std._id, priceAtBooking: 1000 }] });
+  const afterStandard = vnAt(day, policy?.checkOutTime || "12:00"); afterStandard.setMinutes(afterStandard.getMinutes() + 30);
+  assert.equal(await postLateCharge(fresh, afterStandard), policy?.lateCheckOutFee || 0);
+});
+
+test("SRS v2.5 UC18 / BR-38: an upgrade is always charged; a lower-priced room needs nothing better free (MSG-68); before check-in the room type changes", async () => {
+  const me = await User.findOne({ username: "srs25guest" });
+  const Room = require("../src/models/Room");
+  const AuditLog = require("../src/models/AuditLog");
+  const t = await srsRooms("R25", { Low: 500, Mid: 1000, High: 2000 });
+  await Room.updateOne({ _id: t.Mid.rooms[0]._id }, { status: "occupied" });
+  const stay = await srsBooking(me._id, t.Mid, { checkInDate: vnDay(-1), checkOutDate: vnDay(2), roomAmount: 3000, totalAmount: 3000, status: "checked_in" });
+  const url = `/api/front-desk/bookings/${stay.id}/change-room`;
+  assert.match((await send(staff, "post", url, { newRoomId: t.Low.rooms[0].id }).expect(409)).body.error.message, /lower-priced/);
+  const up = (await send(staff, "post", url, { newRoomId: t.High.rooms[0].id }).expect(200)).body;
+  assert.equal(up.data.roomAmount, 3000 + 2 * 2000 - 2 * 1000); // the 2 remaining nights at the new rate
+  assert.equal((await Room.findById(t.Mid.rooms[0]._id)).status, "cleaning");
+  assert.ok(await AuditLog.exists({ action: "booking.room_changed", targetId: stay._id }));
+
+  const ahead = await srsBooking(me._id, t.Mid, { checkInDate: "2027-10-01", checkOutDate: "2027-10-03", roomAmount: 2000, totalAmount: 2000, depositRequired: 600, status: "confirmed" });
+  const types = (await staff.get(`/api/front-desk/bookings/${ahead.id}/change-room-options`).expect(200)).body;
+  assert.equal(types.meta.mode, "room_type");
+  const moved = (await send(staff, "post", `/api/front-desk/bookings/${ahead.id}/change-room`, { newRoomTypeId: t.High.id }).expect(200)).body.data;
+  assert.deepEqual([moved.roomAmount, moved.depositRequired, String(moved.rooms[0].roomTypeId)], [4000, 600, t.High.id]);
+});
+
+test("SRS v2.5 UC30 / UC39 / BR-33: skip rules, auto-approved requests, withdrawal, and the 06:00 no-show cut-off", async () => {
+  const guest = await login("srs25guest@example.com");
+  const me = await User.findOne({ username: "srs25guest" });
+  const Task = require("../src/models/CleaningTask");
+  const Notification = require("../src/models/Notification");
+  const hk = await srsUser("srs25hk", "housekeeping");
+  const hkUser = await User.findOne({ username: "srs25hk" });
+  const { Std } = await srsRooms("H25", { Std: 1000 });
+  const turnover = await Task.create({ roomId: Std.rooms[0]._id, type: "turnover", status: "assigned", assignedTo: hkUser._id });
+  await send(hk, "patch", `/api/housekeeping/tasks/${turnover.id}/status`, { status: "skipped", reason: "Guest asleep" }).expect(409);
+  const routine = await Task.create({ roomId: Std.rooms[0]._id, type: "routine", status: "assigned", assignedTo: hkUser._id });
+  await send(hk, "patch", `/api/housekeeping/tasks/${routine.id}/status`, { status: "skipped" }).expect(400); // reason required
+  await send(hk, "patch", `/api/housekeeping/tasks/${routine.id}/status`, { status: "completed" }).expect(409); // MSG-49
+  assert.equal((await send(hk, "patch", `/api/housekeeping/tasks/${routine.id}/status`, { status: "skipped", reason: "Do not disturb" }).expect(200)).body.data.skipReason, "Do not disturb");
+
+  const day = "2027-12-01";
+  const b = await srsBooking(me._id, Std, { checkInDate: day, checkOutDate: "2027-12-02", roomAmount: 1000, totalAmount: 1000, status: "confirmed" });
+  const reqUrl = `/api/bookings/${b.id}/requests`;
+  const guestData = { type: "check_in", numberOfGuests: 1, mainGuestName: "Srs Guest", mainGuestIdNumber: "079123456789" };
+  const normal = (await send(guest, "post", reqUrl, { ...guestData, requestedTime: vnAt(day, "20:00").toISOString() }).expect(201)).body.data;
+  assert.equal(normal.status, "approved"); // BR-44: no early check-in, approved at once
+  await send(guest, "post", reqUrl, { ...guestData, requestedTime: vnAt(day, "08:00").toISOString() }).expect(409); // one open request
+  await send(guest, "delete", `${reqUrl}/${normal._id}`).expect(200);
+  const early = (await send(guest, "post", reqUrl, { ...guestData, requestedTime: vnAt(day, "08:00").toISOString() }).expect(201)).body.data;
+  assert.equal(early.status, "pending");
+  await send(staff, "patch", `/api/frontdesk/requests/${early._id}`, { action: "reject" }).expect(400); // a reason is required
+  await send(staff, "patch", `/api/frontdesk/requests/${early._id}`, { action: "reject", responseNote: "No room ready that early" }).expect(200);
+  assert.ok(await Notification.exists({ type: "stay_request_decided", bookingId: b._id }));
+
+  // BR-33: last night's arrival keeps the room until 06:00.
+  const { processNoShows } = require("../src/services/noShows");
+  const arrival = await srsBooking(me._id, Std, { checkInDate: vnDay(-1), checkOutDate: vnDay(1), roomAmount: 2000, totalAmount: 2000, status: "confirmed" });
+  await processNoShows(vnAt(vnDay(0), "05:00"));
+  assert.equal((await Booking.findById(arrival.id)).status, "confirmed");
+  await processNoShows(vnAt(vnDay(0), "06:30"));
+  assert.equal((await Booking.findById(arrival.id)).status, "no_show");
+});
+
 test("forgot password generates token, rejects invalid/expired token, resets password and updates authVersion", async () => {
   await send(request(app), "post", "/api/auth/forgot-password", {
     email: "nonexistent@example.com",

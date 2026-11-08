@@ -489,7 +489,7 @@ export function Profile() {
   const save = async (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
-    try { const r = await api('/profile', { method: 'PATCH', body: { fullName: f.fullName, phone: f.phone, address: f.address, dateOfBirth: f.dateOfBirth } }); setUser(r.data); setErr(null); setOk('Profile saved.'); }
+    try { const r = await api('/profile', { method: 'PATCH', body: { fullName: f.fullName, phone: f.phone, address: f.address, dateOfBirth: f.dateOfBirth, ...(f.email ? { email: f.email } : {}) } }); setUser(r.data); setErr(null); setOk(r.message || 'Profile saved.'); }
     catch (x) { setErr(x); setOk(''); }
   };
   const pw = async (e) => {
@@ -521,6 +521,8 @@ export function Profile() {
         <form className="panel form one" onSubmit={save}>
           <h2>Personal details</h2>
           <Field label="Full name" error={err?.fields?.fullName}><input name="fullName" defaultValue={cp.fullName} required /></Field>
+          {/* UC03 4b: only a Customer changes the e-mail, through a link sent to the new address (BR-24) */}
+          {user.role === 'customer' && <Field label={user.pendingEmail ? `E-mail (waiting for verification: ${user.pendingEmail})` : 'E-mail'} error={err?.fields?.email}><input name="email" type="email" defaultValue={user.email} required /></Field>}
           <Field label="Phone" error={err?.fields?.phone}><input name="phone" defaultValue={user.phone} /></Field>
           <Field label="Address" error={err?.fields?.address}><input name="address" defaultValue={cp.address} /></Field>
           <Field label="Date of birth" error={err?.fields?.dateOfBirth}><input name="dateOfBirth" type="date" defaultValue={inputDate(cp.dateOfBirth)} /></Field>

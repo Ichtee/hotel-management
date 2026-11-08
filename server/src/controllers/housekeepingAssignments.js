@@ -47,7 +47,7 @@ async function affectedRooms(before, after, session, now) {
   const rooms = await Room.find({ isActive: true }).select("floor").session(session).lean();
   const result = rooms.filter((r) => relevant.some((p) => matchesRoom(p, r))).map((r) => String(r._id));
   if (before) {
-    const heldTasks = await Task.find({ assignmentId: before._id, status: "assigned",
+    const heldTasks = await Task.find({ assignmentId: before._id, status: { $in: ["assigned", "in_progress"] },
       $or: [{ scheduledDate: { $lte: now } }, { scheduledDate: null }] }).select("roomId").session(session).lean();
     result.push(...heldTasks.map((task) => String(task.roomId)));
   }

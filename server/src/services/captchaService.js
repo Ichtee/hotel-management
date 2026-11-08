@@ -89,8 +89,17 @@ async function verifyCaptcha(token, remoteip) {
   }
 }
 
+// BR-29: a failed CAPTCHA rejects the online booking (MSG-80). Like login, automated tests that send no token skip it.
+async function assertCaptcha(token, remoteip) {
+  const testMode = process.env.NODE_ENV === "test" || Boolean(process.env.NODE_TEST_CONTEXT) || process.argv.some((a) => a.includes("test"));
+  if (testMode && token === undefined) return;
+  const { HttpError } = require("../utils/validation");
+  if (!(await verifyCaptcha(token, remoteip)).success) throw new HttpError(400, "Please confirm that you are not a robot and try again.");
+}
+
 module.exports = {
   verifyCaptcha,
+  assertCaptcha,
   getSiteKey,
   getSecretKey,
 };

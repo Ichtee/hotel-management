@@ -15,7 +15,7 @@ async function start() {
     throw new Error("CLIENT_ORIGIN is required in production.");
   await connectDatabase();
   await seedRoles();
-  const { app, store } = createApp({
+  const { app } = createApp({
     mongoUri: process.env.MONGO_URI,
     sessionSecret:
       process.env.SESSION_SECRET ||
@@ -31,7 +31,6 @@ async function start() {
   const stop = () =>
     server.close(async () => {
       await stopScheduler();
-      await store.close();
       await mongoose.disconnect();
       process.exit(0);
     });

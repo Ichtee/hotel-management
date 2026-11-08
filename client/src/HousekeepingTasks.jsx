@@ -11,8 +11,11 @@ export default function HousekeepingTasks() {
   const [reporting, setReporting] = useState(null);
 
   const changeStatus = async (task, status) => {
+    // UC30 3b: a skip needs the reason (guest declined, Do not disturb).
+    const reason = status === 'skipped' ? window.prompt('Reason for skipping (e.g. guest declined, Do not disturb):') : undefined;
+    if (status === 'skipped' && !reason) return;
     try {
-      await api(`/housekeeping/tasks/${task._id}/status`, { method: 'PATCH', body: { status } });
+      await api(`/housekeeping/tasks/${task._id}/status`, { method: 'PATCH', body: reason ? { status, reason } : { status } });
       tasks.reload();
     } catch (error) {
       window.alert(error.message);
@@ -28,13 +31,14 @@ export default function HousekeepingTasks() {
           cols={['Room', 'Task', 'Priority', 'Scheduled', 'Status', '']}
           rows={(tasks.data || []).map((task) => [
             task.roomId ? `Room ${task.roomId.roomNumber} - Floor ${task.roomId.floor}` : 'Room unavailable',
-            taskName(task),
+            task.preferredTime ? `${taskName(task)} · at ${new Date(task.preferredTime).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Ho_Chi_Minh' })}` : taskName(task),
             <Badge v={task.priority} />,
             dateLabel(task.scheduledDate || task.createdAt),
             <Badge v={task.status} />,
             <span className="row-actions">
               {task.status === 'assigned' && <button className="btn sm" onClick={() => changeStatus(task, 'in_progress')}>Start</button>}
-              {task.status === 'in_progress' && <><button className="btn sm primary" onClick={() => changeStatus(task, 'completed')}>Complete</button><button className="btn sm" onClick={() => changeStatus(task, 'skipped')}>Skip</button></>}
+              {task.status === 'in_progress' && <><button className="btn sm primary" onClick={() => changeStatus(task, 'completed')}>Complete</button></>}
+              {['assigned', 'in_progress'].includes(task.status) && ['routine', 'ad_hoc'].includes(task.type) && <button className="btn sm" onClick={() => changeStatus(task, 'skipped')}>Skip</button>}
               {task.roomId && task.status !== 'skipped' && <button className="btn sm" onClick={() => setReporting(task.roomId._id)}>Report damage / issue</button>}
             </span>,
           ])}

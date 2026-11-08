@@ -46,6 +46,7 @@ test("Email Verification: Registration, token hashing, rejection before verify, 
   });
 
   const userData = {
+    consent: true,
     username: "verifyuser",
     email: "verifyuser@example.com",
     fullName: "Verify User",
@@ -137,6 +138,7 @@ test("Email Verification: Token expiration and resend cooldown", async () => {
   });
 
   const userData = {
+    consent: true,
     username: "expireuser",
     email: "expireuser@example.com",
     fullName: "Expire User",

@@ -112,7 +112,12 @@ const schema = new Schema({
   roomAmount: { type: Number, required: true, min: 0 },
   serviceAmount: { type: Number, default: 0, min: 0 },
   penaltyAmount: { type: Number, default: 0, min: 0 }, // confirmed UC38 penalties, included in totalAmount
-  feeAmount: { type: Number, default: 0, min: 0 },
+  feeAmount: { type: Number, default: 0, min: 0 }, // sum of feeLines
+  // BR-44 / BR-47: at most one line of each type; after 18:00 an extra night replaces the late check-out fee.
+  feeLines: [{ _id: false, type: { type: String, enum: ['early_check_in', 'late_check_out', 'extra_night'] }, amount: Number, postedAt: Date }],
+  consentAt: Date, // CR-21: privacy consent of an online booking
+  // SDS b.10 / BR-35 / BR-38: the price and room type of every night, copied when the night is booked.
+  nightlyRates: [{ _id: false, date: Date, roomTypeId: { type: Schema.Types.ObjectId, ref: 'RoomType' }, price: { type: Number, min: 0 } }],
   totalAmount: { type: Number, required: true, min: 0 },
   depositRequired: { type: Number, default: 0, min: 0 },
   currency: { type: String, default: 'VND', uppercase: true, trim: true },

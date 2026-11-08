@@ -3,14 +3,14 @@ const Payment = require("../models/Payment");
 const Refund = require("../models/Refund");
 const Penalty = require("../models/Penalty");
 const Invoice = require("../models/Invoice");
+const CheckInOutRequest = require("../models/CheckInOutRequest");
 require("../models/RoomType");
 require("../models/Room");
 const v = require("../utils/validation");
-// BR-14: only verified (success) payments count as paid.
+// SRS 2.6 booking payment status, from the verified (success) payments only (BR-14): Unpaid -> Deposit Paid -> Fully Paid.
 function paymentStatus(booking, payments) {
   const paid = payments.filter((p) => p.status === "success").reduce((s, p) => s + p.amount, 0);
-  const status =
-    paid >= booking.totalAmount ? "paid" : paid > 0 ? "partial" : payments.some((p) => p.status === "pending") ? "pending" : "unpaid";
+  const status = paid > 0 && paid >= booking.totalAmount ? "fully_paid" : paid > 0 ? "deposit_paid" : "unpaid";
   return { paidAmount: paid, paymentStatus: status };
 }
 // BR-26: a customer reaches only their own bookings.
@@ -46,13 +46,14 @@ async function detail(req, res) {
     .populate("rooms.roomId", "roomNumber floor")
     .lean();
   if (!booking) throw new v.HttpError(404, "Booking not found.");
-  const [payments, refunds, penalties, invoices] = await Promise.all([
+  const [payments, refunds, penalties, invoices, requests] = await Promise.all([
     Payment.find({ bookingId: booking._id }).select("kind amount currency method status paidAt createdAt").sort({ createdAt: 1 }).lean(),
     Refund.find({ bookingId: booking._id }).select("amount currency status reason bankTransactionCode processedAt createdAt").sort({ createdAt: 1 }).lean(),
     // UC09: penalties and invoices; a Proposed penalty is not shown until the front desk confirms it with the guest (UC38).
     Penalty.find({ bookingId: booking._id, status: { $ne: "proposed" } }).select("itemName amount status waivedReason afterCheckout").sort({ createdAt: 1 }).lean(),
     Invoice.find({ bookingId: booking._id }).select("invoiceNumber kind lines totalAmount issuedAt createdAt").sort({ createdAt: 1 }).lean(),
+    CheckInOutRequest.find({ bookingId: booking._id }).select("type requestedTime earlyOrLate quotedFee status responseNote numberOfGuests createdAt").sort({ createdAt: -1 }).lean(),
   ]);
-  res.json({ data: { ...booking, ...paymentStatus(booking, payments), payments, refunds, penalties, invoices } });
+  res.json({ data: { ...booking, ...paymentStatus(booking, payments), payments, refunds, penalties, invoices, requests } });
 }
 module.exports = { listing, detail };

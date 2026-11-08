@@ -24,7 +24,7 @@ async function main() {
   const mongoUri = db.getUri("hotel_member1_demo");
   await mongoose.connect(mongoUri);
   if (!persist || !(await require("../src/models/User").exists({}))) await seedDemo();
-  const { app, store } = createApp({
+  const { app } = createApp({
     mongoUri,
     sessionSecret: randomBytes(32).toString("hex"),
     clientOrigin: "http://localhost:5173",
@@ -39,7 +39,6 @@ async function main() {
   const stop = () =>
     server.close(async () => {
       await stopScheduler();
-      await store.close();
       await mongoose.disconnect();
       await db.stop();
       process.exit(0);

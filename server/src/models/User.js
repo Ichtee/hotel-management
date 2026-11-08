@@ -15,8 +15,11 @@ const userSchema = new Schema({
   emailVerification: {
     tokenHash: { type: String, select: false },
     expiresAt: { type: Date, select: false },
-    lastSentAt: { type: Date, select: false }
+    lastSentAt: { type: Date, select: false },
+    sentAt: { type: [Date], select: false } // BR-42: the verification e-mails of the last hour, at most 3
   },
+  pendingEmail: { type: String, lowercase: true, trim: true }, // UC03 4b: new e-mail waiting for its link
+  consentAt: Date, // CR-21: time of the privacy consent
   authVersion: { type: Number, default: 0, select: false },
   // BR-42: 5 consecutive failed logins lock the account for 15 minutes.
   failedLogins: { type: Number, default: 0, select: false, alias: 'failedLoginAttempts' },

@@ -6,7 +6,7 @@ const v = require("../utils/validation");
 const { currentShift, dayDate } = require("../utils/hotelTime");
 const { hotelDay } = require("./roomInventory");
 const { currentCancellationPolicy } = require("./policies");
-const { responsibleStaff } = require("./housekeepingPlans");
+const { responsibleStaff, onDutyStaff } = require("./housekeepingPlans");
 const { hotelTransaction } = require("./hotelOperations");
 const { deliver } = require("./operationNotifications");
 const checklist = ["Change bed linen and pillowcases", "Replace towels", "Refill amenities", "Empty bins", "Clean bathroom", "Vacuum"];
@@ -37,9 +37,9 @@ async function assignTask(task, room, slot, session, events) {
   await task.save({ session });
 }
 
-// Giao task Pending; chỉ chuyển Assigned khi Manager cập nhật phân công liên quan.
+// Giao task Pending; khi Manager đổi kế hoạch, task đang mở (Assigned, In Progress) về Pending và được giao lại (BR-41).
 async function reconcileTasks(session, events, { now = new Date(), roomIds, reassignAssigned = false } = {}) {
-  const filter = { status: { $in: reassignAssigned ? ["pending", "assigned"] : ["pending"] },
+  const filter = { status: { $in: reassignAssigned ? ["pending", "assigned", "in_progress"] : ["pending"] },
     $or: [{ scheduledDate: { $lte: now } }, { scheduledDate: null }] };
   if (roomIds) filter.roomId = { $in: roomIds };
   const tasks = await Task.find(filter).session(session);
@@ -65,22 +65,36 @@ async function taskPriority(room, type, session, now) {
 async function createTaskInSession(input, session, events, now) {
   const room = await Room.findById(input.roomId).session(session);
   if (!room || !room.isActive) throw new v.HttpError(409, "An active room is required for a cleaning task.");
-  const task = new Task({ ...input, priority: await taskPriority(room, input.type, session, now), scheduledDate: now });
+  // BR-41: an Ad-hoc request marked Urgent by the Receptionist is urgent; otherwise the rule of taskPriority applies.
+  const priority = input.priority === "urgent" ? "urgent" : await taskPriority(room, input.type, session, now);
+  const task = new Task({ ...input, priority, scheduledDate: now });
   await assignTask(task, room, currentShift(now), session, events);
   return task;
 }
 
 // Điểm tích hợp cho module check-out, đổi phòng, kiểm tra và yêu cầu vệ sinh.
 async function createCleaningTask(input, { now = new Date() } = {}) {
-  v.keys(input, ["roomId", "bookingId", "type", "requestContent"]);
+  v.keys(input, ["roomId", "bookingId", "type", "requestContent", "priority", "preferredTime", "requestedBy", "assignTo"]);
   const data = { roomId: v.id(String(input.roomId), "roomId"), type: v.choice(input.type, "type", ["turnover", "ad_hoc", "inspection"]) };
   if (input.bookingId !== undefined) data.bookingId = v.id(String(input.bookingId), "bookingId");
   if (input.requestContent !== undefined) data.requestContent = v.text(input.requestContent, "requestContent", 1, 1000);
+  if (input.priority !== undefined) data.priority = v.choice(input.priority, "priority", ["normal", "urgent"]);
+  if (input.preferredTime !== undefined) data.preferredTime = input.preferredTime;
+  if (input.requestedBy !== undefined) data.requestedBy = input.requestedBy;
   const result = await hotelTransaction(async (session) => {
     const events = [];
     if (data.bookingId && !await Booking.exists({ _id: data.bookingId, "rooms.roomId": data.roomId }).session(session))
       throw new v.HttpError(409, "The booking is not linked to this room.");
     const task = await createTaskInSession(data, session, events, now);
+    // UC37 4a / BR-41: only when nobody is responsible for the room may the Receptionist pick a staff member on duty in this shift.
+    if (task.status === "pending" && input.assignTo) {
+      const slot = currentShift(now);
+      if (!(await onDutyStaff(slot, session)).some((id) => String(id) === String(input.assignTo)))
+        v.fail("Select a Housekeeping Staff member on duty in the current shift.", "assignTo");
+      Object.assign(task, { assignedTo: input.assignTo, assignedBy: data.requestedBy, status: "assigned", assignmentDate: slot.date, assignmentShift: slot.shift });
+      await task.save({ session });
+      events.push({ accountIds: [input.assignTo], type: "task_assigned", title: "Cleaning task assigned", message: `Ad-hoc request: ${task.requestContent || "cleaning"}.`, roomId: task.roomId });
+    }
     return { task, events };
   });
   return { data: result.task, notificationStored: await deliver(result.events) };
@@ -88,18 +102,23 @@ async function createCleaningTask(input, { now = new Date() } = {}) {
 
 // UC30: only the Housekeeping employee assigned to a task can progress it.
 // A room becomes Available only after its Turnover task is actually completed.
+const INVALID_CHANGE = "Invalid status change. A task must follow Assigned, In Progress, Completed (or Skipped)."; // MSG-49
 async function updateOwnTaskStatus(taskId, actorId, input, { now = new Date() } = {}) {
-  v.keys(input, ["status"]);
+  v.keys(input, ["status", "reason"]);
   const status = v.choice(input.status, "status", ["in_progress", "completed", "skipped"]);
   const result = await hotelTransaction(async (session) => {
     const task = await Task.findById(taskId).session(session);
     if (!task) throw new v.HttpError(404, "Cleaning task not found.");
     if (!task.assignedTo || String(task.assignedTo) !== String(actorId))
       throw new v.HttpError(403, "You can only update cleaning tasks assigned to you.");
-    if (["completed", "skipped"].includes(task.status))
-      throw new v.HttpError(409, "This cleaning task is already closed.");
-    if (status === "completed" && task.status !== "in_progress")
-      throw new v.HttpError(409, "Start the cleaning task before completing it.");
+    // BR-22: Assigned -> In Progress -> Completed; only a Routine or Ad-hoc task can be Skipped (with a reason).
+    if (["completed", "skipped"].includes(task.status)) throw new v.HttpError(409, INVALID_CHANGE);
+    if (status === "in_progress" && task.status !== "assigned") throw new v.HttpError(409, INVALID_CHANGE);
+    if (status === "completed" && task.status !== "in_progress") throw new v.HttpError(409, INVALID_CHANGE);
+    if (status === "skipped") {
+      if (!["routine", "ad_hoc"].includes(task.type)) throw new v.HttpError(409, "Only a routine or ad-hoc task can be skipped.");
+      task.skipReason = v.text(input.reason, "reason", 2, 500); // guest declined, Do not disturb...
+    }
 
     task.status = status;
     if (status === "completed") task.completedAt = now;
@@ -110,7 +129,14 @@ async function updateOwnTaskStatus(taskId, actorId, input, { now = new Date() } 
 
     return task.populate([{ path: "roomId", select: "roomNumber floor status" }, { path: "assignedTo", select: "username customerProfile.fullName" }]);
   });
-  return { data: result };
+  // BR-28: the Receptionist hears when an ad-hoc task is completed or skipped and when an inspection result is in.
+  const room = result.roomId?.roomNumber;
+  const events = [];
+  if (result.type === "ad_hoc" && ["completed", "skipped"].includes(status))
+    events.push({ roles: ["receptionist"], type: "ad_hoc_task_closed", title: `Ad-hoc task ${status}`, message: `Room ${room}: ${result.requestContent || "ad-hoc request"} - ${status}${result.skipReason ? ` (${result.skipReason})` : ""}.`, roomId: result.roomId?._id });
+  if (result.type === "inspection" && status === "completed")
+    events.push({ roles: ["receptionist"], type: "inspection_result", title: "Room inspection completed", message: `Room ${room} was inspected; reported damage, if any, is waiting on the booking's penalties.`, roomId: result.roomId?._id });
+  return { data: result, notificationStored: await deliver(events) };
 }
 
 // Mỗi ngày tạo tối đa một Routine cho phòng Occupied, trừ phòng trả trong ngày.
@@ -159,7 +185,8 @@ async function createInspectionTasks(session, events, now) {
     if (later.has(String(booking._id))) continue;
     if (!line.roomId) continue;
     const inspectionKey = `${booking.id}:${line.roomId}`;
-    if (await Task.exists({ inspectionKey }).session(session)) continue;
+    // One inspection per stay: the Receptionist may already have requested it at check-out (UC20 step 2).
+    if (await Task.exists({ $or: [{ inspectionKey }, { bookingId: booking._id, type: "inspection" }] }).session(session)) continue;
     await createTaskInSession({ roomId: line.roomId, bookingId: booking._id, type: "inspection", inspectionKey,
       requestContent: "Inspect room before scheduled checkout." }, session, events, now);
     created++;

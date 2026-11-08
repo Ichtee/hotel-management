@@ -1,6 +1,4 @@
 const express = require("express");
-const session = require("express-session");
-const { MongoStore } = require("connect-mongo");
 const { rateLimit } = require("express-rate-limit");
 const helmet = require("helmet");
 const { authenticate, permit, requireManager, requirePasswordChanged } = require("./middleware/auth");
@@ -82,29 +80,9 @@ function createApp({
 
   app.use(express.json({ limit: "32kb" }));
 
-  const store = MongoStore.create({
-    mongoUrl: mongoUri,
-    collectionName: "sessions",
-    ttl: 30 * 60,
-  });
-
-  app.use(
-    session({
-      name: "hotel.sid",
-      secret: sessionSecret,
-      store,
-      resave: false,
-      saveUninitialized: false,
-      // Sliding idle timeout (SRS 4.2.4): every request renews the expiry; login sets 15 or 30 minutes by role.
-      rolling: true,
-      cookie: {
-        httpOnly: true,
-        sameSite: "lax",
-        secure: production,
-        maxAge: 30 * 60 * 1000,
-      },
-    }),
-  );
+  // SDS: stateless JWT authentication (middleware/auth.js); the secret signs the tokens.
+  app.set("jwtSecret", sessionSecret);
+  app.set("production", production);
 
   app.use("/api", (req, res, next) => {
     res.set("Cache-Control", "no-store");
@@ -167,18 +145,13 @@ function createApp({
   app.use("/api", requirePasswordChanged);
   // Member 2 modify / withdraw / search. The customer is always the signed-in user (never a body field or header),
   // so nobody can change another customer's booking; searching all bookings is for front-desk staff only.
-  const asSelf = (handler) => (req, res, next) => {
-    req.body = { ...(req.body || {}), customerId: String(req.user._id) };
-    delete req.headers["x-user-id"];
-    handler.call(bookingController, req, res, next);
-  };
   const staffSearch = (req, res, next) => {
     if (!["manager", "admin"].includes(req.role.key)) return permit("bookings.managed.read")(req, res, next);
     next();
   };
-  app.post("/api/bookings/:id/withdraw-cancellation", asSelf(bookingController.withdrawCancellation));
-  app.post("/api/bookings/:id/modify", asSelf(bookingController.modify));
-  app.patch("/api/bookings/:id/modify", asSelf(bookingController.modify));
+  app.post("/api/bookings/:id/withdraw-cancellation", cancellations.withdraw); // UC08 2b (same as DELETE /cancel)
+  app.post("/api/bookings/:id/modify", bookingCreation.modifyOwn); // UC07
+  app.patch("/api/bookings/:id/modify", bookingCreation.modifyOwn);
   app.get("/api/bookings/search", staffSearch, (req, res, next) => bookingController.search(req, res, next));
   app.patch("/api/profile", auth.updateProfile);
   // UC12 Submit Review (Customer session)
@@ -246,11 +219,13 @@ function createApp({
 
   // UC10 View Booking History (Session-authenticated)
   app.get("/api/bookings", bookings.listing);
-  app.post("/api/bookings", bookingCreation.create);
+  // BR-29 / MSG-81: online bookings are limited per IP address, generously enough for shared networks.
+  const bookingLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: "draft-8", legacyHeaders: false, message: { error: { message: "Too many requests. Please try again later." } } });
+  app.post("/api/bookings", bookingLimit, bookingCreation.create);
   // SRS 2.4.3 permissions, so the manager's changes in UC33 apply to these front-desk functions.
   app.post("/api/front-desk/bookings", permit("bookings.walk_in.create"), bookingCreation.createWalkIn);
   app.patch("/api/front-desk/bookings/:id", permit("bookings.managed.update"), bookingCreation.modifyWalkIn);
-  app.post("/api/front-desk/bookings/:id/cancel", permit("bookings.managed.cancel"), bookingCreation.cancelWalkIn);
+  app.post("/api/front-desk/bookings/:id/cancel", permit("bookings.managed.cancel"), cancellations.recordAtDesk);
   app.get("/api/front-desk/bookings/:id/available-rooms", permit("stays.check_in"), bookingCreation.availableRooms);
   app.post("/api/front-desk/bookings/:id/check-in", permit("stays.check_in"), bookingCreation.checkIn);
   app.get("/api/front-desk/bookings/:id/change-room-options", permit("rooms.change"), bookingCreation.changeRoomOptions);
@@ -258,11 +233,14 @@ function createApp({
   app.get("/api/front-desk/services", permit("booking_services.record"), bookingCreation.services);
   app.post("/api/front-desk/bookings/:id/services", permit("booking_services.record"), bookingCreation.addService);
   app.post("/api/front-desk/bookings/:id/services/:serviceLineId/void", permit("booking_services.record"), bookingCreation.voidService);
+  app.post("/api/front-desk/bookings/:id/check-out/start", permit("stays.check_out"), bookingCreation.startCheckOut);
   app.post("/api/front-desk/bookings/:id/check-out", permit("stays.check_out"), bookingCreation.checkOut);
+  app.post("/api/front-desk/bookings/:id/invoice", permit("stays.check_out"), bookingCreation.generateInvoice);
   // UC11 View Booking Details
   app.get("/api/bookings/:id", bookings.detail);
   app.get("/api/bookings/:bookingId/invoice", invoices.customerDetail);
   app.post("/api/bookings/:id/requests", stayRequests.create);
+  app.delete("/api/bookings/:id/requests/:requestId", stayRequests.withdraw);
   app.post("/api/bookings/:id/reviews", reviews.create);
 
   app.post("/api/bookings/:id/payments/deposit", payments.deposit);
@@ -291,6 +269,7 @@ function createApp({
   app.get("/api/frontdesk/cancellations", review, cancellations.listing);
   app.post("/api/frontdesk/cancellations", cancel, cancellations.record);
   app.post("/api/frontdesk/cancellations/:id/approve", review, cancellations.approve);
+  app.post("/api/frontdesk/cancellations/:id/withdraw", review, cancellations.withdrawAtDesk);
   app.get("/api/frontdesk/refunds", refund, refunds.listing);
   app.put("/api/frontdesk/refunds/:id/account", refund, refunds.setAccount);
   app.post("/api/frontdesk/refunds/:id/contacts", refund, refunds.addContact);
@@ -366,7 +345,7 @@ function createApp({
       });
   });
 
-  return { app, store };
+  return { app };
 }
 
 module.exports = { createApp };

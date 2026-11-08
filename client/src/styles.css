@@ -68,7 +68,9 @@ td.nw, td .badge, td .btn { white-space: nowrap; }
 .row-actions .btn, .row-actions summary { white-space: nowrap; flex-shrink: 0; }
 textarea { font: inherit; min-height: 88px; padding: .55rem .7rem; }
 .badge { padding: .15rem .65rem; border-radius: 99px; font-size: .78rem; font-weight: 600; text-transform: capitalize; background: var(--grey-bg); }
-.b-confirmed, .b-active, .b-paid, .b-success, .b-completed, .b-done, .b-resolved, .b-published, .b-low { background: var(--green-bg); color: var(--green); }
+.b-confirmed, .b-active, .b-paid, .b-success, .b-completed, .b-done, .b-resolved, .b-published, .b-low, .b-fully_paid, .b-approved { background: var(--green-bg); color: var(--green); }
+.b-deposit_paid, .b-refunded, .b-skipped { background: var(--blue-bg); color: var(--blue); }
+.b-rejected, .b-no_show { background: var(--red-bg); color: var(--red); }
 .b-checked_in, .b-in_progress, .b-medium { background: var(--blue-bg); color: var(--blue); }
 .b-pending, .b-open, .b-partial, .b-cancellation_requested, .b-requested { background: var(--amber-bg); color: var(--amber); }
 .b-cancelled, .b-failed, .b-expired, .b-inactive, .b-high { background: var(--red-bg); color: var(--red); }

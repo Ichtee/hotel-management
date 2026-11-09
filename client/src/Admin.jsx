@@ -145,7 +145,7 @@ function Queue({ title, rows, empty, action, onAction, loading }) {
 function Dashboard() {
   const { user } = useAuth();
   const name = user.customerProfile?.fullName?.split(' ').pop() || user.username;
-  const desk = canSeeBookings(user);
+  const desk = canSeeBookings(user) && user.role !== 'admin';
   const fd = useFrontDesk(desk);
   const canRev = user.permissions.includes('revenue.read');
   const rev = useApi(`/reports/revenue?from=${vnDay(-13)}&to=${vnDay(0)}&groupBy=day`, canRev);
@@ -191,7 +191,11 @@ function Dashboard() {
           </section>
         )}
       </div>
-      {!desk && !canRev && <p className="empty">Use the menu to open your tasks.</p>}
+      {!desk && !canRev && (
+        <div className="kpis">
+          {MENU.flatMap((g) => g.items || []).filter(([, , , need]) => (need || []).some((n) => (n === 'admin.only' ? user.role === 'admin' : user.permissions.includes(n)))).map(([href, label, hint]) => <Stat key={href} label={label} value="Open" hint={hint || ''} href={href} />)}
+        </div>
+      )}
     </>
   );
 }
@@ -235,10 +239,10 @@ function Bookings() {
         </div>
         <input
           type="search"
-          placeholder="Search booking code or reference…"
+          placeholder="Search by booking code"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ padding: '0.45rem 0.8rem', borderRadius: '8px', border: '1px solid var(--line)', minWidth: '240px' }}
+          style={{ padding: '0.45rem 0.8rem', borderRadius: '8px', border: '1px solid var(--line)', minWidth: '260px' }}
         />
       </div>
       <Notice error={live.error || notice?.error} ok={notice?.ok} />
@@ -246,7 +250,7 @@ function Bookings() {
         cols={['Booking', 'Guest', 'Stay', 'Total', 'Status', '']}
         rows={bookingsList.map((b) => [
           <span key="c" className="nw"><b>{b.bookingReference || b._id.slice(-8).toUpperCase()}</b><small className="muted" style={{ display: 'block' }}>{roomOf(b)}</small></span>,
-          b.guestName || '—',
+          <span key="g" className="nw">{b.guestName || '—'}</span>,
           <span key="s" className="nw">{dateLabel(b.checkInDate)} → {dateLabel(b.checkOutDate)}</span>,
           money(b.totalAmount),
           b.status,

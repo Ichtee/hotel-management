@@ -148,6 +148,8 @@ function HideReview({ review, onClose, onDone }) {
 }
 
 /* UC32 step 5: the Admin reads the audit log (read-only), filtered by actor, action, target and date. */
+// "key: value" instead of raw JSON; long ids are shortened.
+const detailText = (d) => !d ? '' : Object.entries(d).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : /^[0-9a-f]{24}$/.test(String(v)) ? `…${String(v).slice(-6)}` : v}`).join(' · ');
 export function AuditLog() {
   const [q, setQ] = useState({});
   const [page, setPage] = useState(1);
@@ -171,7 +173,7 @@ export function AuditLog() {
       {list.loading ? <p className="muted">Loading…</p> : !list.data?.length ? <p className="empty">No records match.</p> : (
         <DataTable cols={['Time', 'Actor', 'Action', 'Target', 'Detail']} rows={list.data.map((a) => [
           new Date(a.createdAt).toLocaleString('en-GB'), who(a), a.action, `${a.targetType}${a.targetId ? ` · …${String(a.targetId).slice(-6)}` : ''}`,
-          <small key="d" className="muted" style={{ display: 'block', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={a.detail ? JSON.stringify(a.detail) : ''}>{a.detail ? JSON.stringify(a.detail) : '—'}</small>,
+          <small key="d" className="muted" style={{ display: 'block', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={detailText(a.detail)}>{detailText(a.detail) || '—'}</small>,
         ])} />
       )}
       {total > 50 && <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: '.75rem' }}>

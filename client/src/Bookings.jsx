@@ -511,7 +511,7 @@ export function MyBookings() {
   }
 
   return (
-    <div className="c-wrap c-section">
+    <div className="c-wrap c-section acct">
       <h1 className="title">My bookings</h1>
       <Notice ok={notice} />
       <div className="chips" role="group" aria-label="Filter bookings">

@@ -369,10 +369,10 @@ export function Occupancy() {
 
 /* ---------------- Profile (UC03) and Change Password: two pages, shared by both shells ---------------- */
 const ProfileTabs = ({ base, on }) => (
-  <nav className="subnav" aria-label="Account">
+  <div className="subnav" role="navigation" aria-label="Account">
     <a href={base} className={on === 'profile' ? 'on' : ''} aria-current={on === 'profile' ? 'page' : undefined}>Personal details</a>
     <a href={`${base}/password`} className={on === 'password' ? 'on' : ''} aria-current={on === 'password' ? 'page' : undefined}>Change password</a>
-  </nav>
+  </div>
 );
 export function Profile({ base = '#/profile' }) {
   const { user, setUser } = useAuth();
@@ -389,7 +389,7 @@ export function Profile({ base = '#/profile' }) {
     <>
       <PageHead title="My profile" sub={`${user.roleName} · ${user.email}`} />
       <ProfileTabs base={base} on="profile" />
-      <form className="panel form one" onSubmit={save} style={{ maxWidth: 560 }}>
+      <form className="panel form acct" onSubmit={save}>
         <Field label="Full name" error={err?.fields?.fullName}><input name="fullName" defaultValue={cp.fullName} required minLength={2} maxLength={50} /></Field>
         {/* UC03 4b: only a Customer changes the e-mail, through a link sent to the new address (BR-24) */}
         {user.role === 'customer' && <Field label={user.pendingEmail ? `E-mail (waiting for verification: ${user.pendingEmail})` : 'E-mail'} error={err?.fields?.email}><input name="email" type="email" defaultValue={user.email} required /></Field>}
@@ -419,7 +419,7 @@ export function ChangePassword({ base = '#/profile' }) {
     <>
       <PageHead title="Change password" sub="Use 8 or more characters with an upper-case letter, a lower-case letter and a number." />
       <ProfileTabs base={base} on="password" />
-      <form className="panel form one" onSubmit={submit} style={{ maxWidth: 560 }}>
+      <form className="panel form one" onSubmit={submit} style={{ maxWidth: 480 }}>
         <Field label="Current password" error={err?.fields?.currentPassword}><input name="currentPassword" type="password" autoComplete="current-password" required /></Field>
         <Field label="New password" error={err?.fields?.newPassword}><input name="newPassword" type="password" autoComplete="new-password" minLength={8} maxLength={128} required /></Field>
         <Field label="Confirm new password" error={err?.fields?.confirmPassword}><input name="confirmPassword" type="password" autoComplete="new-password" required /></Field>

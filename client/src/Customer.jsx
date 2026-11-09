@@ -584,9 +584,9 @@ export default function Customer({ route }) {
   let page;
   if (loading) page = <p className="muted c-wrap c-section">Loading…</p>;
   else if ((PROTECTED.includes(path) || path.startsWith('#/pay/')) && !user) { sessionStorage.setItem('next', route); page = <Auth note="Please sign in to continue." />; }
-  else if (path === '#/notifications') page = <div className="c-wrap c-section narrow"><NotificationsPage bookingHref="#/my-bookings" /></div>;
-  else if (path === '#/profile') page = <div className="c-wrap c-section"><Profile base="#/profile" /></div>;
-  else if (path === '#/profile/password') page = <div className="c-wrap c-section"><ChangePassword base="#/profile" /></div>;
+  else if (path === '#/notifications') page = <div className="c-wrap c-section acct"><NotificationsPage bookingHref="#/my-bookings" /></div>;
+  else if (path === '#/profile') page = <div className="c-wrap c-section acct"><Profile base="#/profile" /></div>;
+  else if (path === '#/profile/password') page = <div className="c-wrap c-section acct"><ChangePassword base="#/profile" /></div>;
   else
   if (path === '#/pay/result') page = <PaymentResult paymentId={q.payment} back={q.r} />;
   else if (path.startsWith('#/pay/sandbox/')) page = <SandboxGateway orderId={path.split('/')[3]} paymentId={q.payment} />;

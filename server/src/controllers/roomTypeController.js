@@ -54,6 +54,7 @@ class RoomTypeController {
   async updatePricing(req, res, next) {
     try {
       const data = await roomTypeService.updatePricing(req.params.id, req.body);
+      await require('../services/audit').audit(req.user._id, 'room_type.pricing_updated', 'RoomType', data._id, { seasonalPricing: data.seasonalPricing, basePrice: data.basePrice });
       res.json({ success: true, message: 'Room pricing updated successfully', data });
     } catch (err) {
       next(err);

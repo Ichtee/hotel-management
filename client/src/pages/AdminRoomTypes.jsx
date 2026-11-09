@@ -1,355 +1,119 @@
 import { useState } from 'react';
-import { ROOM_TYPES as INITIAL_TYPES } from '../data.js';
-import { roomApi } from '../api/roomApi.js';
+import { api, dateLabel, inputDate, money } from '../api/client.js';
+import { DataTable, Field, Modal, Notice, PageHead, useApi } from '../ui.jsx';
 
+const BEDS = ['King bed', 'Queen bed', '2 single beds', '2 queen beds'];
+
+/* UC24 room types (add, edit, deactivate, delete when nothing is linked) and UC25 seasonal prices. */
 export default function AdminRoomTypes() {
-  const [types, setTypes] = useState(INITIAL_TYPES);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [editingSeasonal, setEditingSeasonal] = useState(null);
-  const [toastMessage, setToastMessage] = useState('');
-
-  // Form states for adding room type
-  const [name, setName] = useState('');
-  const [bed, setBed] = useState('King bed');
-  const [size, setSize] = useState('35');
-  const [guests, setGuests] = useState('2');
-  const [price, setPrice] = useState('95');
-  const [desc, setDesc] = useState('');
-
-  // Seasonal rates state for currently edited room type
-  const [seasonName, setSeasonName] = useState('');
-  const [seasonStart, setSeasonStart] = useState('');
-  const [seasonEnd, setSeasonEnd] = useState('');
-  const [seasonPrice, setSeasonPrice] = useState('');
-
-  const showToast = (msg) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(''), 3000);
+  const list = useApi('/room-types?limit=100');
+  const [edit, setEdit] = useState(null); // {} = new
+  const [pricing, setPricing] = useState(null);
+  const [msg, setMsg] = useState(null);
+  const done = (text) => { setMsg(text); list.reload(); };
+  const toggle = async (t) => {
+    try { await api(`/room-types/${t._id}`, { method: 'PATCH', body: { isActive: !t.isActive } }); done(`${t.name} ${t.isActive ? 'deactivated: it is hidden from guests and new bookings' : 'reactivated'}.`); }
+    catch (x) { setMsg(null); alert(x.message); }
   };
-
-  const handleCreate = (e) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-
-    const newType = {
-      id: Date.now(),
-      name: name.trim(),
-      bed,
-      size: parseInt(size, 10) || 30,
-      guests: parseInt(guests, 10) || 2,
-      price: parseFloat(price) || 80,
-      rating: 5.0,
-      desc: desc.trim() || 'A comfortable modern guest room.',
-      amenities: ['Free WiFi', 'Air conditioning'],
-      img: 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=70',
-      seasonalPricing: []
-    };
-
-    setTypes(prev => [newType, ...prev]);
-    setShowAddModal(false);
-    setName('');
-    setDesc('');
-    showToast(`Hạng phòng "${newType.name}" đã được tạo thành công!`);
-
-    // Best-effort backend call
-    roomApi.createRoomType(newType).catch(() => {});
+  const remove = async (t) => {
+    if (!confirm(`Delete room type "${t.name}"? Only a room type with no rooms, bookings, price rates or reviews can be deleted.`)) return;
+    try { await api(`/room-types/${t._id}`, { method: 'DELETE' }); done(`${t.name} deleted.`); }
+    catch (x) { setMsg(null); alert(x.message); }
   };
-
-  const handleDelete = (id, typeName) => {
-    if (confirm(`Bạn có chắc muốn xóa hạng phòng "${typeName}"?`)) {
-      setTypes(prev => prev.filter(t => t.id !== id));
-      showToast(`Đã xóa hạng phòng "${typeName}"`);
-      roomApi.deleteRoomType(id).catch(() => {});
-    }
-  };
-
-  const handleAddSeason = (e) => {
-    e.preventDefault();
-    if (!seasonName || !seasonStart || !seasonEnd || !seasonPrice) return;
-
-    if (new Date(seasonEnd) <= new Date(seasonStart)) {
-      alert('Ngày kết thúc phải sau ngày bắt đầu!');
-      return;
-    }
-
-    const newSeason = {
-      seasonName,
-      startDate: seasonStart,
-      endDate: seasonEnd,
-      price: parseFloat(seasonPrice)
-    };
-
-    setTypes(prev => prev.map(t => {
-      if (t.id === editingSeasonal.id) {
-        const seasons = t.seasonalPricing ? [...t.seasonalPricing, newSeason] : [newSeason];
-        return { ...t, seasonalPricing: seasons };
-      }
-      return t;
-    }));
-
-    showToast(`Đã thêm giá mùa "${seasonName}" cho ${editingSeasonal.name}!`);
-    setSeasonName('');
-    setSeasonStart('');
-    setSeasonEnd('');
-    setSeasonPrice('');
-  };
-
   return (
-    <div className="admin-roomtypes-page">
-      {toastMessage && (
-        <div style={{
-          position: 'fixed', bottom: '24px', right: '24px', zIndex: 9999,
-          background: '#0f2742', color: '#fff', padding: '12px 20px', borderRadius: '10px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.2)', fontSize: '0.9rem', fontWeight: 600
-        }}>
-          ✓ {toastMessage}
-        </div>
-      )}
-
-      <div className="page-head">
-        <div>
-          <h1>Quản lý Loại Phòng & Giá (Room Types)</h1>
-          <p>Thiết lập danh mục hạng phòng, sức chứa, tiện nghi và giá mùa cao điểm (UC31, UC32)</p>
-        </div>
-        <div className="head-actions">
-          <button className="btn primary" onClick={() => setShowAddModal(true)}>+ Thêm Hạng Phòng</button>
-        </div>
-      </div>
-
-      {/* Room Types Cards & Table */}
-      <div className="table-wrap" style={{ background: '#fff', borderRadius: '14px', border: '1px solid var(--line)', overflow: 'hidden' }}>
-        <table>
-          <thead>
-            <tr>
-              <th>Hình ảnh</th>
-              <th>Tên hạng phòng</th>
-              <th>Giường</th>
-              <th>Diện tích</th>
-              <th>Sức chứa</th>
-              <th>Giá gốc (Base)</th>
-              <th>Giá mùa vụ (Seasonal)</th>
-              <th>Thao tác</th>
-            </tr>
-          </thead>
-          <tbody>
-            {types.map(t => (
-              <tr key={t.id}>
-                <td>
-                  <img src={t.img} alt={t.name} style={{ width: '64px', height: '44px', objectFit: 'cover', borderRadius: '6px' }} />
-                </td>
-                <td>
-                  <strong>{t.name}</strong>
-                  <div className="muted" style={{ fontSize: '0.78rem' }}>{t.desc ? t.desc.slice(0, 45) + '...' : ''}</div>
-                </td>
-                <td>{t.bed}</td>
-                <td>{t.size} m²</td>
-                <td>{t.guests} khách</td>
-                <td>
-                  <strong style={{ color: 'var(--green)', fontSize: '1.05rem' }}>${t.price}</strong>
-                  <span className="muted" style={{ fontSize: '0.75rem' }}> /đêm</span>
-                </td>
-                <td>
-                  {t.seasonalPricing && t.seasonalPricing.length > 0 ? (
-                    <span className="badge b-in_progress" title={`${t.seasonalPricing.length} đợt giá mùa`}>
-                      {t.seasonalPricing.length} đợt điều chỉnh
-                    </span>
-                  ) : (
-                    <span className="badge b-low">Giá tiêu chuẩn</span>
-                  )}
-                </td>
-                <td>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button
-                      className="btn"
-                      style={{ padding: '6px 12px', fontSize: '0.8rem' }}
-                      onClick={() => setEditingSeasonal(t)}
-                    >
-                      Quản lý giá mùa
-                    </button>
-                    <button
-                      className="btn"
-                      style={{ padding: '6px 10px', fontSize: '0.8rem', color: 'var(--red)', borderColor: 'var(--red)' }}
-                      onClick={() => handleDelete(t.id, t.name)}
-                    >
-                      Xóa
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Add Room Type Modal (UC31) */}
-      {showAddModal && (
-        <div className="scrim" onClick={() => setShowAddModal(false)} style={{ display: 'grid', placeItems: 'center', zIndex: 100 }}>
-          <form
-            onSubmit={handleCreate}
-            onClick={e => e.stopPropagation()}
-            style={{
-              background: '#fff', borderRadius: '16px', padding: '1.75rem', width: 'min(500px, 92vw)',
-              boxShadow: '0 24px 60px rgba(0,0,0,0.3)', maxHeight: '90vh', overflowY: 'auto'
-            }}
-          >
-            <h2 style={{ margin: '0 0 0.25rem' }}>Thêm Hạng Phòng Mới</h2>
-            <p className="muted" style={{ margin: '0 0 1.25rem' }}>Tạo hạng phòng lưu trú mới trong khách sạn (UC31)</p>
-
-            <div style={{ display: 'grid', gap: '0.9rem', marginBottom: '1.5rem' }}>
-              <label>
-                Tên Hạng Phòng
-                <input
-                  type="text"
-                  placeholder="Ví dụ: Executive Suite Ocean View"
-                  value={name}
-                  onChange={e => setName(e.target.value)}
-                  required
-                />
-              </label>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <label>
-                  Loại Giường
-                  <select value={bed} onChange={e => setBed(e.target.value)}>
-                    <option value="King bed">1 Giường King</option>
-                    <option value="Queen bed">1 Giường Queen</option>
-                    <option value="2 single beds">2 Giường Đơn</option>
-                    <option value="2 queen beds">2 Giường Queen</option>
-                  </select>
-                </label>
-
-                <label>
-                  Sức Chứa Tối Đa
-                  <select value={guests} onChange={e => setGuests(e.target.value)}>
-                    <option value="1">1 Người</option>
-                    <option value="2">2 Người</option>
-                    <option value="3">3 Người</option>
-                    <option value="4">4 Người</option>
-                    <option value="6">6 Người</option>
-                  </select>
-                </label>
+    <>
+      <PageHead title="Room types" sub="Categories, capacity, amenities and base price. Seasonal rates override the base price for their dates." action="Add room type" onAction={() => setEdit({})} />
+      <Notice error={list.error} ok={msg} />
+      {list.loading ? <p className="muted">Loading…</p> : !list.data?.length ? <p className="empty">No room types yet.</p> : (
+        <DataTable cols={['', 'Room type', 'Bed & guests', 'Base / night', 'Status', '']} rows={list.data.map((t) => [
+          t.images?.[0] ? <img key="i" src={t.images[0]} alt="" width="64" height="44" style={{ objectFit: 'cover', borderRadius: 6, display: 'block' }} /> : <span key="i" className="img-ph" style={{ display: 'block', width: 64, height: 44, borderRadius: 6 }} />,
+          <span key="n"><b>{t.name}</b>{t.description ? <small className="muted" style={{ display: 'block', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description}</small> : null}</span>,
+          <span key="b">{t.bedType || '—'}<small className="muted" style={{ display: 'block' }}>{t.maxOccupancy} guests{t.roomSizeSqm ? ` · ${t.roomSizeSqm} m²` : ''}</small></span>,
+          <span key="p" style={{ whiteSpace: 'nowrap' }}>{money(t.basePrice)}<small className="muted" style={{ display: 'block' }}>{t.seasonalPricing?.length ? `+ ${t.seasonalPricing.length} seasonal rate${t.seasonalPricing.length > 1 ? 's' : ''}` : 'Base price only'}</small></span>,
+          t.isActive ? 'active' : 'inactive',
+          <span key="a" className="row-actions">
+            <button className="btn sm" onClick={() => setEdit(t)}>Edit</button>
+            <button className="btn sm" onClick={() => setPricing(t)}>Rates</button>
+            <details className="rowmenu">
+              <summary className="btn sm" aria-label="More actions">More ▾</summary>
+              <div>
+                <button onClick={(e) => { e.currentTarget.closest('details').open = false; toggle(t); }}>{t.isActive ? 'Deactivate' : 'Reactivate'}</button>
+                <button className="danger" onClick={(e) => { e.currentTarget.closest('details').open = false; remove(t); }}>Delete</button>
               </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <label>
-                  Diện Tích (m²)
-                  <input
-                    type="number"
-                    min="10"
-                    value={size}
-                    onChange={e => setSize(e.target.value)}
-                    required
-                  />
-                </label>
-
-                <label>
-                  Giá Gốc ($/đêm)
-                  <input
-                    type="number"
-                    min="0"
-                    value={price}
-                    onChange={e => setPrice(e.target.value)}
-                    required
-                  />
-                </label>
-              </div>
-
-              <label>
-                Mô Tả Hạng Phòng
-                <textarea
-                  rows="3"
-                  placeholder="Mô tả không gian, tầm nhìn, trang thiết bị..."
-                  value={desc}
-                  onChange={e => setDesc(e.target.value)}
-                  style={{ width: '100%', padding: '0.5rem', borderRadius: '8px', border: '1px solid var(--line)', fontFamily: 'inherit' }}
-                />
-              </label>
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-              <button type="button" className="btn" onClick={() => setShowAddModal(false)}>Hủy</button>
-              <button type="submit" className="btn primary">Lưu Hạng Phòng</button>
-            </div>
-          </form>
-        </div>
+            </details>
+          </span>,
+        ])} />
       )}
-
-      {/* Manage Seasonal Pricing Modal (UC32) */}
-      {editingSeasonal && (
-        <div className="scrim" onClick={() => setEditingSeasonal(null)} style={{ display: 'grid', placeItems: 'center', zIndex: 100 }}>
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              background: '#fff', borderRadius: '16px', padding: '1.75rem', width: 'min(550px, 92vw)',
-              boxShadow: '0 24px 60px rgba(0,0,0,0.3)', maxHeight: '90vh', overflowY: 'auto'
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-              <h2 style={{ margin: 0, fontSize: '1.3rem' }}>Giá Theo Mùa: {editingSeasonal.name}</h2>
-              <button onClick={() => setEditingSeasonal(null)} style={{ border: 0, background: '#eee', borderRadius: '99px', width: '32px', height: '32px', cursor: 'pointer' }}>✕</button>
-            </div>
-            <p className="muted" style={{ margin: '0 0 1.25rem' }}>
-              Giá cơ bản hiện tại: <strong>${editingSeasonal.price}/đêm</strong> (UC32 - Manage Room Prices)
-            </p>
-
-            {/* List existing seasons */}
-            <div style={{ marginBottom: '1.5rem' }}>
-              <h4 style={{ margin: '0 0 0.5rem', fontSize: '0.9rem', color: 'var(--muted)' }}>Các Đợt Điều Chỉnh Đang Áp Dụng:</h4>
-              {editingSeasonal.seasonalPricing && editingSeasonal.seasonalPricing.length > 0 ? (
-                <div style={{ display: 'grid', gap: '0.5rem' }}>
-                  {editingSeasonal.seasonalPricing.map((s, idx) => (
-                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--line)' }}>
-                      <div>
-                        <strong>{s.seasonName}</strong>
-                        <div className="muted" style={{ fontSize: '0.78rem' }}>
-                          {new Date(s.startDate).toLocaleDateString()} → {new Date(s.endDate).toLocaleDateString()}
-                        </div>
-                      </div>
-                      <strong style={{ color: 'var(--green)', fontSize: '1.1rem' }}>${s.price}/đêm</strong>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div style={{ padding: '1rem', background: '#f8fafc', borderRadius: '8px', textAlign: 'center', color: 'var(--muted)' }}>
-                  Chưa có đợt giá mùa nào. Giá sẽ luôn là giá gốc ${editingSeasonal.price}/đêm.
-                </div>
-              )}
-            </div>
-
-            {/* Form add season */}
-            <form onSubmit={handleAddSeason} style={{ borderTop: '1px solid var(--line)', paddingTop: '1rem' }}>
-              <h4 style={{ margin: '0 0 0.75rem', fontSize: '0.9rem' }}>+ Thêm Khoảng Giá Mùa Mới</h4>
-              <div style={{ display: 'grid', gap: '0.75rem', marginBottom: '1rem' }}>
-                <label>
-                  Tên Dịp/Mùa (Ví dụ: Cao điểm Tết, Hè 2026)
-                  <input
-                    type="text"
-                    placeholder="Mùa hè 2026"
-                    value={seasonName}
-                    onChange={e => setSeasonName(e.target.value)}
-                    required
-                  />
-                </label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
-                  <label>
-                    Từ Ngày
-                    <input type="date" value={seasonStart} onChange={e => setSeasonStart(e.target.value)} required />
-                  </label>
-                  <label>
-                    Đến Ngày
-                    <input type="date" value={seasonEnd} onChange={e => setSeasonEnd(e.target.value)} required />
-                  </label>
-                </div>
-                <label>
-                  Giá Điều Chỉnh ($/đêm)
-                  <input type="number" min="0" placeholder="120" value={seasonPrice} onChange={e => setSeasonPrice(e.target.value)} required />
-                </label>
-              </div>
-              <button type="submit" className="btn primary" style={{ width: '100%' }}>Áp Dụng Đợt Giá Này</button>
-            </form>
-          </div>
-        </div>
-      )}
-    </div>
+      {edit && <RoomTypeForm type={edit} onClose={() => setEdit(null)} onSaved={(text) => { setEdit(null); done(text); }} />}
+      {pricing && <SeasonalRates type={pricing} onClose={() => { setPricing(null); list.reload(); }} />}
+    </>
   );
+}
+
+function RoomTypeForm({ type, onClose, onSaved }) {
+  const isNew = !type._id;
+  const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
+  const submit = async (e) => {
+    e.preventDefault(); const f = Object.fromEntries(new FormData(e.currentTarget));
+    const body = {
+      name: f.name.trim(), bedType: f.bedType, description: f.description.trim(),
+      roomSizeSqm: Number(f.roomSizeSqm), maxOccupancy: Number(f.maxOccupancy), basePrice: Number(f.basePrice),
+      amenities: f.amenities.split(',').map((a) => a.trim()).filter(Boolean),
+      // the first image is the one entered here; other images already on the room type are kept
+      images: [...(f.image.trim() ? [f.image.trim()] : []), ...(type.images || []).slice(1)],
+    };
+    setSaving(true); setError(null);
+    try {
+      await api(isNew ? '/room-types' : `/room-types/${type._id}`, { method: isNew ? 'POST' : 'PATCH', body });
+      onSaved(`${body.name} ${isNew ? 'created' : 'saved'}.`);
+    } catch (x) { setError(x); } finally { setSaving(false); }
+  };
+  const fe = error?.fields || {};
+  return <Modal title={isNew ? 'Add room type' : `Edit ${type.name}`} onClose={onClose}><form className="form-grid" onSubmit={submit}>
+    <div className="full"><Field label="Name" error={fe.name}><input name="name" defaultValue={type.name} required maxLength={100} /></Field></div>
+    <Field label="Bed" error={fe.bedType}><select name="bedType" defaultValue={type.bedType || 'King bed'}>{[...new Set([...BEDS, type.bedType].filter(Boolean))].map((b) => <option key={b}>{b}</option>)}</select></Field>
+    <Field label="Size (m²)" error={fe.roomSizeSqm}><input name="roomSizeSqm" type="number" min="1" defaultValue={type.roomSizeSqm || 30} required /></Field>
+    <Field label="Max guests" error={fe.maxOccupancy}><input name="maxOccupancy" type="number" min="1" max="10" defaultValue={type.maxOccupancy || 2} required /></Field>
+    <Field label="Base price (VND / night)" error={fe.basePrice}><input name="basePrice" type="number" min="1000" step="1000" defaultValue={type.basePrice || ''} required /></Field>
+    <div className="full"><Field label="Amenities (comma separated)" error={fe.amenities}><input name="amenities" defaultValue={(type.amenities || ['Free WiFi', 'Air conditioning']).join(', ')} /></Field></div>
+    <div className="full"><Field label="Image URL" error={fe.images}><input name="image" type="url" defaultValue={type.images?.[0] || ''} placeholder="https://…" /></Field></div>
+    <div className="full"><Field label="Description" error={fe.description}><textarea name="description" maxLength={5000} defaultValue={type.description || ''} /></Field></div>
+    <div className="full"><Notice error={error} /></div>
+    <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button></div>
+  </form></Modal>;
+}
+
+// UC25: rates for date periods; overlapping rates are refused (MSG-60). Existing bookings keep their price (BR-35).
+function SeasonalRates({ type, onClose }) {
+  const [rates, setRates] = useState(type.seasonalPricing || []);
+  const [error, setError] = useState(null); const [saving, setSaving] = useState(false); const [ok, setOk] = useState(null);
+  const save = async (next, text) => {
+    setSaving(true); setError(null); setOk(null);
+    try {
+      const res = await api(`/room-types/${type._id}/pricing`, { method: 'PUT', body: { seasonalPricing: next } });
+      setRates(res.data.seasonalPricing); setOk(text); return true;
+    } catch (x) { setError(x); return false; } finally { setSaving(false); }
+  };
+  const add = async (e) => {
+    e.preventDefault(); const form = e.currentTarget; const f = Object.fromEntries(new FormData(form));
+    const next = [...rates, { description: f.description.trim(), startDate: f.startDate, endDate: f.endDate, price: Number(f.price) }];
+    if (await save(next, 'Rate added.')) form.reset();
+  };
+  const remove = (r) => confirm(`Delete the rate "${r.description || 'Custom'}"? Its dates go back to the base price; existing bookings keep their price.`)
+    && save(rates.filter((x) => x !== r), 'Rate deleted.');
+  return <Modal title={`Seasonal rates · ${type.name}`} onClose={onClose}>
+    <p className="muted">Base price {money(type.basePrice)} / night applies on every date without a rate.</p>
+    {rates.length ? <DataTable cols={['Rate', 'From', 'To', 'Price / night', '']} rows={rates.map((r, i) => [
+      r.description || 'Custom', dateLabel(r.startDate), dateLabel(r.endDate), money(r.price),
+      <button key={i} className="btn sm danger" disabled={saving} onClick={() => remove(r)}>Delete</button>,
+    ])} /> : <p className="empty">No seasonal rates.</p>}
+    <form className="form-grid" onSubmit={add} style={{ marginTop: '1rem' }}>
+      <div className="full"><Field label="Rate name (e.g. Tet holiday, Summer 2027)"><input name="description" required maxLength={100} /></Field></div>
+      <Field label="From"><input name="startDate" type="date" min={inputDate(new Date())} required /></Field>
+      <Field label="To (included)"><input name="endDate" type="date" min={inputDate(new Date())} required /></Field>
+      <Field label="Price (VND / night)"><input name="price" type="number" min="1000" step="1000" required /></Field>
+      <div className="full"><Notice error={error} ok={ok} /></div>
+      <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Close</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Add rate'}</button></div>
+    </form>
+  </Modal>;
 }

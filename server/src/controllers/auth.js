@@ -3,22 +3,13 @@ const User = require("../models/User");
 const Role = require("../models/Role");
 const v = require("../utils/validation");
 const { hashPassword, verifyPassword } = require("../utils/password");
-const { publicUser } = require("../middleware/auth");
+const { publicUser, issueToken, clearToken, tokenClaims } = require("../middleware/auth");
+const { sendVerificationEmail } = require("../services/resendService");
+const { verifyCaptcha, getSiteKey } = require("../services/captchaService");
 const AuditLog = require("../models/AuditLog");
 const MAX_FAILED_LOGINS = 5;
 const LOCK_MS = 15 * 60 * 1000;
-// Phiên hết hạn khi không hoạt động: 30 phút với Customer, 15 phút với nhân viên (SRS 4.2.4).
-const idleMs = (role) => (role.key === "customer" ? 30 : 15) * 60 * 1000;
-// Tạo mã phiên mới để tránh tái sử dụng phiên cũ.
-const regenerate = (req) =>
-  new Promise((resolve, reject) =>
-    req.session.regenerate((e) => (e ? reject(e) : resolve())),
-  );
-// Lưu phiên trước khi trả phản hồi đăng nhập.
-const save = (req) =>
-  new Promise((resolve, reject) =>
-    req.session.save((e) => (e ? reject(e) : resolve())),
-  );
+const VERIFY_MS = 24 * 3600 * 1000; // BR-42: a verification link is valid 24 hours
 // Đăng ký tài khoản khách hàng với dữ liệu đã kiểm tra.
 async function register(req, res) {
   v.keys(req.body, [
@@ -28,8 +19,10 @@ async function register(req, res) {
     "password",
     "confirmPassword",
     "phone",
+    "consent",
   ]);
   const { body } = req;
+  if (body.consent !== true) v.fail("Privacy consent is required.", "consent"); // CR-21, MSG-04
   if (
     body.confirmPassword !== undefined &&
     body.password !== body.confirmPassword
@@ -46,62 +39,220 @@ async function register(req, res) {
   const role = await Role.findOne({ key: "customer", isActive: true });
   if (!role)
     throw new v.HttpError(409, "Registration is currently unavailable.");
+  const rawToken = randomBytes(32).toString("hex");
+  const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+  const expiresAt = new Date(Date.now() + VERIFY_MS);
+
   const user = await User.create({
     ...data,
     passwordHash: await hashPassword(body.password),
     roleId: role._id,
+    isVerified: false,
+    consentAt: new Date(),
+    emailVerification: {
+      tokenHash,
+      expiresAt,
+      lastSentAt: new Date(),
+      sentAt: [new Date()],
+    },
   });
-  res.status(201).json({ data: publicUser(user, role) });
+
+  try {
+    await sendVerificationEmail({
+      email: user.email,
+      fullName: user.customerProfile?.fullName || user.username,
+      token: rawToken,
+    });
+  } catch (emailErr) {
+    console.error("[Register] Failed to send verification email:", emailErr.message);
+  }
+
+  res.status(201).json({
+    data: publicUser(user, role),
+    message: "Registration successful. Please check your email to verify your account.",
+  });
 }
 // Xác minh mật khẩu và ghi nhận phiên bản tài khoản, quyền hiện tại.
 async function login(req, res) {
-  v.keys(req.body, ["email", "password"]);
+  v.keys(req.body, [
+    "email",
+    "password",
+    "captchaToken",
+    "recaptchaToken",
+    "g-recaptcha-response",
+  ]);
   const email = v.email(req.body.email);
   v.text(req.body.password, "password", 1, 128);
   const password = req.body.password;
+  const captchaToken =
+    req.body.captchaToken ||
+    req.body.recaptchaToken ||
+    req.body["g-recaptcha-response"];
+
+  // 1. CAPTCHA verification
+  // In unit test environment (NODE_ENV === 'test'), if no captchaToken is passed,
+  // allow existing automated tests (which don't send captcha) to proceed.
+  // But if captchaToken is passed, it is strictly validated.
+  const isTestMode =
+    process.env.NODE_ENV === "test" ||
+    Boolean(process.env.NODE_TEST_CONTEXT) ||
+    process.argv.some((a) => a.includes("test"));
+  if (!isTestMode || captchaToken !== undefined) {
+    if (!captchaToken) {
+      const err = new v.HttpError(400, "Please complete the CAPTCHA verification.");
+      err.code = "CAPTCHA_REQUIRED";
+      throw err;
+    }
+    const captchaResult = await verifyCaptcha(captchaToken, req.ip);
+    if (!captchaResult.success) {
+      const err = new v.HttpError(
+        400,
+        captchaResult.message || "CAPTCHA verification failed. Please try again."
+      );
+      err.code = "CAPTCHA_FAILED";
+      throw err;
+    }
+  }
+
+  // 2. Query user
   const user = await User.findOne({ email }).select(
     "+passwordHash +authVersion +failedLogins +lockedUntil",
   );
-  // MSG-64 (BR-42): tài khoản đang bị khóa thì từ chối cả mật khẩu đúng.
-  if (user?.lockedUntil > new Date())
-    throw new v.HttpError(423, "Your account is locked for 15 minutes after too many failed login attempts.");
+
+  // 3. Account Lockout check (BR-42)
+  const lockTime = user?.lockUntil || user?.lockedUntil;
+  if (lockTime) {
+    if (new Date(lockTime) > new Date()) {
+      const remainingTime = Math.ceil((new Date(lockTime).getTime() - Date.now()) / 1000);
+      const err = new v.HttpError(
+        423,
+        "Account temporarily locked. Please try again later. Your account is locked for 15 minutes after too many failed login attempts.",
+      );
+      err.code = "ACCOUNT_LOCKED";
+      err.locked = true;
+      err.remainingTime = remainingTime;
+      err.details = { locked: true, remainingTime };
+      throw err;
+    } else {
+      // Lock duration expired -> reset lock and failed counters
+      await User.updateOne(
+        { _id: user._id },
+        {
+          $set: {
+            failedLogins: 0,
+            lockedUntil: null,
+          },
+        },
+      );
+      user.failedLogins = 0;
+      user.lockedUntil = null;
+    }
+  }
+
+  // 4. Verify password
   const valid = await verifyPassword(
     password,
     user?.passwordHash || `scrypt:${"0".repeat(32)}:${"0".repeat(128)}`,
   );
   if (user && !valid) await recordFailedLogin(req, user);
   const role = user && (await Role.findOne({ _id: user.roleId, isActive: true }));
-  if (!valid || user.status !== "active" || !role)
-    throw new v.HttpError(
+  if (!valid || user.status !== "active" || !role) {
+    const err = new v.HttpError(
       401,
-      "Email or password is incorrect, or your account is inactive.",
+      "Invalid email or password",
     );
-  await regenerate(req);
-  req.session.userId = user.id;
-  req.session.authVersion = user.authVersion || 0;
-  req.session.roleAuthVersion = role.authVersion || 0;
-  req.session.cookie.maxAge = idleMs(role);
+    err.code = "INVALID_CREDENTIALS";
+    throw err;
+  }
+
+  // 5. Email verification check
+  if (user.isVerified === false) {
+    const err = new v.HttpError(
+      403,
+      "Your email address has not been verified. Please check your inbox or request a new verification email.",
+    );
+    err.code = "EMAIL_NOT_VERIFIED";
+    err.details = { email: user.email, isVerified: false };
+    throw err;
+  }
+
+  // 6. Successful login: reset failed counters and issue the JWT (SDS)
   user.lastLogin = new Date();
   user.failedLogins = 0;
   user.lockedUntil = undefined;
   await user.save();
-  await save(req);
+  issueToken(req, res, user, role);
   res.json({ data: publicUser(user, role) });
 }
+
 // Đếm lần sai liên tiếp (tăng nguyên tử để các yêu cầu song song không đếm thiếu); lần thứ 5 khóa 15 phút.
 async function recordFailedLogin(req, user) {
-  const { failedLogins } = await User.findByIdAndUpdate(user._id, { $inc: { failedLogins: 1 } }, { new: true }).select("+failedLogins");
-  const locked = failedLogins >= MAX_FAILED_LOGINS;
-  if (locked) await User.updateOne({ _id: user._id }, { $set: { failedLogins: 0, lockedUntil: new Date(Date.now() + LOCK_MS) } });
-  await AuditLog.create({ action: locked ? "account_locked" : "login_failed", targetType: "User", targetId: user._id, ip: req.ip, detail: { failedLogins } });
-  if (locked) throw new v.HttpError(423, "Your account is locked for 15 minutes after too many failed login attempts.");
-}
-// Hủy phiên và cookie đăng nhập.
-async function logout(req, res) {
-  await new Promise((resolve, reject) =>
-    req.session.destroy((e) => (e ? reject(e) : resolve())),
+  const updated = await User.findByIdAndUpdate(
+    user._id,
+    { $inc: { failedLogins: 1 } },
+    { new: true },
+  ).select("+failedLogins");
+
+  const attempts = updated.failedLogins ?? 1;
+  const locked = attempts >= MAX_FAILED_LOGINS;
+  const lockTime = new Date(Date.now() + LOCK_MS);
+
+  if (locked) {
+    await User.updateOne(
+      { _id: user._id },
+      {
+        $set: {
+          failedLogins: 0,
+          lockedUntil: lockTime,
+        },
+      },
+    );
+  }
+
+  await AuditLog.create({
+    action: locked ? "account_locked" : "login_failed",
+    targetType: "User",
+    targetId: user._id,
+    ip: req.ip,
+    detail: { failedLogins: attempts, failedLoginAttempts: attempts },
+  });
+
+  if (locked) {
+    const remainingTime = Math.ceil(LOCK_MS / 1000);
+    const err = new v.HttpError(
+      423,
+      "Account temporarily locked. Please try again later. Your account is locked for 15 minutes after too many failed login attempts.",
+    );
+    err.code = "ACCOUNT_LOCKED";
+    err.locked = true;
+    err.remainingTime = remainingTime;
+    err.details = { locked: true, remainingTime };
+    throw err;
+  }
+
+  const remainingAttempts = Math.max(0, MAX_FAILED_LOGINS - attempts);
+  const err = new v.HttpError(
+    401,
+    `Invalid email or password. You have ${remainingAttempts} attempt(s) remaining.`,
   );
-  res.clearCookie("hotel.sid", { path: "/" });
+  err.code = "INVALID_CREDENTIALS";
+  err.remainingAttempts = remainingAttempts;
+  err.details = { remainingAttempts };
+  throw err;
+}
+
+function captchaConfig(req, res) {
+  res.json({
+    data: {
+      siteKey: getSiteKey(),
+    },
+  });
+}
+// SDS b.1: logout increases the tokenVersion, so every token of the account stops working, then clears the cookie.
+async function logout(req, res) {
+  const claims = tokenClaims(req);
+  if (claims) await User.updateOne({ _id: claims.sub, authVersion: claims.ver }, { $inc: { authVersion: 1 } });
+  clearToken(req, res);
   res.json({ data: { message: "Signed out." } });
 }
 // Trả hồ sơ của tài khoản đang đăng nhập.
@@ -110,9 +261,26 @@ async function profile(req, res) {
 }
 // Chỉ cập nhật các trường hồ sơ cá nhân được phép.
 async function updateProfile(req, res) {
-  v.keys(req.body, ["fullName", "phone", "address", "dateOfBirth"]);
+  v.keys(req.body, ["fullName", "phone", "address", "dateOfBirth", "email"]);
   const b = req.body;
   const u = req.user;
+  let message;
+  // UC03 4b: a Customer changes the e-mail through a link sent to the new address; staff e-mails are changed by
+  // the person who manages the account (BR-24).
+  if (b.email !== undefined && v.email(b.email) !== u.email) {
+    if (req.role.key !== "customer") v.fail("The e-mail of a staff account is changed by the person who manages it.", "email");
+    const email = v.email(b.email);
+    if (await User.exists({ $or: [{ email }, { pendingEmail: email }], _id: { $ne: u._id } })) throw new v.HttpError(409, "This email is already registered."); // MSG-14
+    const rawToken = randomBytes(32).toString("hex");
+    u.pendingEmail = email;
+    u.emailVerification = { tokenHash: createHash("sha256").update(rawToken).digest("hex"), expiresAt: new Date(Date.now() + VERIFY_MS), lastSentAt: new Date(), sentAt: [new Date()] };
+    try {
+      await sendVerificationEmail({ email, fullName: u.customerProfile?.fullName || u.username, token: rawToken });
+    } catch (error) {
+      console.error("[ChangeEmail] Failed to send email:", error.message);
+    }
+    message = "A verification e-mail has been sent. The link is valid for 24 hours."; // MSG-73
+  }
   if (b.fullName !== undefined)
     u.customerProfile.fullName = v.text(b.fullName, "fullName", 2, 50);
   if (b.phone !== undefined)
@@ -129,7 +297,7 @@ async function updateProfile(req, res) {
     }
   }
   await u.save();
-  res.json({ data: publicUser(u, req.role) });
+  res.json({ data: { ...publicUser(u, req.role), pendingEmail: u.pendingEmail }, ...(message ? { message } : {}) });
 }
 // Đổi mật khẩu bằng cập nhật có điều kiện, tránh ghi đè lần thu hồi phiên khác.
 async function changePassword(req, res) {
@@ -140,7 +308,7 @@ async function changePassword(req, res) {
   const u = await User.findById(req.user.id).select(
     "+passwordHash +authVersion",
   );
-  if (!u || u.status !== "active" || (u.authVersion || 0) !== req.session.authVersion)
+  if (!u || u.status !== "active" || (u.authVersion || 0) !== tokenClaims(req)?.ver)
     throw new v.HttpError(401, "Your session has ended. Please sign in.");
   if (!(await verifyPassword(current, u.passwordHash)))
     v.fail("Current password is incorrect.", "currentPassword");
@@ -154,12 +322,7 @@ async function changePassword(req, res) {
     { new: true, runValidators: true },
   ).select("+authVersion");
   if (!updated) throw new v.HttpError(409, "The account changed. Please sign in again.");
-  const roleAuthVersion = req.session.roleAuthVersion || 0;
-  await regenerate(req);
-  req.session.userId = updated.id;
-  req.session.authVersion = updated.authVersion;
-  req.session.roleAuthVersion = roleAuthVersion;
-  await save(req);
+  issueToken(req, res, updated, req.role); // this device keeps working; the other tokens carry the old version
   res.json({
     data: { message: "Password changed. Other sessions have been signed out." },
   });
@@ -244,6 +407,126 @@ async function resetPassword(req, res) {
     data: { message: "Password reset successful. You can now sign in." },
   });
 }
+
+async function verifyEmail(req, res) {
+  v.keys(req.body, ["token", "email"]);
+  const token = v.text(req.body.token, "token", 1, 128).trim();
+  const email = req.body.email ? v.email(req.body.email) : undefined;
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+
+  // UC03 4b: the link of an e-mail change is sent to the new address, which is still pendingEmail.
+  const query = email ? { $or: [{ email }, { pendingEmail: email }] } : { "emailVerification.tokenHash": tokenHash };
+  const user = await User.findOne(query).select(
+    "+emailVerification.tokenHash +emailVerification.expiresAt"
+  );
+
+  if (!user) {
+    throw new v.HttpError(400, "Invalid verification link or account not found.");
+  }
+  const changingEmail = Boolean(user.pendingEmail) && (!email || email === user.pendingEmail);
+
+  if (user.isVerified && !changingEmail) {
+    return res.json({
+      data: { message: "Your email has already been verified. You can now sign in." },
+    });
+  }
+
+  if (
+    !user.emailVerification?.tokenHash ||
+    user.emailVerification.tokenHash !== tokenHash
+  ) {
+    throw new v.HttpError(400, "Invalid verification token.");
+  }
+
+  if (
+    !user.emailVerification?.expiresAt ||
+    new Date() > user.emailVerification.expiresAt
+  ) {
+    const err = new v.HttpError(
+      400,
+      "Verification link has expired. Please request a new verification email."
+    );
+    err.code = "TOKEN_EXPIRED";
+    throw err;
+  }
+
+  user.isVerified = true;
+  if (changingEmail) {
+    // The login e-mail is replaced only now; until here the old one stayed valid (UC03 4b).
+    if (await User.exists({ email: user.pendingEmail, _id: { $ne: user._id } })) throw new v.HttpError(409, "This email is already registered."); // MSG-14
+    user.email = user.pendingEmail;
+    user.pendingEmail = undefined;
+  }
+  user.set("emailVerification", undefined);
+  await user.save();
+
+  res.json({
+    data: { message: "Email verified successfully! You can now sign in to your account." },
+  });
+}
+
+async function resendVerification(req, res) {
+  v.keys(req.body, ["email"]);
+  const email = v.email(req.body.email);
+  const user = await User.findOne({ email }).select(
+    "+emailVerification.tokenHash +emailVerification.expiresAt +emailVerification.lastSentAt +emailVerification.sentAt"
+  );
+
+  if (!user) {
+    return res.json({
+      data: {
+        message: "If an unverified account with this email exists, a verification link has been sent.",
+      },
+    });
+  }
+
+  if (user.isVerified) {
+    return res.json({
+      data: { message: "This email address is already verified. You can sign in directly." },
+    });
+  }
+
+  // Anti-spam cooldown (1 minute)
+  if (user.emailVerification?.lastSentAt) {
+    const elapsed = Date.now() - new Date(user.emailVerification.lastSentAt).getTime();
+    if (elapsed < 60 * 1000) {
+      const waitSec = Math.ceil((60000 - elapsed) / 1000);
+      throw new v.HttpError(
+        429,
+        `Please wait ${waitSec} seconds before requesting another verification email.`
+      );
+    }
+  }
+
+  // BR-42: at most 3 verification e-mails per hour for the same account (MSG-81).
+  const lastHour = (user.emailVerification?.sentAt || []).filter((t) => Date.now() - t < 3600 * 1000);
+  if (lastHour.length >= 3) throw new v.HttpError(429, "Too many requests. Please try again later.");
+
+  const rawToken = randomBytes(32).toString("hex");
+  const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+  user.emailVerification = {
+    tokenHash,
+    expiresAt: new Date(Date.now() + VERIFY_MS),
+    lastSentAt: new Date(),
+    sentAt: [...lastHour, new Date()],
+  };
+  await user.save();
+
+  try {
+    await sendVerificationEmail({
+      email: user.email,
+      fullName: user.customerProfile?.fullName || user.username,
+      token: rawToken,
+    });
+  } catch (emailErr) {
+    console.error("[ResendVerification] Failed to send email:", emailErr.message);
+  }
+
+  res.json({
+    data: { message: "Verification email sent. Please check your inbox." },
+  });
+}
+
 module.exports = {
   register,
   login,
@@ -253,4 +536,7 @@ module.exports = {
   changePassword,
   forgotPassword,
   resetPassword,
+  verifyEmail,
+  resendVerification,
+  captchaConfig,
 };

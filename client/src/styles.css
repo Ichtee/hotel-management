@@ -64,9 +64,13 @@ tr:last-child td { border-bottom: 0; } tbody tr:hover { background: #fafbfc; }
 /* Let text cells wrap so tables fit the screen; codes, dates and amounts have no break points. */
 td { white-space: normal; }
 td.nw, td .badge, td .btn { white-space: nowrap; }
-.row-actions { display: flex; flex-wrap: wrap; gap: .35rem; min-width: 9.5rem; max-width: 15rem; }
+.row-actions { display: flex; flex-wrap: nowrap; gap: .35rem; justify-content: flex-end; }
+.row-actions .btn, .row-actions summary { white-space: nowrap; flex-shrink: 0; }
+textarea { font: inherit; min-height: 88px; padding: .55rem .7rem; }
 .badge { padding: .15rem .65rem; border-radius: 99px; font-size: .78rem; font-weight: 600; text-transform: capitalize; background: var(--grey-bg); }
-.b-confirmed, .b-active, .b-paid, .b-success, .b-completed, .b-done, .b-resolved, .b-published, .b-low { background: var(--green-bg); color: var(--green); }
+.b-confirmed, .b-active, .b-paid, .b-success, .b-completed, .b-done, .b-resolved, .b-published, .b-low, .b-fully_paid, .b-approved { background: var(--green-bg); color: var(--green); }
+.b-deposit_paid, .b-refunded, .b-skipped { background: var(--blue-bg); color: var(--blue); }
+.b-rejected, .b-no_show { background: var(--red-bg); color: var(--red); }
 .b-checked_in, .b-in_progress, .b-medium { background: var(--blue-bg); color: var(--blue); }
 .b-pending, .b-open, .b-partial, .b-cancellation_requested, .b-requested { background: var(--amber-bg); color: var(--amber); }
 .b-cancelled, .b-failed, .b-expired, .b-inactive, .b-high { background: var(--red-bg); color: var(--red); }
@@ -79,7 +83,7 @@ td.nw, td .badge, td .btn { white-space: nowrap; }
 .track { height: 10px; background: var(--grey-bg); border-radius: 99px; overflow: hidden; } .fill { height: 100%; }
 .queue li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .75rem 0; border-bottom: 1px solid var(--line); }
 .queue small { display: block; color: var(--muted); }
-.s-available { background: #2e9e63; } .s-occupied { background: var(--navy-2); } .s-cleaning { background: #e0a030; } .s-maintenance { background: var(--red); }
+.s-available { background: #1f7a4c; } /* white text reaches 4.5:1 */ .s-occupied { background: var(--navy-2); } .s-cleaning { background: #e0a030; } .s-maintenance { background: var(--red); }
 .legend { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-bottom: 1rem; text-transform: capitalize; font-size: .9rem; }
 .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: .4rem; }
 .floor { margin-bottom: 1.5rem; }
@@ -121,6 +125,22 @@ input, select { min-height: 44px; padding: 0 .75rem; border: 1px solid var(--lin
 .site .dd-menu { background: #fff; border: 1px solid var(--line); }
 .site .dd-menu a:hover { background: var(--grey-bg); }
 .site .menu-btn { color: var(--navy); border-color: var(--line); }
+/* Account menu: one entry point for bookings, profile and sign out. */
+.site .right { gap: .75rem; }
+.site .dd > button.acct { width: auto; gap: .5rem; padding: 0 .65rem 0 .3rem; border: 1px solid var(--line); border-radius: 99px; background: #fff; }
+.site .dd > button.acct:hover, .site .dd > button.acct[aria-expanded="true"] { background: var(--grey-bg); }
+.acct .avatar { width: 34px; height: 34px; font-size: .85rem; }
+.acct-name { max-width: 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-head { display: grid; padding: .55rem .75rem .65rem; margin-bottom: .25rem; border-bottom: 1px solid var(--line); }
+.acct-head small { color: var(--muted); font-weight: 400; }
+.dd-menu .signout { width: 100%; min-height: 44px; padding: .5rem .75rem; border: 0; border-radius: 8px; background: none; color: var(--red); font-weight: 600; text-align: left; }
+.dd-menu .signout:hover { background: var(--red-bg); }
+.signin { display: inline-flex; align-items: center; min-height: 44px; padding: 0 .75rem; border-radius: 10px; color: var(--navy); font-weight: 600; text-decoration: none; }
+.signin:hover { background: var(--grey-bg); }
+@media (max-width: 999px) {
+  .site .right { flex-direction: column; align-items: stretch; padding-top: .75rem; border-top: 1px solid var(--line); }
+  .site .dd > button.acct { width: 100%; }
+}
 .btn.gold { background: var(--gold); border-color: var(--gold); color: #1a1205; } .btn.gold:hover { background: #a8761f; color: #fff; }
 .btn.ghost-w { text-decoration: none; display: inline-flex; align-items: center; }
 .site .right a { text-decoration: none; display: inline-flex; align-items: center; }
@@ -215,7 +235,7 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; }
 .details dt { color: var(--muted); } .details dd { margin: 0; text-align: right; }
 .lines { display: grid; gap: .4rem; margin-top: .75rem; }
 .lines li { display: flex; justify-content: space-between; gap: .5rem 1rem; flex-wrap: wrap; padding-top: .4rem; border-top: 1px solid var(--line); font-size: .9rem; }
-.lines li span:first-child { text-transform: capitalize; }
+.lines li span:first-child { text-transform: none; } /* free text (notes, item names) must keep its own capitals */
 .empty { text-align: center; padding: 2.5rem 1rem; background: #fff; border: 1px dashed var(--line); border-radius: 14px; display: grid; gap: .75rem; justify-items: center; }
 .empty h2 { margin: 0; }
 .skel-card { height: 96px; border-radius: 14px; background: linear-gradient(90deg, var(--grey-bg) 25%, #f6f8fa 50%, var(--grey-bg) 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite linear; }
@@ -269,3 +289,76 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; }
 .otp-row { display: flex; gap: .75rem; align-items: end; flex-wrap: wrap; }
 .form.inline { display: flex; gap: .75rem; align-items: end; flex-wrap: wrap; } .form.inline label { flex: 1; min-width: 200px; }
 .tier-row { display: flex; gap: .5rem; align-items: end; flex-wrap: wrap; } .tier-row label { display: grid; gap: .25rem; font-weight: 500; }
+.narrow { max-width: 760px; }
+.policy-list { display: grid; gap: .6rem; padding-left: 1.2rem; margin: .5rem 0 0; }
+.policy-list li { line-height: 1.5; }
+
+/* UC13 notification bell (staff topbar and customer header) */
+.bell { position: relative; }
+.bell-btn { position: relative; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; background: none; color: inherit; cursor: pointer; }
+.bell-btn:hover { background: #0000000d; }
+.bell-dot { position: absolute; top: 6px; right: 4px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: #c0392b; color: #fff; font: 700 11px/18px system-ui, sans-serif; text-align: center; }
+.bell-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 60; width: min(360px, calc(100vw - 32px)); max-height: 70vh; overflow: auto; background: #fff; color: #1f2a2a; border: 1px solid #e3ddd2; border-radius: 10px; box-shadow: 0 12px 32px #0002; text-align: left; letter-spacing: normal; text-transform: none; }
+.bell-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid #eee7dc; font-size: .9rem; }
+.bell-head .linklike { font-size: .8rem; }
+.bell-pop ul { list-style: none; margin: 0; padding: 0; }
+.bell-pop li button { display: grid; gap: 2px; width: 100%; padding: 10px 14px; border: 0; border-bottom: 1px solid #f2ede5; background: none; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.bell-pop li button:hover { background: #f8f5ef; }
+.bell-pop li.unread button { background: #fbf6ec; }
+.bell-pop li.unread b::before { content: ''; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #c39a5f; vertical-align: middle; }
+.bell-pop b { font-size: .88rem; }
+.bell-pop span { font-size: .84rem; color: #4d5a58; }
+.bell-pop small { font-size: .75rem; color: #7c8684; }
+.bell-empty { padding: 18px 14px; margin: 0; color: #6b7472; font-size: .88rem; }
+.perm-list { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 18px; }
+/* the resort header styles its lists as a row; the notification list stays a column */
+.cx .bell-pop ul, .bell-pop ul { display: block; }
+.cx .bell-pop li, .bell-pop li { display: block; width: 100%; }
+/* Collapsible filters (<details>): the summary is a full-width 44px target with an open/closed arrow. */
+details.filters > summary { display: flex; align-items: center; justify-content: space-between; min-height: 44px; cursor: pointer; list-style: none; }
+details.filters > summary::-webkit-details-marker { display: none; }
+details.filters > summary::after { content: "▾"; font-size: 1rem; color: var(--muted); transition: transform .2s; }
+details.filters[open] > summary::after { transform: rotate(180deg); }
+details.filters > label { display: block; margin-top: 1rem; }
+@media (prefers-reduced-motion: reduce) { details.filters > summary::after { transition: none; } }
+.check .consent-text { margin-left: 0; color: var(--text); font-size: .95rem; line-height: 1.4; }
+
+/* ---- Task screens (ui.jsx Modal): a task replaces the page content instead of floating over it ---- */
+#main.has-screen > :not(.screen) { display: none !important; }
+.screen { width: 100%; max-width: 920px; margin: 0 auto; padding-bottom: 2.5rem; }
+.screen-head { display: grid; justify-items: start; gap: .75rem; margin-bottom: 1.25rem; }
+.screen-head h1 { margin: 0; font-size: clamp(1.5rem, 2.4vw, 2rem); line-height: 1.2; outline: none; }
+.btn.back { min-height: 40px; padding: 0 .9rem; gap: .4rem; color: var(--muted); }
+.btn.back:hover { color: var(--navy); }
+.screen-body { background: var(--card, #fff); border: 1px solid var(--line); border-radius: 14px; padding: clamp(1rem, 2.5vw, 1.75rem); }
+.screen .form, .screen .form-grid { max-width: none; }
+.screen-body > p:first-child { margin-top: 0; }
+/* One place for the form buttons: bottom right, secondary first, primary last (the action that saves). */
+.modal-actions { display: flex; justify-content: flex-end; align-items: center; gap: .75rem; flex-wrap: wrap; margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line); }
+.modal-actions .btn { min-width: 120px; }
+@media (max-width: 600px) { .modal-actions { flex-direction: column-reverse; align-items: stretch; } .modal-actions .btn { width: 100%; } }
+.cx .screen { max-width: 960px; padding: 2.5rem 1rem 4rem; }
+.cx .screen-body { border-radius: 2px; background: var(--card); }
+
+/* ---- Production polish (UI review) ---- */
+/* `font: 1rem inherit` is invalid, so controls fell back to the browser's 13px: inherit the app font at 16px. */
+input, select, textarea { font: inherit; font-size: 1rem; }
+/* The page action stays top right however long the subtitle is; it moves under the title only on small screens. */
+.page-head { flex-wrap: nowrap; align-items: flex-start; }
+.page-head > div:first-child { flex: 1; min-width: 0; }
+.page-head .head-actions { flex-shrink: 0; }
+@media (max-width: 640px) { .page-head { flex-wrap: wrap; } }
+.table-wrap td:last-child:has(.btn) { white-space: nowrap; text-align: right; }
+.btn.sm.danger { background: #fff; }
+.nw { white-space: nowrap; }
+.pay-row { display: flex; justify-content: flex-end; }
+
+/* Printing an invoice (or any task screen) prints only the screen content, not the app shell. */
+@media print {
+  .side, .atop, .topbar, .site-foot, .skip, .scrim, .screen-head .btn.back, .modal-actions, .pay-row { display: none !important; }
+  body, .adm, .amain, .acontent, #main, .screen, .screen-body { background: #fff !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; max-width: none !important; }
+  .table-wrap { border: 1px solid #ccc; }
+}
+.form > .modal-actions, .form > p { grid-column: 1 / -1; }
+
+.img-ph { background: #e9e4da; width: 100%; height: 100%; min-height: 64px; }

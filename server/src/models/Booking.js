@@ -63,6 +63,9 @@ const schema = new Schema({
   checkedOutBy: { type: Schema.Types.ObjectId, ref: 'User' },
   holdExpiresAt: Date, // BR-29: pending online bookings hold the room for 15 minutes
   cancelledAt: Date,
+  noShowAt: Date,
+  reminderSentAt: Date,
+  consentAt: Date,
   cancellationReason: String,
   // BR-32 / BR-36 / BR-37: the request, its locked refundable amount and its approval.
   cancellation: {

@@ -14,11 +14,16 @@ const schema = new Schema({
   assignmentShift: { type: String, enum: ['morning', 'afternoon', 'night'] },
   checklist: [{ label: String, completed: { type: Boolean, default: false } }],
   requestContent: String,
+  preferredTime: Date, // UC37: empty = as soon as possible
+  requestedBy: { type: Schema.Types.ObjectId, ref: 'User' }, // Receptionist of an ad-hoc task
+  skipReason: String, // UC30 3b: guest declined or Do not disturb
   routineKey: { type: String },
   unassignedNotifiedKey: String,
-  inspectionResult: String, startedAt: Date, skipReason: String,
-  operationKey: { type: String, unique: true, sparse: true }
+  inspectionResult: String, startedAt: Date, 
+  operationKey: { type: String, unique: true, sparse: true },
+  inspectionKey: String,
 }, { timestamps: true });
 schema.index({ assignedTo: 1, status: 1 });
 schema.index({ routineKey: 1 }, { unique: true, sparse: true });
+schema.index({ inspectionKey: 1 }, { unique: true, sparse: true });
 module.exports = mongoose.model('CleaningTask', schema);

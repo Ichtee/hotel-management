@@ -5,6 +5,7 @@
   "scripts": {
     "test:e2e": "npm run test:e2e --prefix client",
     "demo": "concurrently --kill-others \"npm run dev --prefix client\" \"npm run demo --prefix server\"",
+    "local": "concurrently --kill-others \"npm run dev --prefix client\" \"npm run demo --prefix server -- --persist\"",
     "install:all": "npm install --prefix server && npm install --prefix client",
     "dev": "concurrently --kill-others \"npm run dev --prefix client\" \"npm run dev --prefix server\"",
     "build": "npm run build --prefix client",

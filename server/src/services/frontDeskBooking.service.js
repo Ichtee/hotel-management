@@ -160,7 +160,7 @@ async function checkOut(bookingId, actorId) {
   await Room.updateMany({ _id: { $in: ids }, hotelId: booking.hotelId }, { $set: { status: 'cleaning' } });
   booking.status = 'checked_out'; booking.actualCheckOutAt = new Date(); booking.checkedOutBy = actorId;
   booking.events.push({ actorId, type: 'checked_out', note: 'Guest checked out' }); await booking.save();
-  const invoice = await Invoice.findOneAndUpdate({ bookingId: booking._id }, { $setOnInsert: { bookingId: booking._id, invoiceNumber: `INV-${Date.now()}`, issuedBy: actorId, issuedAt: new Date() }, $set: { subtotal: booking.roomAmount + booking.serviceAmount, totalAmount: booking.totalAmount, status: 'unpaid' } }, { new: true, upsert: true });
+  const invoice = await Invoice.findOneAndUpdate({ bookingId: booking._id, kind: "checkout" }, { $setOnInsert: { bookingId: booking._id, invoiceNumber: `INV-${Date.now()}`, issuedBy: actorId, issuedAt: new Date() }, $set: { subtotal: booking.roomAmount + booking.serviceAmount, totalAmount: booking.totalAmount, status: 'unpaid' } }, { new: true, upsert: true });
   return { booking, invoice };
 }
 

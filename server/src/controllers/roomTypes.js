@@ -137,4 +137,59 @@ async function visibility(req, res) {
   });
   res.json({ data });
 }
-module.exports = { listing, detail, create, update, remove, reviews, visibility };
+// Submit review for completed booking (UC12, BR-23)
+async function submitReview(req, res) {
+  const { bookingId, rating, title, comment } = req.body;
+  if (!bookingId) throw new v.HttpError(400, "Booking ID is required.");
+  const numRating = Number(rating);
+  if (!Number.isInteger(numRating) || numRating < 1 || numRating > 5) {
+    throw new v.HttpError(400, "Rating must be an integer between 1 and 5.");
+  }
+
+  const booking = await Booking.findById(bookingId);
+  if (!booking) throw new v.HttpError(404, "Booking not found.");
+
+  const userId = req.user?._id;
+  if (!userId || (booking.customerId && String(booking.customerId) !== String(userId))) {
+    throw new v.HttpError(403, "You can only review your own booking.");
+  }
+
+  if (booking.status !== "checked_out") {
+    throw new v.HttpError(400, "You can only review a booking after checkout (BR-23).");
+  }
+
+  const existing = await Review.findOne({ bookingId: booking._id });
+  if (existing) {
+    throw new v.HttpError(409, "A review has already been submitted for this booking.");
+  }
+
+  const roomTypeId = booking.rooms?.[0]?.roomTypeId || booking.roomTypeId;
+  if (!roomTypeId) {
+    throw new v.HttpError(400, "Room type not found on booking.");
+  }
+
+  const review = await Review.create({
+    customerId: userId,
+    bookingId: booking._id,
+    roomTypeId,
+    rating: numRating,
+    title: title ? String(title).trim() : undefined,
+    comment: comment ? String(comment).trim() : undefined,
+    status: "visible"
+  });
+
+  res.status(201).json({
+    data: review,
+    message: "Review submitted successfully"
+  });
+}
+
+// Lấy danh sách review của chính khách hàng đăng nhập
+async function customerReviews(req, res) {
+  const userId = req.user?._id;
+  if (!userId) return res.json({ data: [] });
+  const reviews = await Review.find({ customerId: userId }).lean();
+  res.json({ data: reviews });
+}
+
+module.exports = { listing, detail, create, update, remove, reviews, visibility, submitReview, customerReviews };

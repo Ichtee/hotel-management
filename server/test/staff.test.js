@@ -54,8 +54,8 @@ async function setup() {
   const passwordHash = await hashPassword(password);
   for (const key of ["manager", "admin", "customer"])
     await User.create({ username: key, email: `${key}@example.com`, roleId: roles[key]._id, passwordHash,
-      phone: "0912345678", customerProfile: { fullName: key } });
-  ({ app, store } = createApp({ mongoUri: db.getUri("staff_api_tests"), sessionSecret: "temporary-tests-secret-at-least-32-characters" }));
+      phone: "0912345678", customerProfile: { fullName: key }, isVerified: true });
+  ({ app, store } = createApp({ mongoUri: db.getUri("staff_api_tests"), jwtSecret: "temporary-tests-secret-at-least-32-characters" }));
   manager = await login("manager@example.com");
   admin = await login("admin@example.com");
   customer = await login("customer@example.com");
@@ -74,7 +74,7 @@ test("UC22/UC33 deny non-manager access including custom roles with staff.manage
   const staff = await employee();
   const role = await Role.create({ key: "fake_manager", name: "Custom", scope: "hotel", permissions: ["staff.manage", "roles.manage"] });
   await User.create({ username: "fake", email: "fake@example.com", roleId: role._id,
-    passwordHash: await hashPassword(password), customerProfile: { fullName: "Fake" } });
+    passwordHash: await hashPassword(password), customerProfile: { fullName: "Fake" }, isVerified: true });
   const fake = await login("fake@example.com");
   for (const agent of [admin, customer, staff.agent, fake]) {
     await agent.get("/api/staff").expect(403);
@@ -161,19 +161,19 @@ async function responsibilities(staffId) {
   return { tasks, plan, past };
 }
 
-test("UC22 deactivation or role change releases Assigned tasks, preserves In Progress and assignment history", async () => {
+test("UC22 deactivation or role change returns Assigned and In Progress tasks to Pending, keeps closed tasks and assignment history", async () => {
   for (const patch of [{ status: "suspended", reason: "On leave" }, { role: "receptionist" }]) {
     const staff = await employee("housekeeping");
     const { tasks, plan, past } = await responsibilities(staff.id);
     const result = await send(manager, "patch", `/api/staff/${staff.id}`, patch).expect(200);
-    assert.deepEqual(result.body.meta.responsibility, { pendingTasks: 2, revokedAssignments: 1, inProgressTasks: 1 });
+    assert.deepEqual(result.body.meta.responsibility, { pendingTasks: 3, revokedAssignments: 1 }); // BR-41 (SRS v2.5)
     assert.equal(result.body.meta.notificationStored, true);
-    for (const task of tasks.slice(0, 2)) {
+    for (const task of tasks.slice(0, 3)) {
       const saved = await CleaningTask.findById(task._id);
       assert.equal(saved.status, "pending");
       assert.equal(saved.assignedTo, undefined);
     }
-    for (const task of tasks.slice(2)) {
+    for (const task of tasks.slice(3)) {
       const saved = await CleaningTask.findById(task._id);
       assert.equal(saved.status, task.status);
       assert.equal(String(saved.assignedTo), staff.id);

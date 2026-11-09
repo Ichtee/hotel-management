@@ -16,7 +16,6 @@ class RoomService {
 
     return Room.find(query)
       .populate('roomTypeId', 'name basePrice maxOccupancy bedType')
-      .populate('hotelId', 'name city')
       .sort({ floor: 1, roomNumber: 1 });
   }
 
@@ -25,8 +24,7 @@ class RoomService {
    */
   async getRoomById(id) {
     const room = await Room.findById(id)
-      .populate('roomTypeId')
-      .populate('hotelId');
+      .populate('roomTypeId');
     if (!room) {
       const error = new Error('Room not found');
       error.status = 404;
@@ -81,8 +79,7 @@ class RoomService {
     }
 
     const room = await Room.findByIdAndUpdate(id, data, { new: true, runValidators: true })
-      .populate('roomTypeId')
-      .populate('hotelId');
+      .populate('roomTypeId');
     if (!room) {
       const error = new Error('Room not found');
       error.status = 404;
@@ -175,7 +172,7 @@ class RoomService {
     }
 
     const query = { status: { $ne: 'maintenance' }, isActive: { $ne: false } };
-    if (hotelId) query.hotelId = hotelId;
+    // Single-hotel system: rooms belong to this hotel property
 
     let availableRooms = await Room.find(query).populate('roomTypeId');
 
@@ -252,7 +249,7 @@ class RoomService {
       status: { $ne: 'maintenance' },
       isActive: { $ne: false }
     };
-    if (hotelId) roomQuery.hotelId = hotelId;
+    // Hotel is single-property system; Room schema matches by roomTypeId
 
     const candidateRooms = await Room.find(roomQuery);
     if (!candidateRooms.length) return null;

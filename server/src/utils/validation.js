@@ -53,8 +53,9 @@ function password(value, field = "password") {
 }
 function phone(value, required = false) {
   if (!required && (value === "" || value === undefined)) return "";
-  if (typeof value !== "string" || !/^\d{10,11}$/.test(value))
-    fail("Phone must contain 10–11 digits.", "phone");
+  // CR-04 / MSG-52: Vietnamese 10-11 digits, or + and 8 to 15 digits with the country code.
+  if (typeof value !== "string" || !/^(\d{10,11}|\+\d{8,15})$/.test(value))
+    fail("Phone number must have 10 to 11 digits, or + and 8 to 15 digits with the country code.", "phone");
   return value;
 }
 function choice(value, field, choices) {

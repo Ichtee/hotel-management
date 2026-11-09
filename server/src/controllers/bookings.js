@@ -4,6 +4,8 @@ const Refund = require("../models/Refund");
 require("../models/RoomType");
 require("../models/Room");
 const v = require("../utils/validation");
+const Invoice = require("../models/Invoice");
+const CheckInOutRequest = require("../models/CheckInOutRequest");
 const { decrypt, mask, phoneHash } = require("../utils/guestData");
 // BR-14: only verified (success) payments count as paid.
 function paymentStatus(booking, payments) {
@@ -63,9 +65,11 @@ async function detail(req, res) {
     .populate("rooms.roomId", "roomNumber floor")
     .lean();
   if (!booking) throw new v.HttpError(404, "Booking not found.");
-  const [payments, refunds] = await Promise.all([
+  const [payments, refunds, invoices, requests] = await Promise.all([
     Payment.find({ bookingId: booking._id }).select("kind amount currency method status paidAt createdAt refundedAmount isLateDeposit").sort({ createdAt: 1 }).lean(),
     Refund.find({ bookingId: booking._id }).select("amount currency status reason bankTransactionCode processedAt createdAt").sort({ createdAt: 1 }).lean(),
+    Invoice.find({ bookingId: booking._id }).select("invoiceNumber type lines totalAmount issuedAt createdAt").sort({ createdAt: 1 }).lean(),
+    CheckInOutRequest.find({ bookingId: booking._id }).select("type requestedTime earlyOrLate quotedFee status responseNote numberOfGuests createdAt").sort({ createdAt: -1 }).lean(),
   ]);
   const penalties = (booking.penalties || []).map(({ _id, description, quantity, amount, status, afterCheckout, paymentId }) => ({ _id, description, quantity, amount, status, afterCheckout, paymentId }));
   const presented = present(booking, req);
@@ -73,7 +77,7 @@ async function detail(req, res) {
     presented.guestPhone = decrypt(booking.guestPhone);
     presented.guestEmail = decrypt(booking.guestEmail);
   }
-  res.json({ data: { ...presented, ...paymentStatus(booking, payments), payments, refunds, penalties } });
+  res.json({ data: { ...presented, ...paymentStatus(booking, payments), payments, refunds, penalties, invoices, requests } });
 }
 
 async function byReference(req, res) {

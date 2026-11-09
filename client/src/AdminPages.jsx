@@ -171,7 +171,7 @@ export function Users() {
           u.customerProfile?.fullName || '—', u.username, u.email, roleName(u.role), u.status,
           <span className="row-actions" key={u._id}>
             <button className="btn sm" onClick={() => setEdit(u)}>Edit</button>
-            {u.role !== 'admin' && <button className="btn sm" onClick={() => toggle(u)}>{u.status === 'active' ? 'Suspend' : 'Activate'}</button>}
+            {u.role !== 'admin' && <button className={`btn sm${u.status === 'active' ? ' danger' : ''}`} onClick={() => toggle(u)}>{u.status === 'active' ? 'Suspend' : 'Activate'}</button>}
           </span>
         ])} />
       )}
@@ -241,7 +241,7 @@ export function Roles() {
           r.name + (r.isSystem ? ' (system)' : ''), r.key, r.scope, r.permissions.length ? r.permissions.join(', ') : '—', r.isActive ? 'active' : 'inactive',
           <span className="row-actions" key={r._id}>
             <button className="btn sm" onClick={() => setEdit(r)}>Edit</button>
-            {!r.isSystem && <button className="btn sm" onClick={() => remove(r)}>Delete</button>}
+            {!r.isSystem && <button className="btn sm danger" onClick={() => remove(r)}>Delete</button>}
           </span>
         ])} />
       )}
@@ -307,8 +307,8 @@ export function Coupons() {
           `${c.usageCount} / ${c.usageLimit}`, `${dateLabel(c.startDate)} – ${dateLabel(c.endDate)}`, c.isActive ? 'active' : 'inactive',
           <span className="row-actions" key={c._id}>
             <button className="btn sm" onClick={() => setEdit(c)}>Edit</button>
-            <button className="btn sm" onClick={() => act(() => api(`/promotions/${c._id}`, { method: 'PATCH', body: { isActive: !c.isActive } }))}>{c.isActive ? 'Disable' : 'Enable'}</button>
-            <button className="btn sm" onClick={() => confirm(`Delete ${c.code}?`) && act(() => api(`/promotions/${c._id}`, { method: 'DELETE' }))}>Delete</button>
+            <button className={`btn sm${c.isActive ? ' danger' : ''}`} onClick={() => act(() => api(`/promotions/${c._id}`, { method: 'PATCH', body: { isActive: !c.isActive } }))}>{c.isActive ? 'Disable' : 'Enable'}</button>
+            <button className="btn sm danger" onClick={() => confirm(`Delete ${c.code}?`) && act(() => api(`/promotions/${c._id}`, { method: 'DELETE' }))}>Delete</button>
           </span>
         ])} />
       )}
@@ -384,9 +384,56 @@ export function Revenue() {
   );
 }
 
+/* ---------------- Occupancy Report (UC37 - Member 2) ---------------- */
+export function Occupancy() {
+  const [p, setP] = useState({ from: day(-29), to: day(0) });
+  const rep = useApi(`/reports/occupancy?${qs(p)}`);
+  const d = rep.data;
+  const labels = d?.series.map((r) => r.date) || [];
+  const pctFmt = (n) => `${Number(n || 0).toFixed(1)}%`;
+
+  return (
+    <>
+      <PageHead
+        title="Occupancy Report"
+        sub="Room-night utilization and capacity, excluding maintenance/blocked rooms"
+        extra={<a className="btn" href={`/api/reports/occupancy?${qs({ ...p, format: 'csv' })}`}>Export CSV</a>}
+      />
+      <form className="filters-row" onSubmit={(e) => { e.preventDefault(); setP(Object.fromEntries(new FormData(e.target))); }}>
+        <label>From<input name="from" type="date" defaultValue={p.from} required /></label>
+        <label>To<input name="to" type="date" defaultValue={p.to} required /></label>
+        <button className="btn" type="submit">Apply</button>
+      </form>
+      <Loading s={rep} />
+      {d && (
+        <>
+          {/* BR-27: occupied room-nights / available room-nights; inactive rooms and rooms in Maintenance are not available */}
+          <div className="kpis">
+            <div className="kpi"><p>Occupancy rate</p><strong>{pctFmt(d.totals.rate)}</strong><small className="muted">{d.from} → {d.to}</small></div>
+            <div className="kpi"><p>Occupied room-nights</p><strong>{d.totals.occupiedRoomNights}</strong><small className="muted">Checked-in and checked-out stays</small></div>
+            <div className="kpi"><p>Available room-nights</p><strong>{d.totals.availableRoomNights}</strong><small className="muted">Active rooms not in Maintenance</small></div>
+          </div>
+
+          <section className="panel">
+            <div className="phead"><h2>Daily occupancy rate</h2></div>
+            {d.series.length > 1 ? (
+              <LineChart labels={labels} cur={d.series.map((r) => r.rate)} format={pctFmt} summary={`Daily occupancy from ${d.from} to ${d.to}, average ${pctFmt(d.totals.rate)}`} />
+            ) : (
+              <p className="muted">Choose a longer range to see an occupancy trend.</p>
+            )}
+          </section>
+
+          <h2 className="mt">Daily details</h2>
+          <DataTable cols={['Date', 'Available room-nights', 'Occupied room-nights', 'Occupancy rate']} rows={d.series.map((r) => [r.date, String(r.availableRoomNights), String(r.occupiedRoomNights), pctFmt(r.rate)])} />
+        </>
+      )}
+    </>
+  );
+}
+
 /* ---------------- Profile & password (UC03), shared by both shells ---------------- */
 export function Profile() {
-  const { user, setUser } = useAuth();
+  const { user, setUser, signOut } = useAuth();
   const [err, setErr] = useState(null);
   const [ok, setOk] = useState('');
   const [pErr, setPErr] = useState(null);
@@ -395,7 +442,7 @@ export function Profile() {
   const save = async (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
-    try { const r = await api('/profile', { method: 'PATCH', body: { fullName: f.fullName, phone: f.phone, address: f.address, dateOfBirth: f.dateOfBirth } }); setUser(r.data); setErr(null); setOk('Profile saved.'); }
+    try { const r = await api('/profile', { method: 'PATCH', body: { fullName: f.fullName, phone: f.phone, address: f.address, dateOfBirth: f.dateOfBirth, ...(f.email ? { email: f.email } : {}) } }); setUser(r.data); setErr(null); setOk(r.message || 'Profile saved.'); }
     catch (x) { setErr(x); setOk(''); }
   };
   const pw = async (e) => {
@@ -406,11 +453,29 @@ export function Profile() {
   };
   return (
     <>
-      <PageHead title="My profile" sub={`${user.roleName} · ${user.email}`} />
+      <PageHead
+        title="My profile"
+        sub={`${user.roleName} · ${user.email}`}
+        extra={
+          <button
+            className="btn danger"
+            style={{ background: '#dc2626', color: '#ffffff', border: 'none', padding: '0.5rem 1.25rem', borderRadius: '6px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+            type="button"
+            onClick={async () => {
+              await signOut();
+              location.hash = '#/login';
+            }}
+          >
+            🚪 Sign out
+          </button>
+        }
+      />
       <div className="two">
         <form className="panel form one" onSubmit={save}>
           <h2>Personal details</h2>
           <Field label="Full name" error={err?.fields?.fullName}><input name="fullName" defaultValue={cp.fullName} required /></Field>
+          {/* UC03 4b: only a Customer changes the e-mail, through a link sent to the new address (BR-24) */}
+          {user.role === 'customer' && <Field label={user.pendingEmail ? `E-mail (waiting for verification: ${user.pendingEmail})` : 'E-mail'} error={err?.fields?.email}><input name="email" type="email" defaultValue={user.email} required /></Field>}
           <Field label="Phone" error={err?.fields?.phone}><input name="phone" defaultValue={user.phone} /></Field>
           <Field label="Address" error={err?.fields?.address}><input name="address" defaultValue={cp.address} /></Field>
           <Field label="Date of birth" error={err?.fields?.dateOfBirth}><input name="dateOfBirth" type="date" defaultValue={inputDate(cp.dateOfBirth)} /></Field>
@@ -424,6 +489,7 @@ export function Profile() {
           <Notice error={pErr && !pErr.fields ? pErr : null} ok={pOk} />
           <button className="btn primary" type="submit">Update password</button>
         </form>
+        <div className="panel form one full" style={{ gridColumn: "1 / -1", marginTop: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(211, 47, 47, 0.04)", borderColor: "rgba(211, 47, 47, 0.2)" }}><div><h3 style={{ margin: 0, color: "#d32f2f" }}>Sign out</h3><p className="muted" style={{ margin: "0.25rem 0 0" }}>End your current session on this device.</p></div><button type="button" className="btn" style={{ color: "#d32f2f", borderColor: "#d32f2f", background: "transparent" }} onClick={async () => { await signOut(); location.hash = "#/"; }}>Sign out</button></div>
       </div>
     </>
   );

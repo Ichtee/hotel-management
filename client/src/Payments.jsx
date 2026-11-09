@@ -3,10 +3,16 @@ import { api, dateLabel, money } from './api/client.js';
 import { Notice, useApi } from './ui.jsx';
 
 const METHODS = [
-  ['e_wallet', 'E-wallet', 'Pay from your wallet app'],
+  ['bank_transfer', 'Bank transfer (VietQR)', 'Scan the QR code with any banking app; the gateway confirms it'],
   ['credit_card', 'Credit or debit card', 'Visa, Mastercard, JCB'],
-  ['bank_transfer', 'Bank transfer', 'Pay with your banking app'],
 ];
+
+
+
+
+
+
+
 const mmss = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
 const refOf = (b) => b.bookingReference || b._id.slice(-8).toUpperCase();
 
@@ -87,8 +93,10 @@ export function PaymentPage({ id, kind }) {
                   ))}
                 </fieldset>
                 <Notice error={err} />
-                <button className="btn primary wide" type="submit" disabled={busy}>{busy ? 'Opening gateway…' : `Pay ${money(due)}`}</button>
-                <p className="muted fine">You will be sent to the payment gateway{offered.data.provider === 'sandbox' ? ' (sandbox)' : ''} to confirm.</p>
+                <button className="btn primary wide" type="submit" disabled={busy} style={{ marginTop: '1rem' }}>
+                  {busy ? 'Opening gateway…' : `Pay ${money(due)}${method === 'bank_transfer' ? ' by bank transfer' : ' with card'}`}
+                </button>
+                <p className="muted fine">You will be sent to the payment gateway{offered.data.provider === 'sandbox' ? ' (sandbox)' : ''}; the booking is confirmed only when the gateway confirms the payment.</p>
               </form>
             )}
           </>
@@ -103,6 +111,12 @@ export function SandboxGateway({ orderId, paymentId }) {
   const s = useApi(paymentId ? `/payments/${paymentId}` : '', Boolean(paymentId));
   const [busy, setBusy] = useState(null);
   const [err, setErr] = useState(null);
+  const [copied, setCopied] = useState('');
+  const copyText = (text, label) => {
+    navigator.clipboard?.writeText(text);
+    setCopied(label);
+    setTimeout(() => setCopied(''), 2000);
+  };
   const finish = async (result) => {
     setBusy(result); setErr(null);
     try {

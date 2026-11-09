@@ -10,7 +10,7 @@ class RoomTypeService {
     const query = {};
     if (filter.hotelId) query.hotelId = filter.hotelId;
     if (filter.isActive !== undefined) query.isActive = filter.isActive;
-    return RoomType.find(query).populate('hotelId', 'name city address starRating').sort({ createdAt: -1 });
+    return RoomType.find(query).sort({ createdAt: -1 });
   }
 
   /**
@@ -18,7 +18,7 @@ class RoomTypeService {
    * (UC06 - View Room Details)
    */
   async getRoomTypeById(id) {
-    const roomType = await RoomType.findById(id).populate('hotelId', 'name city address starRating phone email');
+    const roomType = await RoomType.findById(id);
     if (!roomType) {
       const error = new Error('Room type not found');
       error.status = 404;
@@ -88,16 +88,21 @@ class RoomTypeService {
     const update = {};
     if (basePrice !== undefined) update.basePrice = basePrice;
     if (seasonalPricing !== undefined) {
-      // Validate dates
-      for (const season of seasonalPricing) {
+      const { HttpError } = require('../utils/validation');
+      if (!Array.isArray(seasonalPricing)) throw new HttpError(400, 'seasonalPricing must be a list.');
+      // UC25: valid dates and price (MSG-23 / MSG-24), and no two rates of a room type overlap (MSG-60).
+      const spans = seasonalPricing.map((season) => {
         const start = new Date(season.startDate);
         const end = new Date(season.endDate);
-        if (end <= start) {
-          const error = new Error(`Seasonal price "${season.seasonName || 'Custom'}" endDate must be after startDate`);
-          error.status = 400;
-          throw error;
-        }
-      }
+        if (Number.isNaN(+start) || Number.isNaN(+end) || end < start)
+          throw new HttpError(400, `Rate "${season.description || 'Custom'}": the end date cannot be before the start date.`);
+        if (typeof season.price !== 'number' || !(season.price > 0))
+          throw new HttpError(400, `Rate "${season.description || 'Custom'}": the price must be greater than 0.`);
+        return { name: season.description || 'Custom', start, end };
+      }).sort((a, b) => a.start - b.start);
+      for (let i = 1; i < spans.length; i++)
+        if (spans[i].start <= spans[i - 1].end) // ranges include both days
+          throw new HttpError(409, `Rate "${spans[i].name}" overlaps "${spans[i - 1].name}". Change its dates.`);
       update.seasonalPricing = seasonalPricing;
     }
 

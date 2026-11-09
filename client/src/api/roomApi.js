@@ -1,7 +1,4 @@
-/**
- * Room and Inventory API Client for Member 2
- * Connects to http://localhost:5000/api with seamless fallback to client mock data
- */
+/** Room and inventory API client. */
 
 const API_BASE = '/api';
 
@@ -79,56 +76,19 @@ export const roomApi = {
     });
   },
 
+  // UC23: the manager only switches Maintenance on or off; other statuses follow check-in, check-out and cleaning (BR-04, BR-05).
   async updateRoomStatus(id, status) {
-    return request(`/rooms/${id}/status`, {
+    return request(`/rooms/${id}/maintenance`, {
       method: 'PATCH',
-      body: JSON.stringify({ status })
+      body: JSON.stringify({ enabled: status === 'maintenance' })
     });
   },
 
+  // UC23 3c: rooms are deactivated, never deleted, so past bookings keep their room.
   async deleteRoom(id) {
     return request(`/rooms/${id}`, {
-      method: 'DELETE'
-    });
-  },
-
-  // --- Housekeeping & Cleaning Tasks (UC39) ---
-  async getCleaningTasks(params = {}) {
-    const q = new URLSearchParams(params).toString();
-    return request(`/housekeeping/tasks${q ? '?' + q : ''}`);
-  },
-
-  async createCleaningTask(data) {
-    return request('/housekeeping/tasks', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-  },
-
-  async updateCleaningTaskStatus(id, status) {
-    return request(`/housekeeping/tasks/${id}/status`, {
       method: 'PATCH',
-      body: JSON.stringify({ status })
-    });
-  },
-
-  // --- Room Issues & Maintenance (UC40) ---
-  async getRoomIssues(params = {}) {
-    const q = new URLSearchParams(params).toString();
-    return request(`/housekeeping/issues${q ? '?' + q : ''}`);
-  },
-
-  async createRoomIssue(data) {
-    return request('/housekeeping/issues', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-  },
-
-  async resolveRoomIssue(id, payload = {}) {
-    return request(`/housekeeping/issues/${id}/resolve`, {
-      method: 'PATCH',
-      body: JSON.stringify(payload)
+      body: JSON.stringify({ isActive: false })
     });
   }
 };

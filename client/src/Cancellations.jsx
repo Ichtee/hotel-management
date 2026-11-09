@@ -11,6 +11,11 @@ export function Cancellations() {
   const [msg, setMsg] = useState(null);
   const [err, setErr] = useState(null);
   const [recording, setRecording] = useState(false);
+  // UC35 1a: withdrawn at the customer's request; the booking is Confirmed again.
+  const withdraw = async (b) => {
+    if (!window.confirm(`Withdraw the cancellation request of ${b.bookingReference} at the customer's request?`)) return;
+    try { setMsg((await api(`/frontdesk/cancellations/${b._id}/withdraw`, { method: 'POST' })).message); setErr(null); list.reload(); } catch (x) { setErr(x); }
+  };
   const approve = async (b) => {
     if (!confirm(`Approve the cancellation of ${b.bookingReference}? Refund: ${money(b.cancellation.refundableAmount)}.`)) return;
     try { setMsg((await api(`/frontdesk/cancellations/${b._id}/approve`, { method: 'POST' })).message); setErr(null); list.reload(); } catch (x) { setErr(x); }
@@ -21,11 +26,13 @@ export function Cancellations() {
       <Notice error={err} ok={msg} />
       <Loading s={list} empty="No cancellation requests are waiting." />
       {list.data?.length > 0 && (
-        <DataTable cols={['Booking', 'Booker', 'Stay', 'Requested', 'Channel', 'Reason', 'Deposit paid', 'Refund', '']} rows={list.data.map((b) => [
-          b.bookingReference, <Booker key="p" p={b.booker} />, `${dateLabel(b.checkInDate)} – ${dateLabel(b.checkOutDate)}`, dateLabel(b.cancellation.requestedAt),
-          b.cancellation.channel === 'online' ? 'Online' : `Front desk (${b.cancellation.verifyMethod === 'otp' ? 'OTP' : 'ID'})`, b.cancellation.reason || '—',
+        <DataTable cols={['Booking', 'Booker', 'Requested', 'Reason', 'Deposit paid', 'Refund', '']} rows={list.data.map((b) => [
+          <span key="r" className="nw"><b>{b.bookingReference}</b><small className="muted" style={{ display: 'block' }}>{dateLabel(b.checkInDate)} – {dateLabel(b.checkOutDate)}</small></span>,
+          <Booker key="p" p={b.booker} />,
+          <span key="q" className="nw">{dateLabel(b.cancellation.requestedAt)}<small className="muted" style={{ display: 'block' }}>{b.cancellation.channel === 'online' ? 'Online' : `Front desk (${b.cancellation.verifyMethod === 'otp' ? 'OTP' : 'ID'})`}</small></span>,
+          b.cancellation.reason || '—',
           money(b.depositPaid), money(b.cancellation.refundableAmount),
-          <button key="a" className="btn sm primary" onClick={() => approve(b)}>Approve</button>,
+          <span key="a" className="row-actions"><button className="btn sm primary" onClick={() => approve(b)}>Approve</button><button className="btn sm" onClick={() => withdraw(b)}>Withdraw</button></span>,
         ])} />
       )}
       {recording && <RecordCancellation onClose={() => setRecording(false)} onDone={(m) => { setRecording(false); setMsg(m); setErr(null); list.reload(); }} />}

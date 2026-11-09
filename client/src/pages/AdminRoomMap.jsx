@@ -1,69 +1,140 @@
 import { useState, useEffect } from 'react';
-import { ROOMS as INITIAL_ROOMS, ROOM_TYPES } from '../data.js';
 import { roomApi } from '../api/roomApi.js';
+import { Modal } from '../ui.jsx';
 
 const STATUS_CONFIG = {
-  available: { label: 'Available', color: '#2e9e63', desc: 'Ready for guest check-in' },
+  available: { label: 'Available', color: '#1f7a4c', desc: 'Ready for guest check-in' },
   occupied: { label: 'Occupied', color: '#0f2742', desc: 'Guest is currently staying' },
   cleaning: { label: 'Cleaning', color: '#e0a030', desc: 'Housekeeping in progress' },
   maintenance: { label: 'Maintenance', color: '#d32f2f', desc: 'Out of order / repair' }
 };
 
 export default function AdminRoomMap() {
-  const [rooms, setRooms] = useState(INITIAL_ROOMS);
+  const [rooms, setRooms] = useState([]);
+  const [roomTypes, setRoomTypes] = useState([]);
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newRoomNumber, setNewRoomNumber] = useState('');
-  const [newRoomFloor, setNewRoomFloor] = useState('2');
-  const [newRoomTypeId, setNewRoomTypeId] = useState(ROOM_TYPES[0]?.id || 1);
+  const [newRoomFloor, setNewRoomFloor] = useState('');
+  const [newRoomTypeId, setNewRoomTypeId] = useState('');
   const [toastMessage, setToastMessage] = useState('');
+  const [loading, setLoading] = useState(true);
 
   const showToast = (msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(''), 3000);
   };
 
-  // Change room status (UC30, lifecycle)
-  const handleStatusChange = async (roomNo, newStatus) => {
-    setRooms(prev => prev.map(r => r.no === roomNo ? { ...r, status: newStatus } : r));
-    if (selectedRoom && selectedRoom.no === roomNo) {
-      setSelectedRoom(prev => ({ ...prev, status: newStatus }));
-    }
-    showToast(`Room ${roomNo} status updated to "${STATUS_CONFIG[newStatus]?.label}"`);
-
-    // Best-effort backend call
+  const loadData = async () => {
+    setLoading(true);
     try {
-      await roomApi.updateRoomStatus(roomNo, newStatus);
-    } catch {
-      // Offline/fallback handled
+      const [roomsRes, typesRes] = await Promise.allSettled([
+        roomApi.getRooms({ limit: 100 }), // the API pages by 10 by default
+        roomApi.getRoomTypes()
+      ]);
+
+      if (typesRes.status === 'fulfilled') {
+        const rawTypes = Array.isArray(typesRes.value) ? typesRes.value : (typesRes.value?.data || []);
+        if (rawTypes.length > 0) {
+          setRoomTypes(rawTypes.map(t => ({
+            id: t._id || t.id,
+            _id: t._id || t.id,
+            name: t.name,
+            price: t.basePrice
+          })));
+          setNewRoomTypeId(rawTypes[0]._id || rawTypes[0].id);
+        }
+      }
+
+      if (roomsRes.status === 'fulfilled') {
+        const rawRooms = Array.isArray(roomsRes.value) ? roomsRes.value : (roomsRes.value?.data || []);
+        {
+          const mapped = rawRooms.filter(r => r.isActive !== false).map(r => ({
+            _id: r._id || r.id,
+            no: r.roomNumber || r.no,
+            floor: r.floor,
+            status: r.status || 'available',
+            typeName: r.roomTypeId?.name || '',
+            roomTypeId: r.roomTypeId?._id || r.roomTypeId
+          })).sort((a, b) => a.no.localeCompare(b.no));
+          setRooms(mapped);
+        }
+      }
+    } catch (err) {
+      console.warn('Error loading room map data:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  // Change room status (UC30, lifecycle)
+  const handleStatusChange = async (targetRoom, newStatus) => {
+    const roomKey = targetRoom._id || targetRoom.no;
+    if (newStatus !== 'maintenance' && targetRoom.status !== 'maintenance') {
+      alert('Occupied, cleaning and available follow check-in, check-out and housekeeping. You can only put a room into Maintenance or take it out.');
+      return;
+    }
+    try {
+      const res = await roomApi.updateRoomStatus(roomKey, newStatus);
+      const saved = res?.data?.status || newStatus;
+      setRooms(prev => prev.map(r => (r._id === roomKey || r.no === targetRoom.no) ? { ...r, status: saved } : r));
+      if (selectedRoom && (selectedRoom._id === roomKey || selectedRoom.no === targetRoom.no)) setSelectedRoom(prev => ({ ...prev, status: saved }));
+      showToast(`Room ${targetRoom.no} is now "${STATUS_CONFIG[saved]?.label || saved}"`);
+    } catch (err) {
+      alert(err.message);
     }
   };
 
   // Add room (UC30)
-  const handleAddRoom = (e) => {
+  const handleAddRoom = async (e) => {
     e.preventDefault();
-    if (!newRoomNumber.trim()) return;
+    const trimmedNo = newRoomNumber.trim();
+    if (!trimmedNo) return;
 
-    if (rooms.some(r => r.no === newRoomNumber.trim())) {
-      alert(`Room number ${newRoomNumber} already exists!`);
+    if (rooms.some(r => r.no === trimmedNo)) {
+      alert(`Room ${trimmedNo} already exists.`);
       return;
     }
 
-    const newRoom = {
-      no: newRoomNumber.trim(),
+    const payload = {
+      roomNumber: trimmedNo,
       floor: parseInt(newRoomFloor, 10),
-      typeId: newRoomTypeId,
+      roomTypeId: newRoomTypeId || roomTypes[0]?.id || roomTypes[0]?._id,
       status: 'available'
     };
 
-    setRooms(prev => [...prev, newRoom].sort((a, b) => a.no.localeCompare(b.no)));
-    setShowAddModal(false);
-    setNewRoomNumber('');
-    showToast(`Room ${newRoom.no} created successfully!`);
+    try {
+      await roomApi.createRoom(payload);
+      showToast(`Room ${payload.roomNumber} created`);
+      setShowAddModal(false);
+      setNewRoomNumber('');
+      loadData();
+    } catch (err) {
+      alert(err.message);
+    }
   };
 
-  const floors = [...new Set(rooms.map(r => r.no[0]))].sort();
+  // Delete room (UC30)
+  const handleDeleteRoom = async (targetRoom) => {
+    if (!window.confirm(`Deactivate room ${targetRoom.no}? It will no longer be sold; past bookings keep it.`)) return;
+    try {
+      if (targetRoom._id) {
+        await roomApi.deleteRoom(targetRoom._id);
+      }
+      setRooms(prev => prev.filter(r => r.no !== targetRoom.no));
+      setSelectedRoom(null);
+      showToast(`Room ${targetRoom.no} deactivated`);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const floors = [...new Set(rooms.map(r => String(r.no)[0]))].sort();
   const filteredRooms = filterStatus === 'all' ? rooms : rooms.filter(r => r.status === filterStatus);
 
   const counts = {
@@ -88,64 +159,35 @@ export default function AdminRoomMap() {
 
       <div className="page-head">
         <div>
-          <h1>Interactive Room Map</h1>
-          <p>Live inventory monitoring & room lifecycle management (UC30, UC05)</p>
+          <h1>Room map</h1>
+          <p>Live status of every room. Put a room into Maintenance, add or deactivate rooms.</p>
         </div>
         <div className="head-actions">
-          <button className="btn primary" onClick={() => setShowAddModal(true)}>+ Add Room</button>
+          <button className="btn primary" onClick={() => setShowAddModal(true)}>+ Add room</button>
         </div>
       </div>
 
-      {/* Real-time KPI Status Bar */}
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-        gap: '0.75rem', marginBottom: '1.25rem'
-      }}>
-        <div style={{ background: '#fff', padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--line)' }}>
-          <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>Total Rooms</span>
-          <strong style={{ display: 'block', fontSize: '1.5rem', color: 'var(--navy)' }}>{counts.total}</strong>
-        </div>
+      {/* One row of filters: each count is a button, its dot is the colour key of the map (no colour-only meaning: the label is there too). */}
+      <div className="room-filters" role="group" aria-label="Filter rooms by status">
+        <button type="button" className={`room-filter ${filterStatus === 'all' ? 'on' : ''}`} aria-pressed={filterStatus === 'all'} onClick={() => setFilterStatus('all')}>
+          <span>All rooms</span><strong>{counts.total}</strong>
+        </button>
         {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-          <div key={key}
-            onClick={() => setFilterStatus(filterStatus === key ? 'all' : key)}
-            style={{
-              background: filterStatus === key ? cfg.color : '#fff',
-              color: filterStatus === key ? '#fff' : 'var(--text)',
-              padding: '12px 16px', borderRadius: '12px', border: `1px solid ${filterStatus === key ? cfg.color : 'var(--line)'}`,
-              cursor: 'pointer', transition: 'all 0.15s'
-            }}>
-            <span style={{ fontSize: '0.78rem', opacity: 0.85 }}>{cfg.label}</span>
-            <strong style={{ display: 'block', fontSize: '1.5rem' }}>{counts[key]}</strong>
-          </div>
+          <button key={key} type="button" className={`room-filter ${filterStatus === key ? 'on' : ''}`} aria-pressed={filterStatus === key} onClick={() => setFilterStatus(filterStatus === key ? 'all' : key)}>
+            <span><i className={`dot s-${key}`} aria-hidden="true" />{cfg.label}</span><strong>{counts[key]}</strong>
+          </button>
         ))}
-      </div>
-
-      {/* Legend & Filter Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
-        <div className="legend" style={{ margin: 0 }}>
-          {Object.entries(STATUS_CONFIG).map(([s, cfg]) => (
-            <span key={s} style={{ cursor: 'pointer', opacity: filterStatus === 'all' || filterStatus === s ? 1 : 0.4 }} onClick={() => setFilterStatus(filterStatus === s ? 'all' : s)}>
-              <i style={{ background: cfg.color }} /> {cfg.label} ({counts[s]})
-            </span>
-          ))}
-        </div>
-        <div className="chips" style={{ margin: 0 }}>
-          <button className={`chip ${filterStatus === 'all' ? 'on' : ''}`} onClick={() => setFilterStatus('all')}>All Rooms</button>
-          {Object.entries(STATUS_CONFIG).map(([s, cfg]) => (
-            <button key={s} className={`chip ${filterStatus === s ? 'on' : ''}`} onClick={() => setFilterStatus(s)}>{cfg.label}</button>
-          ))}
-        </div>
       </div>
 
       {/* Floors grid */}
       {floors.map(fl => {
-        const floorRooms = filteredRooms.filter(r => r.no[0] === fl);
+        const floorRooms = filteredRooms.filter(r => String(r.no)[0] === fl);
         if (floorRooms.length === 0) return null;
         return (
           <section key={fl} className="floor" style={{ background: '#fff', padding: '1.25rem', borderRadius: '14px', border: '1px solid var(--line)', marginBottom: '1.25rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
               <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Floor {fl}</h2>
-              <span className="muted" style={{ fontSize: '0.85rem' }}>{floorRooms.length} room{floorRooms.length > 1 ? 's' : ''}</span>
+              <span className="muted" style={{ fontSize: '0.85rem' }}>{floorRooms.length} room{floorRooms.length === 1 ? "" : "s"}</span>
             </div>
             <div className="rooms">
               {floorRooms.map(r => (
@@ -158,7 +200,7 @@ export default function AdminRoomMap() {
                     cursor: 'pointer',
                     outline: selectedRoom?.no === r.no ? '3px solid #ffd700' : 'none'
                   }}
-                  title={`Click to inspect or change status of Room ${r.no}`}
+                  title={`Room ${r.no} (${STATUS_CONFIG[r.status]?.label})`}
                 >
                   <b>{r.no}</b>
                   <small>{STATUS_CONFIG[r.status]?.label || r.status}</small>
@@ -169,122 +211,66 @@ export default function AdminRoomMap() {
         );
       })}
 
-      {/* Room Detail & Status Switcher Modal */}
       {selectedRoom && (
-        <div className="scrim" onClick={() => setSelectedRoom(null)} style={{ display: 'grid', placeItems: 'center', zIndex: 100 }}>
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              background: '#fff', borderRadius: '16px', padding: '1.75rem', width: 'min(440px, 92vw)',
-              boxShadow: '0 24px 60px rgba(0,0,0,0.3)', animation: 'pop 0.2s ease-out'
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <div>
-                <h2 style={{ margin: 0, fontSize: '1.3rem' }}>Room {selectedRoom.no}</h2>
-                <span className="muted">Floor {selectedRoom.no[0]} · Standard Suite</span>
-              </div>
-              <button onClick={() => setSelectedRoom(null)} style={{ border: 0, background: '#eee', borderRadius: '99px', width: '32px', height: '32px', cursor: 'pointer' }}>✕</button>
+        <Modal title={`Room ${selectedRoom.no}`} onClose={() => setSelectedRoom(null)}>
+          <p className="muted" style={{ marginTop: 0 }}>Floor {selectedRoom.floor}{selectedRoom.typeName ? ` · ${selectedRoom.typeName}` : ''}</p>
+          <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '10px', marginBottom: '1.25rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <span className="muted">Current status</span>
+              <span className={`badge b-${selectedRoom.status}`}>{STATUS_CONFIG[selectedRoom.status]?.label}</span>
             </div>
-
-            <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '10px', marginBottom: '1.25rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                <span style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>Current Status:</span>
-                <span className={`badge b-${selectedRoom.status}`}>{STATUS_CONFIG[selectedRoom.status]?.label}</span>
-              </div>
-              <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--muted)' }}>
-                {STATUS_CONFIG[selectedRoom.status]?.desc}
-              </p>
-            </div>
-
-            <h4 style={{ margin: '0 0 0.5rem', fontSize: '0.9rem', color: 'var(--muted)', textTransform: 'uppercase' }}>
-              Change Operational Status:
-            </h4>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1.25rem' }}>
-              {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-                <button
-                  key={key}
-                  disabled={selectedRoom.status === key}
-                  onClick={() => handleStatusChange(selectedRoom.no, key)}
-                  style={{
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    border: `1.5px solid ${cfg.color}`,
-                    background: selectedRoom.status === key ? cfg.color : '#fff',
-                    color: selectedRoom.status === key ? '#fff' : cfg.color,
-                    fontWeight: 600,
-                    fontSize: '0.85rem',
-                    cursor: selectedRoom.status === key ? 'default' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: selectedRoom.status === key ? '#fff' : cfg.color }} />
-                  {cfg.label}
-                </button>
-              ))}
-            </div>
-
-            <button className="btn" style={{ width: '100%' }} onClick={() => setSelectedRoom(null)}>
-              Done
-            </button>
+            <p className="muted" style={{ margin: 0 }}>{STATUS_CONFIG[selectedRoom.status]?.desc}</p>
           </div>
-        </div>
+          <h3 style={{ margin: '0 0 0.5rem', fontSize: '1rem' }}>Change status</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.5rem', marginBottom: '1.25rem' }}>
+            {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
+              <button
+                key={key}
+                disabled={selectedRoom.status === key}
+                onClick={() => handleStatusChange(selectedRoom, key)}
+                style={{
+                  minHeight: 44, padding: '10px 12px', borderRadius: '8px', border: `1.5px solid ${cfg.color}`,
+                  background: selectedRoom.status === key ? cfg.color : '#fff', color: selectedRoom.status === key ? '#fff' : cfg.color,
+                  fontWeight: 600, cursor: selectedRoom.status === key ? 'default' : 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
+                }}
+              >
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: selectedRoom.status === key ? '#fff' : cfg.color }} />
+                {cfg.label}
+              </button>
+            ))}
+          </div>
+          <div className="modal-actions">
+            <button className="btn danger" onClick={() => handleDeleteRoom(selectedRoom)}>Deactivate room</button>
+            <button className="btn primary" onClick={() => setSelectedRoom(null)}>Done</button>
+          </div>
+        </Modal>
       )}
 
-      {/* Add Room Modal (UC30) */}
       {showAddModal && (
-        <div className="scrim" onClick={() => setShowAddModal(false)} style={{ display: 'grid', placeItems: 'center', zIndex: 100 }}>
-          <form
-            onSubmit={handleAddRoom}
-            onClick={e => e.stopPropagation()}
-            style={{
-              background: '#fff', borderRadius: '16px', padding: '1.75rem', width: 'min(420px, 92vw)',
-              boxShadow: '0 24px 60px rgba(0,0,0,0.3)'
-            }}
-          >
-            <h2 style={{ margin: '0 0 0.25rem' }}>Add New Physical Room</h2>
-            <p className="muted" style={{ margin: '0 0 1.25rem' }}>Register a room into the hotel inventory (UC30)</p>
-
-            <div style={{ display: 'grid', gap: '1rem', marginBottom: '1.5rem' }}>
-              <label>
-                Room Number
-                <input
-                  type="text"
-                  placeholder="e.g. 405"
-                  value={newRoomNumber}
-                  onChange={e => setNewRoomNumber(e.target.value)}
-                  required
-                />
-              </label>
-
-              <label>
-                Floor
-                <select value={newRoomFloor} onChange={e => setNewRoomFloor(e.target.value)}>
-                  {[1, 2, 3, 4, 5, 6, 7].map(f => (
-                    <option key={f} value={f}>Floor {f}</option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                Room Type
-                <select value={newRoomTypeId} onChange={e => setNewRoomTypeId(e.target.value)}>
-                  {ROOM_TYPES.map(rt => (
-                    <option key={rt.id} value={rt.id}>{rt.name} (${rt.price}/night)</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+        <Modal title="Add room" onClose={() => setShowAddModal(false)}>
+          <form onSubmit={handleAddRoom} className="form">
+            <p className="muted" style={{ marginTop: 0 }}>A new room starts as Available.</p>
+            <label>
+              Room number
+              <input type="text" placeholder="e.g. 305" value={newRoomNumber} onChange={e => setNewRoomNumber(e.target.value)} required />
+            </label>
+            <label>
+              Floor
+              <input type="number" min="0" step="1" required placeholder="e.g. 3" value={newRoomFloor} onChange={e => setNewRoomFloor(e.target.value)} />
+            </label>
+            <label>
+              Room type
+              <select value={newRoomTypeId} onChange={e => setNewRoomTypeId(e.target.value)}>
+                {roomTypes.map(rt => <option key={rt.id || rt._id} value={rt.id || rt._id}>{rt.name}</option>)}
+              </select>
+            </label>
+            <div className="modal-actions">
               <button type="button" className="btn" onClick={() => setShowAddModal(false)}>Cancel</button>
-              <button type="submit" className="btn primary">Create Room</button>
+              <button type="submit" className="btn primary">Create room</button>
             </div>
           </form>
-        </div>
+        </Modal>
       )}
     </div>
   );

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from './api/client.js';
 import { useAuth } from './context/Auth.jsx';
 import { Field, Notice } from './ui.jsx';
@@ -14,7 +14,7 @@ const CHECK = 'M20 6L9 17l-5-5';
 export function AuthShell({ staff, children }) {
   const points = staff
     ? ['Manage accounts, roles and promotions', 'Live revenue and occupancy reports', 'Role-based access for every team member']
-    : ['Best-price guarantee on every room', 'Free cancellation up to 48 hours before', 'Manage all your bookings in one place'];
+    : ['Best-price guarantee on every room', 'Cancel or change a booking online', 'Manage all your bookings in one place'];
   return (
     <div className={`split ${staff ? 'staff' : ''}`}>
       <aside className="split-side">
@@ -66,16 +66,39 @@ function PasswordField({ label, name, error, autoComplete, onChange, minLength, 
   );
 }
 
+// Google reCAPTCHA v2 checkbox; the site key comes from the server (Google's test key when none is configured).
+export function Captcha({ onToken, resetKey }) {
+  const box = useRef(null); const widget = useRef(null);
+  useEffect(() => {
+    let alive = true;
+    const draw = (siteKey) => { if (alive && box.current && widget.current == null) widget.current = window.grecaptcha.render(box.current, { sitekey: siteKey, callback: onToken, 'expired-callback': () => onToken('') }); };
+    api('/auth/captcha-config').then(({ data: { siteKey } }) => {
+      if (window.grecaptcha?.render) return draw(siteKey);
+      window.__onCaptchaLoad = () => draw(siteKey);
+      if (!document.getElementById('recaptcha-js')) document.head.append(Object.assign(document.createElement('script'), { id: 'recaptcha-js', src: 'https://www.google.com/recaptcha/api.js?onload=__onCaptchaLoad&render=explicit', async: true }));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => { if (resetKey && widget.current != null) { window.grecaptcha.reset(widget.current); onToken(''); } }, [resetKey]);
+  return <div ref={box} style={{ minHeight: 78 }} />;
+}
+
 export function SignIn({ onDone, hint, onForgot }) {
   const { signIn } = useAuth();
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [token, setToken] = useState(''); const [tries, setTries] = useState(0);
+  const [unverified, setUnverified] = useState(null); const [resent, setResent] = useState(null);
   const submit = async (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
-    setBusy(true);
-    try { await signIn({ email: f.email, password: f.password }); setErr(null); onDone(); }
-    catch (x) { setErr(x); setBusy(false); }
+    setBusy(true); setResent(null);
+    try { await signIn({ email: f.email, password: f.password, captchaToken: token || undefined }); setErr(null); onDone(); }
+    catch (x) { setErr(x); setUnverified(x.code === 'EMAIL_NOT_VERIFIED' ? f.email : null); setBusy(false); setTries((t) => t + 1); } // a token is single-use
+  };
+  const resend = async () => {
+    try { setResent({ ok: (await api('/auth/resend-verification', { method: 'POST', body: { email: unverified } })).data.message }); }
+    catch (x) { setResent({ error: x }); }
   };
   return (
     <form className="form one" onSubmit={submit}>
@@ -93,7 +116,10 @@ export function SignIn({ onDone, hint, onForgot }) {
           </button>
         </div>
       )}
+      <Captcha onToken={setToken} resetKey={tries} />
       <Notice error={err} />
+      {unverified && <p><button type="button" className="btn sm" onClick={resend}>Resend verification email</button></p>}
+      {resent && <Notice error={resent.error} ok={resent.ok} />}
       <button className="btn primary wide" type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
       {hint}
     </form>
@@ -250,7 +276,6 @@ const RULES = [['10+ characters', (p) => p.length >= 10], ['A letter', (p) => /[
 export function Register({ onDone, hint }) {
   const [err, setErr] = useState(null);
   const [pw, setPw] = useState('');
-  const { signIn } = useAuth();
   const fe = (k) => err?.fields?.[k];
   const submit = async (e) => {
     e.preventDefault();
@@ -285,10 +310,10 @@ export function Register({ onDone, hint }) {
     }
 
     const phone = (f.phone || '').trim();
-    if (!/^\d{10,11}$/.test(phone)) {
+    if (!/^(\d{10,11}|\+\d{8,15})$/.test(phone)) { // CR-04
       setErr({
-        message: 'Phone must contain 10–11 digits.',
-        fields: { phone: 'Phone must contain 10–11 digits.' }
+        message: 'Phone number must have 10 to 11 digits, or + and 8 to 15 digits with the country code.',
+        fields: { phone: 'Phone number must have 10 to 11 digits, or + and 8 to 15 digits with the country code.' }
       });
       return;
     }
@@ -302,9 +327,9 @@ export function Register({ onDone, hint }) {
     }
 
     try {
-      await api('/auth/register', { method: 'POST', body: f });
-      await signIn({ email: f.email, password: f.password });
-      onDone();
+      await api('/auth/register', { method: 'POST', body: { ...f, consent: f.consent === 'on' } }); // CR-21
+      onDone(f.email); // the account must verify its email before it can sign in
+
     } catch (x) {
       setErr(x);
     }
@@ -346,10 +371,10 @@ export function Register({ onDone, hint }) {
           type="tel"
           autoComplete="tel"
           placeholder="0912345678"
-          pattern="[0-9]{10,11}"
-          minLength={10}
-          maxLength={11}
-          title="Phone must contain 10–11 digits."
+          pattern="([0-9]{10,11}|\+[0-9]{8,15})"
+          minLength={9}
+          maxLength={16}
+          title="10–11 digits, or + and 8–15 digits with the country code."
           required
         />
       </Field>
@@ -378,6 +403,8 @@ export function Register({ onDone, hint }) {
           error={fe('confirmPassword')}
         />
       </div>
+      <label className="check full"><input type="checkbox" name="consent" required /><span className="consent-text">I agree to the processing of my personal data (<a href="#/offers" target="_blank" rel="noreferrer">privacy notice</a>) *</span></label>
+      {fe('consent') && <p className="full note bad-note" role="alert">{fe('consent')}</p>}
       <div className="full"><Notice error={err && !err.fields ? err : null} /></div>
       <button className="btn primary wide full" type="submit">Create account</button>
       {hint && <div className="full">{hint}</div>}

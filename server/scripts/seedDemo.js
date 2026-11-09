@@ -10,6 +10,7 @@ const Payment = require("../src/models/Payment");
 const Refund = require("../src/models/Refund");
 const Coupon = require("../src/models/Coupon");
 const HotelPolicy = require("../src/models/HotelPolicy");
+const HotelInfo = require("../src/models/HotelInfo");
 const Invoice = require("../src/models/Invoice");
 const Review = require("../src/models/Review");
 const Service = require("../src/models/Service");
@@ -146,6 +147,7 @@ async function seedDemo({ anyDatabase = false } = {}) {
   await seedOperations({ users, roomTypes: [roomType, ...customerRoomTypes], day });
   const startDate = new Date(+monthStart - 86400000);
   const endDate = new Date(+monthStart + 90 * 86400000);
+  await HotelInfo.create({ name: "GrandStay", city: "Da Nang", address: "Vo Nguyen Giap, Son Tra, Da Nang, Vietnam", phone: "+842360000000", email: "hello@grandstay.example", description: "A seaside retreat in Da Nang, Vietnam.", starRating: 5 });
   await Coupon.create([
     {
       code: "DIRECT15",

@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { useAuth } from './context/Auth.jsx';
 import { AuthShell, AuthTabs, SignIn, Register, ForgotPassword, Captcha } from './AuthForms.jsx';
 import { Profile } from './AdminPages.jsx';
-import { ROOM_TYPES } from './data.js';
 import { MyBookings } from './Bookings.jsx';
 import { roomApi } from './api/roomApi.js';
 import { PaymentPage, PaymentResult, SandboxGateway } from './Payments.jsx';
@@ -15,7 +14,7 @@ const NAV = [
   { label: 'Home', href: '#/' },
   { label: 'Rooms', items: [['#/rooms', 'All rooms', 'Compare every room type'], ['#/rooms?cat=standard', 'Standard rooms', 'Deluxe & Superior'], ['#/rooms?cat=suite', 'Suites', 'Family & Presidential']] },
   { label: 'Offers', href: '#/offers' },
-  { label: 'Help', items: [['#/offers', 'Booking policies', 'Deposit and cancellation'], ['#/', 'Contact us', 'hello@grandstay.example']] }
+  { label: 'Help', items: [['#/offers', 'Booking policies', 'Deposit and cancellation']] }
 ];
 
 const parse = (route) => {
@@ -102,6 +101,7 @@ function SiteHeader({ route }) {
 }
 
 function SearchBar({ q = {} }) {
+  const hotel = useHotel();
   const submit = (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
@@ -109,7 +109,7 @@ function SearchBar({ q = {} }) {
   };
   return (
     <form className="c-search" onSubmit={submit}>
-      <label>Destination<input defaultValue="GrandStay Da Nang" readOnly /></label>
+      <label>Destination<input value={hotel ? [hotel.name, hotel.city].filter(Boolean).join(' ') : ''} readOnly /></label>
       <label>Check-in<input name="in" type="date" min={day(0)} defaultValue={q.in || day(7)} required /></label>
       <label>Check-out<input name="out" type="date" min={day(1)} defaultValue={q.out || day(10)} required /></label>
       <label>Guests<select name="guests" defaultValue={q.guests || "2"}>{[1, 2, 3, 4].map((n) => <option key={n}>{n}</option>)}</select></label>
@@ -122,7 +122,7 @@ function RoomCard({ r, q = '' }) {
   return (
     <article className="c-card">
       <a className="c-media" href={`#/room/${r.id}${q}`} tabIndex={-1} aria-hidden="true">
-        <img src={r.img} alt="" loading="lazy" width="900" height="1125" />
+        <Pic src={r.img} alt="" loading="lazy" width="900" height="1125" />
         <span className="c-price">From <b>{money(r.price)}</b> / night</span>
       </a>
       <div className="c-body">
@@ -136,14 +136,35 @@ function RoomCard({ r, q = '' }) {
   );
 }
 
+let hotelReq;
+// The hotel's own name, city and contact details (Hotel & policies screen), fetched once.
+function useHotel() {
+  const [h, setH] = useState(null);
+  useEffect(() => {
+    hotelReq ??= api('/hotel-info').then((x) => x.data).catch(() => { hotelReq = null; return null; });
+    hotelReq.then(setH);
+  }, []);
+  return h;
+}
+function usePromos() {
+  const [list, setList] = useState([]);
+  useEffect(() => { api('/public/promotions').then((x) => setList(x.data)).catch(() => {}); }, []);
+  return list;
+}
+const Pic = ({ src, ...p }) => (src ? <img src={src} {...p} /> : <div className="img-ph" />);
+
 function Home() {
   const perks = [
     ['Best price guarantee', 'Coupons and seasonal rates applied automatically.', 'M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z M7 7h.01'],
-    ['Free cancellation', 'Cancel up to 48 hours before check-in.', 'M3 12a9 9 0 1 0 3-6.7 M3 4v5h5 M12 8v4l3 2'],
     ['Verified reviews', 'Only guests who stayed can review.', 'M12 2l3 6.3 6.9.9-5 4.8 1.2 6.9L12 17.5 5.9 20.9 7.1 14 2.1 9.2l6.9-.9z'],
     ['Secure payment', 'Pay a deposit online, the rest when you check out.', 'M5 11h14v10H5z M8 11V7a4 4 0 0 1 8 0v4']
   ];
 
+  const hotel = useHotel();
+  const promos = usePromos();
+  const policy = usePolicies();
+  const fullRefundHours = Math.max(...(policy?.cancellationTiers || []).filter((t) => t.refundPercent === 100).map((t) => t.minHoursBeforeCheckIn), -1);
+  if (fullRefundHours >= 0) perks.splice(1, 0, ['Free cancellation', `Full deposit back when you cancel ${fullRefundHours ? `at least ${fullRefundHours} hours before check-in` : 'in time'}.`, 'M3 12a9 9 0 1 0 3-6.7 M3 4v5h5 M12 8v4l3 2']);
   const [featuredRooms, setFeaturedRooms] = useState([]);
   const [reviews, setReviews] = useState([]);
 
@@ -155,18 +176,7 @@ function Home() {
     try {
       const res = await roomApi.getRoomTypes({ isActive: true });
       if (res.data && res.data.length > 0) {
-        const mapped = res.data.slice(0, 3).map((rt, i) => ({
-          id: rt._id,
-          name: rt.name,
-          price: rt.basePrice,
-          guests: rt.maxOccupancy || 2,
-          bed: rt.bedType || 'King bed',
-          size: rt.roomSizeSqm || 32,
-          rating: rt.rating || null,
-          amenities: rt.amenities || [],
-          img: rt.images?.[0] || ROOM_TYPES[i % ROOM_TYPES.length].img,
-          desc: rt.description || 'Spacious and well-appointed luxury room.'
-        }));
+        const mapped = res.data.slice(0, 3).map(toCard);
         setFeaturedRooms(mapped);
         const lists = await Promise.all(res.data.map((t) => api(`/public/room-types/${t._id}/reviews?limit=2`).then((x) => x.data.map((v) => ({ ...v, room: t.name }))).catch(() => [])));
         setReviews(lists.flat().slice(0, 3));
@@ -180,7 +190,7 @@ function Home() {
     <>
       <section className="c-hero">
         <div className="c-wrap hero-copy">
-          <p className="eyebrow">GrandStay · Da Nang, Vietnam</p>
+          {hotel && <p className="eyebrow">{[hotel.name, hotel.city].filter(Boolean).join(' · ')}</p>}
           <h1>Where the sea<br />meets stillness</h1>
           <p className="lead">Ocean-view rooms and suites, a quiet pool above the beach, and a team that takes care of the details.</p>
         </div>
@@ -190,7 +200,7 @@ function Home() {
       <section className="c-wrap c-section intro">
         <div>
           <p className="eyebrow ink">Welcome</p>
-          <h2 className="display">A five-star retreat on the coast of Da Nang</h2>
+          <h2 className="display">A five-star retreat{hotel?.city ? ` in ${hotel.city}` : ''}</h2>
           <p className="lead-ink">Wake up to the sound of the waves, spend the afternoon by the pool and end the day with dinner by the sea. Book online in a few minutes and manage your stay from your account.</p>
           <a className="more-link" href="#/rooms">Explore rooms &amp; suites <span aria-hidden="true">→</span></a>
         </div>
@@ -205,17 +215,19 @@ function Home() {
         <div className="c-grid">{featuredRooms.map((r) => <RoomCard key={r.id} r={r} />)}</div>
       </section>
 
-      <section className="band">
-        <div className="c-wrap band-copy">
-          <p className="eyebrow">Book direct</p>
-          <h2 className="display light">Save 15% when you book with us</h2>
-          <p>Our best rate is always on this website: 15% off stays from ₫1,500,000.</p>
-          <div className="promo-actions">
-            <a className="btn gold" href="#/rooms">Book your stay</a>
-            <span className="promo-code">Code <b>DIRECT15</b></span>
+      {promos[0] && (
+        <section className="band">
+          <div className="c-wrap band-copy">
+            <p className="eyebrow">Book direct</p>
+            <h2 className="display light">Save {promos[0].discountValue}% when you book with us</h2>
+            <p>{promos[0].discountValue}% off{promos[0].minimumSpend ? ` stays from ${money(promos[0].minimumSpend)}` : ' your stay'}, applied when you enter the code at checkout.</p>
+            <div className="promo-actions">
+              <a className="btn gold" href="#/rooms">Book your stay</a>
+              <span className="promo-code">Code <b>{promos[0].code}</b></span>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       <section className="c-wrap c-section perks">
         {perks.map(([t, d, p]) => (
@@ -256,20 +268,21 @@ function PolicyText({ p }) {
 
 function Offers() {
   const p = usePolicies();
+  const promos = usePromos();
   return (
     <div className="c-wrap c-section narrow">
       <h1 className="title">Booking policies</h1>
       <div className="panel"><h2>Deposit &amp; cancellation</h2><PolicyText p={p} /></div>
-      <div className="panel mt"><h2>Promo codes</h2><p className="muted">Enter a promo code at checkout, for example <b>DIRECT15</b> (15% off stays from ₫1,500,000). The discount is checked and applied when your booking is created.</p></div>
+      {promos.length > 0 && <div className="panel mt"><h2>Promo codes</h2><ul className="policy-list">{promos.map((c) => <li key={c.code}><b>{c.code}</b>: {c.discountValue}% off{c.minimumSpend ? ` stays from ${money(c.minimumSpend)}` : ''}, valid until {new Date(c.endDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}. Enter it at checkout.</li>)}</ul></div>}
     </div>
   );
 }
 
 // Room-type card shape used by the room list, detail and checkout pages.
 const toCard = (rt) => ({
-  id: rt._id, _id: rt._id, name: rt.name, price: rt.basePrice, guests: rt.maxOccupancy || 2,
+  id: rt._id, _id: rt._id, name: rt.name, price: rt.basePrice, guests: rt.maxOccupancy,
   bed: rt.bedType || '', size: rt.roomSizeSqm || null, rating: rt.rating || null, amenities: rt.amenities || [],
-  img: rt.images?.[0] || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=80',
+  img: rt.images?.[0] || '',
   desc: rt.description || '', cat: rt.name.toLowerCase().includes('suite') ? 'suite' : 'standard',
 });
 
@@ -317,10 +330,6 @@ function Rooms({ q }) {
           <label>Category<select value={cat} onChange={(e) => setCat(e.target.value)}><option value="all">All</option><option value="standard">Standard</option><option value="suite">Suites</option></select></label>
         </details>
         <div>
-          <p className="muted">
-            {list.length} room type(s) available for {guests} guest(s)
-            {apiRooms !== null && <span style={{ marginLeft: 8, color: 'var(--green)' }}>● Live verified from server</span>}
-          </p>
           <div className="c-grid g2">{list.map((r) => <RoomCard key={r.id} r={r} q={carry} />)}</div>
           {!isSearchingApi && !list.length && <p className="empty">{loadError ? 'Rooms could not be loaded. Please try again in a moment.' : 'No rooms match your dates or filters. Try other dates or raise the maximum price.'}</p>}
         </div>
@@ -366,7 +375,7 @@ function RoomDetail({ id, q }) {
       <a className="more-link" href="#/rooms"><span aria-hidden="true">←</span> All rooms</a>
       <div className="c-layout detail">
         <div>
-          <img className="hero-img" src={r.img} alt={`${r.name} room`} width="900" height="600" />
+          <Pic className="hero-img" src={r.img} alt={`${r.name} room`} width="900" height="600" />
           <div className="between mt"><h1 className="title">{r.name}</h1>{r.rating && <Stars n={r.rating} />}</div>
           <p className="kicker">{[r.bed, r.size && `${r.size} m²`, `Up to ${r.guests} guests`].filter(Boolean).join(' · ')}</p>
           <p>{r.desc}</p>
@@ -380,7 +389,7 @@ function RoomDetail({ id, q }) {
           <label>Check-in<input type="date" value={d.in} min={day(0)} onChange={set('in')} required /></label>
           <label>Check-out<input type="date" value={d.out} min={d.in} onChange={set('out')} required /></label>
           <label>Guests<select value={d.guests} onChange={set('guests')}>{Array.from({ length: r.guests }, (_, i) => <option key={i}>{i + 1}</option>)}</select></label>
-          <label>Promo code (optional)<input value={d.coupon} onChange={set('coupon')} placeholder="DIRECT15" autoCapitalize="characters" /></label>
+          <label>Promo code (optional)<input value={d.coupon} onChange={set('coupon')} placeholder="Code" autoCapitalize="characters" /></label>
           {coupon && <small className="muted">The code is checked when your booking is created.</small>}
           <dl className="sum">
             <div><dt>{money(r.price)} × {nights} night(s)</dt><dd>{money(nights * r.price)}</dd></div>
@@ -457,7 +466,7 @@ function Checkout({ q, user }) {
           <button className="btn primary" type="submit" disabled={saving}>{saving ? 'Creating booking…' : 'Continue to deposit payment'}</button>
         </form>
         <aside className="panel book">
-          <img className="thumb" src={r.img} alt="" />
+          <Pic className="thumb" src={r.img} alt="" />
           <h2>{r.name}</h2>
           <p className="muted">{q.in} → {q.out} · {nights} night(s) · {q.guests} guest(s)</p>
           <dl className="sum">
@@ -542,15 +551,16 @@ function VerifyEmail({ token, email }) {
 }
 
 function SiteFooter() {
+  const hotel = useHotel();
   return (
     <footer className="site-foot">
       <div className="c-wrap c-grid g4">
-        <div><a className="brand" href="#/">Grand<span>Stay</span></a><p>A seaside retreat in Da Nang, Vietnam.</p></div>
+        <div><a className="brand" href="#/">Grand<span>Stay</span></a>{hotel?.description && <p>{hotel.description}</p>}</div>
         <div><h4>Explore</h4><a href="#/rooms">Rooms &amp; suites</a><a href="#/offers">Booking policies</a><a href="#/my-bookings">My bookings</a></div>
         <div><h4>Guests</h4><a href="#/login">Sign in or register</a><a href="#/profile">My profile</a></div>
-        <div><h4>Contact</h4><p>hello@grandstay.example</p><p>+84 000 000 000</p><a href="#/admin">Staff portal</a></div>
+        <div><h4>Contact</h4>{hotel?.address && <p>{hotel.address}</p>}{hotel?.email && <p>{hotel.email}</p>}{hotel?.phone && <p>{hotel.phone}</p>}<a href="#/admin">Staff portal</a></div>
       </div>
-      <p className="copy">© 2026 GrandStay · WDP301</p>
+      {hotel?.name && <p className="copy">© {new Date().getFullYear()} {hotel.name}</p>}
     </footer>
   );
 }

@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { ROOMS as INITIAL_ROOMS, ROOM_TYPES as STATIC_ROOM_TYPES } from '../data.js';
 import { roomApi } from '../api/roomApi.js';
 import { Modal } from '../ui.jsx';
 
@@ -11,13 +10,13 @@ const STATUS_CONFIG = {
 };
 
 export default function AdminRoomMap() {
-  const [rooms, setRooms] = useState(INITIAL_ROOMS);
-  const [roomTypes, setRoomTypes] = useState(STATIC_ROOM_TYPES);
+  const [rooms, setRooms] = useState([]);
+  const [roomTypes, setRoomTypes] = useState([]);
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedRoom, setSelectedRoom] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newRoomNumber, setNewRoomNumber] = useState('');
-  const [newRoomFloor, setNewRoomFloor] = useState('2');
+  const [newRoomFloor, setNewRoomFloor] = useState('');
   const [newRoomTypeId, setNewRoomTypeId] = useState('');
   const [toastMessage, setToastMessage] = useState('');
   const [loading, setLoading] = useState(true);
@@ -42,7 +41,7 @@ export default function AdminRoomMap() {
             id: t._id || t.id,
             _id: t._id || t.id,
             name: t.name,
-            price: t.basePrice || t.price || 80
+            price: t.basePrice
           })));
           setNewRoomTypeId(rawTypes[0]._id || rawTypes[0].id);
         }
@@ -50,13 +49,13 @@ export default function AdminRoomMap() {
 
       if (roomsRes.status === 'fulfilled') {
         const rawRooms = Array.isArray(roomsRes.value) ? roomsRes.value : (roomsRes.value?.data || []);
-        if (rawRooms.length > 0) {
+        {
           const mapped = rawRooms.filter(r => r.isActive !== false).map(r => ({
             _id: r._id || r.id,
             no: r.roomNumber || r.no,
-            floor: r.floor || (r.roomNumber ? parseInt(r.roomNumber[0], 10) : 1),
+            floor: r.floor,
             status: r.status || 'available',
-            typeName: r.roomTypeId?.name || 'Standard Room',
+            typeName: r.roomTypeId?.name || '',
             roomTypeId: r.roomTypeId?._id || r.roomTypeId
           })).sort((a, b) => a.no.localeCompare(b.no));
           setRooms(mapped);
@@ -104,7 +103,7 @@ export default function AdminRoomMap() {
 
     const payload = {
       roomNumber: trimmedNo,
-      floor: parseInt(newRoomFloor, 10) || 1,
+      floor: parseInt(newRoomFloor, 10),
       roomTypeId: newRoomTypeId || roomTypes[0]?.id || roomTypes[0]?._id,
       status: 'available'
     };
@@ -214,7 +213,7 @@ export default function AdminRoomMap() {
 
       {selectedRoom && (
         <Modal title={`Room ${selectedRoom.no}`} onClose={() => setSelectedRoom(null)}>
-          <p className="muted" style={{ marginTop: 0 }}>Floor {String(selectedRoom.no)[0]} · {selectedRoom.typeName || 'Standard Room'}</p>
+          <p className="muted" style={{ marginTop: 0 }}>Floor {selectedRoom.floor}{selectedRoom.typeName ? ` · ${selectedRoom.typeName}` : ''}</p>
           <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '10px', marginBottom: '1.25rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
               <span className="muted">Current status</span>
@@ -258,9 +257,7 @@ export default function AdminRoomMap() {
             </label>
             <label>
               Floor
-              <select value={newRoomFloor} onChange={e => setNewRoomFloor(e.target.value)}>
-                {[1, 2, 3, 4, 5, 6, 7].map(f => <option key={f} value={f}>Floor {f}</option>)}
-              </select>
+              <input type="number" min="0" step="1" required placeholder="e.g. 3" value={newRoomFloor} onChange={e => setNewRoomFloor(e.target.value)} />
             </label>
             <label>
               Room type

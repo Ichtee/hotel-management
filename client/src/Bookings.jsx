@@ -313,7 +313,7 @@ function CancelModal({ booking, onClose, onCancelled }) {
         <p className="muted" style={{ marginBottom: '1rem' }}>
           {isPending
             ? 'This reservation is currently pending deposit payment. Cancelling now will release your 15-minute room hold immediately.'
-            : 'According to hotel policy, cancellations requested > 48 hours before check-in receive a 100% deposit refund. If a deposit was paid, the front desk will contact you for your bank account to transfer the refund.'}
+            : 'The refund follows the hotel cancellation policy. If a deposit was paid, the front desk will contact you for your bank account to transfer the refund.'}
         </p>
 
         <Field label="Reason for cancellation">

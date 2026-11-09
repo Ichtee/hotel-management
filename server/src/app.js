@@ -133,6 +133,7 @@ function createApp({
   app.post("/api/jobs/:name", jobs.run);
   app.get("/api/hotel-info", policies.hotelInfo);
   app.get("/api/public/policies", policies.publicSummary);
+  app.get("/api/public/promotions", promotions.publicListing);
   app.use("/api", authenticate);
 
   app.get("/api/auth/me", auth.profile);

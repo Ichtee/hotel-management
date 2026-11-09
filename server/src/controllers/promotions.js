@@ -87,4 +87,11 @@ async function remove(req, res) {
   await coupon.deleteOne();
   res.json({ data: { message: "Promotion deleted." } });
 }
-module.exports = { listing, create, update, remove };
+// Public: coupons a guest can use today (shown on the home and policy pages).
+async function publicListing(req, res) {
+  const now = new Date();
+  const data = await Coupon.find({ isActive: true, startDate: { $lte: now }, endDate: { $gte: now } })
+    .sort({ discountValue: -1 }).select("code discountValue minimumSpend endDate -_id").lean();
+  res.json({ data });
+}
+module.exports = { publicListing, listing, create, update, remove };

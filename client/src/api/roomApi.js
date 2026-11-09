@@ -1,7 +1,4 @@
-/**
- * Room and Inventory API Client for Member 2
- * Connects to http://localhost:5000/api with seamless fallback to client mock data
- */
+/** Room and inventory API client. */
 
 const API_BASE = '/api';
 

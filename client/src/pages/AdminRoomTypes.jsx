@@ -3,7 +3,6 @@ import { api, dateLabel, inputDate, money } from '../api/client.js';
 import { DataTable, Field, Modal, Notice, PageHead, useApi } from '../ui.jsx';
 
 const BEDS = ['King bed', 'Queen bed', '2 single beds', '2 queen beds'];
-const FALLBACK_IMG = 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=70';
 
 /* UC24 room types (add, edit, deactivate, delete when nothing is linked) and UC25 seasonal prices. */
 export default function AdminRoomTypes() {
@@ -27,7 +26,7 @@ export default function AdminRoomTypes() {
       <Notice error={list.error} ok={msg} />
       {list.loading ? <p className="muted">Loading…</p> : !list.data?.length ? <p className="empty">No room types yet.</p> : (
         <DataTable cols={['', 'Room type', 'Bed & guests', 'Base / night', 'Status', '']} rows={list.data.map((t) => [
-          <img key="i" src={t.images?.[0] || FALLBACK_IMG} alt="" width="64" height="44" style={{ objectFit: 'cover', borderRadius: 6, display: 'block' }} />,
+          t.images?.[0] ? <img key="i" src={t.images[0]} alt="" width="64" height="44" style={{ objectFit: 'cover', borderRadius: 6, display: 'block' }} /> : <span key="i" className="img-ph" style={{ display: 'block', width: 64, height: 44, borderRadius: 6 }} />,
           <span key="n"><b>{t.name}</b>{t.description ? <small className="muted" style={{ display: 'block', maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description}</small> : null}</span>,
           <span key="b">{t.bedType || '—'}<small className="muted" style={{ display: 'block' }}>{t.maxOccupancy} guests{t.roomSizeSqm ? ` · ${t.roomSizeSqm} m²` : ''}</small></span>,
           <span key="p" style={{ whiteSpace: 'nowrap' }}>{money(t.basePrice)}<small className="muted" style={{ display: 'block' }}>{t.seasonalPricing?.length ? `+ ${t.seasonalPricing.length} seasonal rate${t.seasonalPricing.length > 1 ? 's' : ''}` : 'Base price only'}</small></span>,
@@ -61,7 +60,7 @@ function RoomTypeForm({ type, onClose, onSaved }) {
       roomSizeSqm: Number(f.roomSizeSqm), maxOccupancy: Number(f.maxOccupancy), basePrice: Number(f.basePrice),
       amenities: f.amenities.split(',').map((a) => a.trim()).filter(Boolean),
       // the first image is the one entered here; other images already on the room type are kept
-      images: [f.image.trim() || FALLBACK_IMG, ...(type.images || []).slice(1)],
+      images: [...(f.image.trim() ? [f.image.trim()] : []), ...(type.images || []).slice(1)],
     };
     setSaving(true); setError(null);
     try {

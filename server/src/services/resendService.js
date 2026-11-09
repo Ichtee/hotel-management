@@ -170,6 +170,21 @@ function buildVerificationHtml({ fullName, verificationUrl }) {
 async function sendVerificationEmail({ email, fullName, token }) {
   const clientUrl = getClientUrl();
   const verificationUrl = `${clientUrl}/#/verify-email?token=${token}&email=${encodeURIComponent(email)}`;
+  // SMTP_URL (e.g. Gmail app password) needs no verified domain, so it wins over Resend.
+  if (process.env.SMTP_URL) {
+    try {
+      const info = await require("nodemailer").createTransport(process.env.SMTP_URL).sendMail({
+        from: process.env.MAIL_FROM || "GrandStay <no-reply@grandstay.local>",
+        to: email,
+        subject: "GrandStay - Verify your email address",
+        html: buildVerificationHtml({ fullName, verificationUrl }),
+      });
+      return { success: true, messageId: info.messageId };
+    } catch (err) {
+      console.error("[SMTP] Verification email failed:", err.message);
+      return { success: false, error: err.message, verificationUrl };
+    }
+  }
   const resend = getResendClient();
 
   if (!resend) {

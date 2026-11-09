@@ -14,7 +14,7 @@ const CHECK = 'M20 6L9 17l-5-5';
 export function AuthShell({ staff, children }) {
   const points = staff
     ? ['Manage accounts, roles and promotions', 'Live revenue and occupancy reports', 'Role-based access for every team member']
-    : ['Best-price guarantee on every room', 'Free cancellation up to 48 hours before', 'Manage all your bookings in one place'];
+    : ['Best-price guarantee on every room', 'Cancel or change a booking online', 'Manage all your bookings in one place'];
   return (
     <div className={`split ${staff ? 'staff' : ''}`}>
       <aside className="split-side">

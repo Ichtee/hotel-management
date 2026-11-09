@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, dateLabel } from './api/client.js';
-import { DataTable, Field, Modal, Notice, PageHead, useApi } from './ui.jsx';
+import { DataTable, Dialog, Field, Notice, PageHead, Screen, useApi, useScreen } from './ui.jsx';
 import { useAuth } from './context/Auth.jsx';
 
 // UC31: staff report an issue; UC23 3d: the Hotel Manager reviews the reports and closes them as Resolved.
@@ -8,7 +8,7 @@ export default function RoomIssues() {
   const { user } = useAuth();
   const manager = user.role === 'manager';
   const canReport = user.permissions.includes('room_issues.report');
-  const [open, setOpen] = useState(false);
+  const sc = useScreen();
   const [filter, setFilter] = useState('open');
   const [msg, setMsg] = useState(null);
   const rooms = useApi('/room-issues/options', canReport);
@@ -19,8 +19,9 @@ export default function RoomIssues() {
     try { await api(`/room-issues/${issue._id}/resolve`, { method: 'PATCH', body: {} }); setMsg('Issue resolved. The room leaves Maintenance once no open issue remains.'); list.reload(); }
     catch (x) { setMsg(null); alert(x.message); }
   };
+  if (sc.name === 'new') return <ReportIssue rooms={rooms} onClose={() => { if (manager) list.reload(); sc.close(); }} />;
   return <>
-    <PageHead title="Room issues" sub="Report a damaged or missing item (charged to the guest after the front desk confirms it) or a room that cannot be used." action={canReport ? 'Report issue' : undefined} onAction={() => setOpen(true)} />
+    <PageHead title="Room issues" sub="Report a damaged or missing item (charged to the guest after the front desk confirms it) or a room that cannot be used." action={canReport ? 'Report issue' : undefined} onAction={() => sc.go('new')} />
     {manager ? <>
       <div className="chips" style={{ display: 'flex', gap: 8, marginBottom: '1rem' }}>
         {[['open', 'Open'], ['in_progress', 'In progress'], ['resolved', 'Resolved'], ['', 'All']].map(([k, l]) => <button key={l} className={`chip ${filter === k ? 'on' : ''}`} onClick={() => { setFilter(k); setMsg(null); }}>{l}</button>)}
@@ -33,7 +34,6 @@ export default function RoomIssues() {
         ])} />
       )}
     </> : <p className="muted">Reports go to the Hotel Manager, who closes them once the room is fixed.</p>}
-    {open && <ReportIssue rooms={rooms} onClose={() => { setOpen(false); if (manager) list.reload(); }} />}
   </>;
 }
 
@@ -60,13 +60,14 @@ export function ReportIssue({ rooms, roomId, onClose }) {
     } catch (x) { setError(x); } finally { setSaving(false); }
   };
   const items = rooms.meta?.compensationItems || [];
+  const Shell = roomId ? Dialog : Screen; // SRS UC31: a popup on the housekeeping task page, a page for the receptionist
   const fixed = roomId && (rooms.data || []).find((r) => r._id === roomId);
-  return <Modal title={fixed ? `Report damage / issue · Room ${fixed.roomNumber}` : 'Report damage / issue'} onClose={onClose}><form className="form-grid" onSubmit={submit}>
+  return <Shell title={fixed ? `Report damage / issue · Room ${fixed.roomNumber}` : 'Report damage / issue'} onClose={onClose}><form className="form-grid" onSubmit={submit}>
     {!roomId && <div className="full"><Field label="Room" error={error?.fields?.roomId}><select name="roomId" required disabled={rooms.loading}><option value="">Select room</option>{(rooms.data || []).map((room) => <option key={room._id} value={room._id}>Room {room.roomNumber} - Floor {room.floor} ({room.status})</option>)}</select></Field></div>}
     <Field label="Damaged or missing item" error={error?.fields?.chargeItemId}><select name="chargeItemId" defaultValue=""><option value="">None</option>{items.map((i) => <option key={i._id} value={i._id}>{i.name} · {i.price.toLocaleString('en-US')} VND</option>)}</select></Field>
     <Field label="Quantity" error={error?.fields?.quantity}><input name="quantity" type="number" min="1" max="20" defaultValue="1" /></Field>
     <label className="full check"><input type="checkbox" name="unusable" /> The room cannot be used (moves an empty room to Maintenance)</label>
     <div className="full"><Field label="Description" error={error?.fields?.description}><textarea name="description" maxLength="2000" placeholder="What happened? Required when the room cannot be used." /></Field></div>
     <div className="full"><Notice error={error || rooms.error} ok={ok} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Close</button><button className="btn primary" disabled={saving || rooms.loading}>{saving ? 'Reporting...' : 'Submit report'}</button></div>
-  </form></Modal>;
+  </form></Shell>;
 }

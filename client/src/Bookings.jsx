@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, dateLabel, inputDate, money } from './api/client.js';
-import { Badge, DataTable, Field, Modal, Notice, useApi } from './ui.jsx';
+import { Badge, DataTable, Field, Notice, Screen, useApi, useScreen } from './ui.jsx';
 
 const UPCOMING = ['pending', 'confirmed', 'checked_in', 'cancellation_requested'];
 const nightsOf = (a, b) => Math.max(1, Math.round((new Date(b) - new Date(a)) / 864e5));
@@ -228,7 +228,7 @@ function ModifyModal({ booking, onClose, onSaved }) {
   };
 
   return (
-    <Modal title={`Modify reservation ${booking.bookingReference || ''}`} onClose={onClose}>
+    <Screen title={`Modify reservation ${booking.bookingReference || ''}`} onClose={onClose}>
       <form className="form" onSubmit={submit}>
         <p className="muted full">
           Availability and price are recalculated. The deposit already paid does not change: any difference is paid at check-out.
@@ -270,7 +270,7 @@ function ModifyModal({ booking, onClose, onSaved }) {
           </button>
         </div>
       </form>
-    </Modal>
+    </Screen>
   );
 }
 
@@ -308,7 +308,7 @@ function CancelModal({ booking, onClose, onCancelled }) {
   };
 
   return (
-    <Modal title={isPending ? `Cancel hold: ${booking.bookingReference || ''}` : `Cancel reservation ${booking.bookingReference || ''}`} onClose={onClose}>
+    <Screen title={isPending ? `Cancel hold: ${booking.bookingReference || ''}` : `Cancel reservation ${booking.bookingReference || ''}`} onClose={onClose}>
       <form className="form" onSubmit={submit}>
         <p className="muted" style={{ marginBottom: '1rem' }}>
           {isPending
@@ -335,7 +335,7 @@ function CancelModal({ booking, onClose, onCancelled }) {
           </button>
         </div>
       </form>
-    </Modal>
+    </Screen>
   );
 }
 
@@ -372,7 +372,7 @@ function ReviewModal({ booking, onClose, onSaved }) {
   };
 
   return (
-    <Modal title={`Review your stay (${booking.bookingReference || ''})`} onClose={onClose}>
+    <Screen title={`Review your stay (${booking.bookingReference || ''})`} onClose={onClose}>
       <form className="form" onSubmit={submit}>
         <p className="muted" style={{ marginBottom: '1rem' }}>
           Share your experience for <strong>{roomName}</strong> from {dateLabel(booking.checkInDate)} to {dateLabel(booking.checkOutDate)}.
@@ -436,7 +436,7 @@ function ReviewModal({ booking, onClose, onSaved }) {
           </button>
         </div>
       </form>
-    </Modal>
+    </Screen>
   );
 }
 
@@ -455,7 +455,7 @@ function StayRequestModal({ booking, type, onClose, onSaved }) {
     } catch (x) { setErr(x); setSaving(false); }
   };
   return (
-    <Modal title={`${isIn ? 'Check-in' : 'Check-out'} request · ${booking.bookingReference || ''}`} onClose={onClose}>
+    <Screen title={`${isIn ? 'Check-in' : 'Check-out'} request · ${booking.bookingReference || ''}`} onClose={onClose}>
       <form className="form" onSubmit={submit}>
         <p className="muted full">{isIn ? 'Tell the front desk when you arrive so the room is ready. Check-in is from 14:00; an earlier time is an early check-in request.' : 'Tell the front desk when you leave so the bill is ready. Check-out is until 12:00; a later time (until 18:00) is a late check-out request.'} A fee applies only if it really takes place.</p>
         <Field label={`${isIn ? 'Expected arrival' : 'Planned check-out'} time on ${dateLabel(day)}`}><input name="time" type="time" defaultValue={isIn ? '14:00' : '12:00'} required /></Field>
@@ -468,25 +468,18 @@ function StayRequestModal({ booking, type, onClose, onSaved }) {
         <div className="full"><Notice error={err} /></div>
         <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Sending…' : 'Send request'}</button></div>
       </form>
-    </Modal>
+    </Screen>
   );
 }
 
 // UC10: a customer's own bookings, split into upcoming and past.
 export function MyBookings() {
   const [tab, setTab] = useState('upcoming');
-  const [open, setOpen] = useState(null);
-  const [modifying, setModifying] = useState(null);
-  const [cancelling, setCancelling] = useState(null);
-  const [reviewing, setReviewing] = useState(null);
-  const [cancelFor, setCancelFor] = useState(null);
   const [notice, setNotice] = useState(null);
   const [msg, setMsg] = useState(null);
-  const [invoice, setInvoice] = useState(null);
+  const sc = useScreen();
   const s = useApi('/bookings?limit=100');
-  const changed = (m) => { setMsg(m); setOpen(null); s.reload(); };
-  const [requesting, setRequesting] = useState(null); // { booking, type }
-  const viewInvoice = async (booking) => { try { setInvoice((await api(`/bookings/${booking._id}/invoice`)).data); } catch (error) { setMsg(error.message); } };
+  const done = (m) => { setNotice(m); s.reload(); sc.close(); };
   const all = s.data || [];
   const isUp = (b) => UPCOMING.includes(b.status);
   const counts = { upcoming: all.filter(isUp).length, past: all.filter((b) => !isUp(b)).length };
@@ -504,13 +497,26 @@ export function MyBookings() {
     }
   };
 
+  if (sc.name) {
+    const target = all.find((x) => x._id === sc.id);
+    if (sc.name === 'invoice') return <InvoiceScreen id={sc.id} onClose={sc.close} />;
+    if (!target) return <Screen title={s.loading ? 'Loading…' : 'Booking not found'} onClose={sc.close}><p className="muted">{s.loading ? 'Loading your booking…' : 'This booking was not found in your account.'}</p></Screen>;
+    const ref = target.bookingReference || '';
+    if (sc.name === 'details') return <Screen title={`Booking ${ref}`} onClose={sc.close}><Details id={target._id} onChanged={done} /></Screen>;
+    if (sc.name === 'cancel') return <Screen title={`Cancel reservation ${ref}`} onClose={sc.close}><Details id={target._id} startCancel onChanged={done} /></Screen>;
+    if (sc.name === 'modify') return <ModifyModal booking={target} onClose={sc.close} onSaved={done} />;
+    if (sc.name === 'abandon') return <CancelModal booking={target} onClose={sc.close} onCancelled={done} />;
+    if (sc.name === 'review') return <ReviewModal booking={target} onClose={sc.close} onSaved={done} />;
+    if (sc.name === 'request-in' || sc.name === 'request-out') return <StayRequestModal booking={target} type={sc.name === 'request-in' ? 'check_in' : 'check_out'} onClose={sc.close} onSaved={done} />;
+  }
+
   return (
     <div className="c-wrap c-section">
       <h1 className="title">My bookings</h1>
       <Notice ok={notice} />
       <div className="chips" role="group" aria-label="Filter bookings">
         {['upcoming', 'past'].map((t) => (
-          <button key={t} className={tab === t ? 'chip on' : 'chip'} aria-pressed={tab === t} onClick={() => { setTab(t); setOpen(null); }}>
+          <button key={t} className={tab === t ? 'chip on' : 'chip'} aria-pressed={tab === t} onClick={() => setTab(t)}>
             {t}{!s.loading && !s.error ? ` (${counts[t]})` : ''}
           </button>
         ))}
@@ -549,13 +555,11 @@ export function MyBookings() {
                   <div className="end">
                     <strong>{money(b.totalAmount)}</strong>
                     {depositDue(b) && <a className="btn primary" href={`#/pay/${b._id}?kind=deposit`}>Pay deposit</a>}
-                    <button className="btn" aria-expanded={open === b._id} aria-controls={`details-${b._id}`} onClick={() => { setOpen(open === b._id ? null : b._id); setCancelFor(null); }}>
-                      {open === b._id ? 'Hide details' : 'View details'}
-                    </button>
+                    <button className="btn" onClick={() => sc.go('details', b._id)}>View details</button>
                     {canModifyOrCancel && (
                       <>
-                        <button className="btn" onClick={() => setModifying(b)}>Modify</button>
-                        <button className="btn danger" onClick={() => (b.status === 'pending' ? setCancelling(b) : (setOpen(b._id), setCancelFor(b._id)))}>
+                        <button className="btn" onClick={() => sc.go('modify', b._id)}>Modify</button>
+                        <button className="btn danger" onClick={() => sc.go(b.status === 'pending' ? 'abandon' : 'cancel', b._id)}>
                           {b.status === 'pending' ? 'Abandon hold' : 'Cancel'}
                         </button>
                       </>
@@ -566,61 +570,29 @@ export function MyBookings() {
                       </button>
                     )}
                     {b.status === 'checked_out' && (
-                      <button className="btn" onClick={() => setReviewing(b)}>
+                      <button className="btn" onClick={() => sc.go('review', b._id)}>
                         Write review
                       </button>
                     )}
-                    {b.status === 'confirmed' && <button className="btn" onClick={() => setRequesting({ booking: b, type: 'check_in' })}>Check-in request</button>}
-                    {b.status === 'checked_in' && <button className="btn" onClick={() => setRequesting({ booking: b, type: 'check_out' })}>Check-out request</button>}
-                    {b.status === 'checked_out' && <button className="btn" onClick={() => viewInvoice(b)}>View invoice</button>}
+                    {b.status === 'confirmed' && <button className="btn" onClick={() => sc.go('request-in', b._id)}>Check-in request</button>}
+                    {b.status === 'checked_in' && <button className="btn" onClick={() => sc.go('request-out', b._id)}>Check-out request</button>}
+                    {b.status === 'checked_out' && <button className="btn" onClick={() => sc.go('invoice', b._id)}>View invoice</button>}
                   </div>
                 </article>
-                {open === b._id && <Details key={`${b._id}-${cancelFor === b._id}`} id={b._id} startCancel={cancelFor === b._id} onChanged={changed} />}
               </div>
             );
           })}
         </div>
       </div>
 
-      {modifying && (
-        <ModifyModal
-          booking={modifying}
-          onClose={() => setModifying(null)}
-          onSaved={(msg) => {
-            setModifying(null);
-            setNotice(msg);
-            s.reload();
-          }}
-        />
-      )}
-
-      {cancelling && (
-        <CancelModal
-          booking={cancelling}
-          onClose={() => setCancelling(null)}
-          onCancelled={(msg) => {
-            setCancelling(null);
-            setNotice(msg);
-            s.reload();
-          }}
-        />
-      )}
-
-      {reviewing && (
-        <ReviewModal
-          booking={reviewing}
-          onClose={() => setReviewing(null)}
-          onSaved={(msg) => {
-            setReviewing(null);
-            setNotice(msg);
-            s.reload();
-          }}
-        />
-      )}
-      {invoice && <CustomerInvoice invoice={invoice} onClose={() => setInvoice(null)} />}
-      {requesting && <StayRequestModal booking={requesting.booking} type={requesting.type} onClose={() => setRequesting(null)} onSaved={(m) => { setRequesting(null); changed(m); }} />}
     </div>
   );
+}
+
+function InvoiceScreen({ id, onClose }) {
+  const s = useApi(`/bookings/${id}/invoice`);
+  if (s.loading || s.error) return <Screen title="Invoice" onClose={onClose}>{s.loading ? <p className="muted">Loading invoice…</p> : <Notice error={s.error} />}</Screen>;
+  return <CustomerInvoice invoice={s.data} onClose={onClose} />;
 }
 
 function CustomerInvoice({ invoice, onClose }) {
@@ -629,11 +601,11 @@ function CustomerInvoice({ invoice, onClose }) {
   const rows = invoice.lines?.length
     ? [...invoice.lines.map((l) => [l.name.replace(/Night of (\d{4}-\d{2}-\d{2})/, (_, d) => `Night of ${dateLabel(d)}`), money(l.amount)]), ['Total', money(invoice.totalAmount)], ['Paid', money(invoice.paidAmount ?? invoice.totalAmount)], ['Balance', money(invoice.balance ?? 0)]]
     : [['Room charges', money(b.roomAmount)], ['Additional services', money(b.serviceAmount)], ['Total paid', money(invoice.totalAmount)]];
-  return <Modal title={`Invoice ${invoice.invoiceNumber}`} onClose={onClose}>
+  return <Screen title={`Invoice ${invoice.invoiceNumber}`} onClose={onClose}>
     {invoice.hotelName && <p><b>{invoice.hotelName}</b>{invoice.hotelAddress ? ` · ${invoice.hotelAddress}` : ''}</p>}
     <p>{b.bookingReference} · {dateLabel(b.checkInDate)} - {dateLabel(b.checkOutDate)} · issued {dateLabel(invoice.issuedAt)}</p>
     <div id="invoice-print"><DataTable cols={['Item', 'Amount']} rows={rows} /></div>
     <div className="modal-actions"><button className="btn" onClick={onClose}>Close</button><button className="btn primary" onClick={() => window.print()}>Print</button></div>
-  </Modal>;
+  </Screen>;
 }
 

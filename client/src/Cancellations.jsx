@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, dateLabel, money } from './api/client.js';
-import { Badge, DataTable, Field, Modal, Notice, PageHead, useApi } from './ui.jsx';
+import { Badge, DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useScreen } from './ui.jsx';
 
 const Booker = ({ p }) => <span>{p.name || '—'}<br /><small className="muted">{p.phone || 'no phone'} · {p.email || 'no e-mail'}</small></span>;
 const Loading = ({ s, empty }) => s.loading ? <p className="muted">Loading…</p> : s.error ? <Notice error={s.error} /> : s.data.length === 0 ? <p className="empty muted">{empty}</p> : null;
@@ -10,7 +10,7 @@ export function Cancellations() {
   const list = useApi('/frontdesk/cancellations');
   const [msg, setMsg] = useState(null);
   const [err, setErr] = useState(null);
-  const [recording, setRecording] = useState(false);
+  const sc = useScreen();
   // UC35 1a: withdrawn at the customer's request; the booking is Confirmed again.
   const withdraw = async (b) => {
     if (!window.confirm(`Withdraw the cancellation request of ${b.bookingReference} at the customer's request?`)) return;
@@ -20,9 +20,10 @@ export function Cancellations() {
     if (!confirm(`Approve the cancellation of ${b.bookingReference}? Refund: ${money(b.cancellation.refundableAmount)}.`)) return;
     try { setMsg((await api(`/frontdesk/cancellations/${b._id}/approve`, { method: 'POST' })).message); setErr(null); list.reload(); } catch (x) { setErr(x); }
   };
+  if (sc.name === 'record') return <RecordCancellation onClose={sc.close} onDone={(m) => { setMsg(m); setErr(null); list.reload(); sc.close(); }} />;
   return (
     <>
-      <PageHead title="Cancellations" sub="Requests waiting for review. Undecided ones are approved automatically after 24 hours or at check-in." action="Record cancellation" onAction={() => setRecording(true)} />
+      <PageHead title="Cancellations" sub="Requests waiting for review. Undecided ones are approved automatically after 24 hours or at check-in." action="Record cancellation" onAction={() => sc.go('record')} />
       <Notice error={err} ok={msg} />
       <Loading s={list} empty="No cancellation requests are waiting." />
       {list.data?.length > 0 && (
@@ -35,7 +36,6 @@ export function Cancellations() {
           <span key="a" className="row-actions"><button className="btn sm primary" onClick={() => approve(b)}>Approve</button><button className="btn sm" onClick={() => withdraw(b)}>Withdraw</button></span>,
         ])} />
       )}
-      {recording && <RecordCancellation onClose={() => setRecording(false)} onDone={(m) => { setRecording(false); setMsg(m); setErr(null); list.reload(); }} />}
     </>
   );
 }
@@ -73,7 +73,7 @@ function RecordCancellation({ onClose, onDone }) {
   const est = pick && (hotel ? pick.hotelCausedEstimate : pick.estimate);
   const walkIn = pick?.bookingSource === 'front_desk';
   return (
-    <Modal title="Record a cancellation" onClose={onClose}>
+    <Screen title="Record a cancellation" onClose={onClose}>
       <form className="form" onSubmit={search} role="search">
         <Field label="Booking code or phone number"><input value={q} onChange={(e) => setQ(e.target.value)} minLength={3} required autoFocus /></Field>
         <button className="btn">Find booking</button>
@@ -114,7 +114,7 @@ function RecordCancellation({ onClose, onDone }) {
         </form>
       )}
       <Notice error={err && !err.fields ? err : null} />
-    </Modal>
+    </Screen>
   );
 }
 
@@ -122,14 +122,16 @@ function RecordCancellation({ onClose, onDone }) {
 export function Refunds() {
   const [tab, setTab] = useState('requested');
   const list = useApi(`/frontdesk/refunds?status=${tab}`);
-  const [open, setOpen] = useState(null);
+  const sc = useScreen();
+  const open = (list.data || []).find((r) => r._id === sc.id);
   const [msg, setMsg] = useState(null);
+  if (sc.name === 'process') return open ? <RefundCase r={open} onClose={sc.close} onChanged={() => list.reload()} onDone={(m) => { setMsg(m); list.reload(); sc.close(); }} /> : <WaitScreen loading={list.loading} onClose={sc.close} />;
   return (
     <>
       <PageHead title="Refunds" sub="Contact the customer for the bank account, transfer the refund and record the transaction code (target: within 7 days)" />
       <div className="chips" role="group" aria-label="Refund status">
         {[['requested', 'Waiting for refund'], ['completed', 'Refunded']].map(([k, label]) => (
-          <button key={k} className={tab === k ? 'chip on' : 'chip'} aria-pressed={tab === k} onClick={() => { setTab(k); setOpen(null); setMsg(null); }}>{label}</button>
+          <button key={k} className={tab === k ? 'chip on' : 'chip'} aria-pressed={tab === k} onClick={() => { setTab(k); setMsg(null); }}>{label}</button>
         ))}
       </div>
       <Notice ok={msg} />
@@ -138,14 +140,13 @@ export function Refunds() {
         <DataTable cols={['Booking', 'Booker', 'Amount', 'Reason', 'Waiting since', 'Account', 'Contacts', '']} rows={list.data.map((r) => [
           r.booking.bookingReference, <Booker key="p" p={r.booker} />, money(r.amount), r.reason || '—', dateLabel(r.createdAt),
           r.account ? `${r.account.bank} ···${r.account.accountNumber?.slice(-4) || ''}` : 'Not entered yet', r.contacts.length,
-          <button key="o" className="btn sm primary" onClick={() => setOpen(r)}>Process</button>,
+          <button key="o" className="btn sm primary" onClick={() => sc.go('process', r._id)}>Process</button>,
         ])} />
       ) : (
         <DataTable cols={['Booking', 'Booker', 'Amount', 'Transaction code', 'Refunded']} rows={list.data.map((r) => [
           r.booking.bookingReference, <Booker key="p" p={r.booker} />, money(r.amount), r.bankTransactionCode, dateLabel(r.processedAt),
         ])} />
       ))}
-      {open && <RefundCase r={open} onClose={() => setOpen(null)} onChanged={(r) => { setOpen(r); list.reload(); }} onDone={(m) => { setOpen(null); setMsg(m); list.reload(); }} />}
     </>
   );
 }
@@ -166,7 +167,7 @@ function RefundCase({ r, onClose, onChanged, onDone }) {
     call('', 'POST', { bankTransactionCode: f.bankTransactionCode, ...(f.note ? { note: f.note } : {}) }, (res) => onDone(res.message));
   };
   return (
-    <Modal title={`Refund · ${r.booking.bookingReference}`} onClose={onClose}>
+    <Screen title={`Refund · ${r.booking.bookingReference}`} onClose={onClose}>
       <dl className="kv">
         <dt>Booker</dt><dd>{r.booker.name} · {r.booker.phone || 'no phone'} · {r.booker.email || 'no e-mail'}</dd>
         <dt>Amount</dt><dd><strong>{money(r.amount)}</strong> (cannot be changed)</dd>
@@ -195,6 +196,6 @@ function RefundCase({ r, onClose, onChanged, onDone }) {
         </form>
       )}
       <Notice error={err && !err.fields ? err : null} />
-    </Modal>
+    </Screen>
   );
 }

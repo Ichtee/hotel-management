@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, dateLabel, inputDate, money } from './api/client.js';
 import { useAuth } from './context/Auth.jsx';
-import { Badge, DataTable, Field, LineChart, Modal, Notice, PageHead, useApi } from './ui.jsx';
+import { Badge, DataTable, Field, LineChart, Notice, PageHead, Screen, WaitScreen, useApi, useEditPage } from './ui.jsx';
 
 const qs = (o) => new URLSearchParams(Object.fromEntries(Object.entries(o).filter(([, v]) => v !== '' && v != null))).toString();
 const day = (offset) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(Date.now() + offset * 864e5));
@@ -151,18 +151,20 @@ export function Users() {
   const isAdmin = user.permissions.includes('users.manage');
   const base = isAdmin ? '/users' : '/staff';
   const [filters, setFilters] = useState({});
-  const list = useApi(`${base}?${qs({ ...filters, limit: 50 })}`);
+  const list = useApi(`${base}?${qs({ ...filters, ...(isAdmin ? { role: 'manager' } : {}), limit: 50 })}`); // BR-25: the Admin manages Hotel Manager accounts only
   const options = useApi('/options');
-  const [edit, setEdit] = useState(null); // {} = new, user object = edit
+  const E = useEditPage(list.data);
   const [msg, setMsg] = useState('');
   const roleName = (k) => options.data?.roles.find((r) => r.key === k)?.name || k;
   const toggle = async (u) => {
     try { await api(`${base}/${u._id}`, { method: 'PATCH', body: { status: u.status === 'active' ? 'suspended' : 'active' } }); setMsg(''); list.reload(); }
     catch (e) { setMsg(e); }
   };
+  if (E.missing) return <WaitScreen loading={list.loading} onClose={E.close} />;
+  if (E.open) return <UserForm user={E.open} isStaff={!isAdmin} base={base} options={options.data} onClose={E.close} onSaved={() => { list.reload(); E.close(); }} />;
   return (
     <>
-      <PageHead title={isAdmin ? 'Users' : 'Staff'} sub={isAdmin ? 'All accounts: guests and staff' : 'Receptionists and housekeeping at your hotel'} action={isAdmin ? 'Add user' : 'Add staff'} onAction={() => setEdit({})} />
+      <PageHead title={isAdmin ? 'Hotel manager accounts' : 'Staff'} sub={isAdmin ? 'Create, update and deactivate Hotel Manager accounts' : 'Receptionists and housekeeping at your hotel'} action={isAdmin ? 'Add hotel manager' : 'Add staff'} onAction={E.add} />
       <Filters onApply={setFilters} statuses={['active', 'suspended', 'deleted']} />
       <Notice error={msg || null} />
       <Loading s={list} />
@@ -170,20 +172,19 @@ export function Users() {
         <DataTable cols={['Name', 'Username', 'Email', 'Role', 'Status', '']} rows={list.data.map((u) => [
           u.customerProfile?.fullName || '—', u.username, u.email, roleName(u.role), u.status,
           <span className="row-actions" key={u._id}>
-            <button className="btn sm" onClick={() => setEdit(u)}>Edit</button>
+            <button className="btn sm" onClick={() => E.edit(u)}>Edit</button>
             {u.role !== 'admin' && <button className={`btn sm${u.status === 'active' ? ' danger' : ''}`} onClick={() => toggle(u)}>{u.status === 'active' ? 'Suspend' : 'Activate'}</button>}
           </span>
         ])} />
       )}
       {list.data?.length === 0 && <p className="empty muted">No accounts match.</p>}
-      {edit && <UserForm user={edit} isStaff={!isAdmin} base={base} options={options.data} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); list.reload(); }} />}
     </>
   );
 }
 
 function UserForm({ user, isStaff, base, options, onClose, onSaved }) {
   const creating = !user._id;
-  const [role, setRole] = useState(user.role || (isStaff ? 'receptionist' : 'customer'));
+  const [role, setRole] = useState(user.role || (isStaff ? 'receptionist' : 'manager'));
   const [err, setErr] = useState(null);
   const scope = options?.roles.find((r) => r.key === role)?.scope;
   const fe = (k) => err?.fields?.[k];
@@ -197,7 +198,7 @@ function UserForm({ user, isStaff, base, options, onClose, onSaved }) {
   };
   const ep = user.employeeProfile || {};
   return (
-    <Modal title={creating ? 'New account' : 'Edit account'} onClose={onClose}>
+    <Screen title={creating ? 'New account' : 'Edit account'} onClose={onClose}>
       <form className="form" onSubmit={submit}>
         <Field label="Full name" error={fe('fullName')}><input name="fullName" defaultValue={user.customerProfile?.fullName} required /></Field>
         <Field label="Email" error={fe('email')}><input name="email" type="email" defaultValue={user.email} required /></Field>
@@ -206,7 +207,7 @@ function UserForm({ user, isStaff, base, options, onClose, onSaved }) {
         <Field label="Phone" error={fe('phone')}><input name="phone" defaultValue={user.phone} required={scope === 'hotel'} /></Field>
         <Field label="Role" error={fe('role')}>
           <select value={role} onChange={(e) => setRole(e.target.value)} disabled={user.role === 'admin'}>
-            {options?.roles.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
+            {options?.roles.filter((r) => isStaff || r.key === 'manager' || r.key === user.role).map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
           </select>
         </Field>
         {!creating && user.role !== 'admin' && <Field label="Status"><select name="status" defaultValue={user.status}><option>active</option><option>suspended</option><option>deleted</option></select></Field>}
@@ -218,73 +219,7 @@ function UserForm({ user, isStaff, base, options, onClose, onSaved }) {
         <div className="full"><Notice error={err && !err.fields ? err : null} /></div>
         <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" type="submit">Save</button></div>
       </form>
-    </Modal>
-  );
-}
-
-/* ---------------- Roles & permissions (UC10) ---------------- */
-export function Roles() {
-  const list = useApi('/roles');
-  const [edit, setEdit] = useState(null);
-  const [msg, setMsg] = useState('');
-  const remove = async (r) => {
-    if (!confirm(`Delete role “${r.name}”?`)) return;
-    try { await api(`/roles/${r._id}`, { method: 'DELETE' }); setMsg(''); list.reload(); } catch (e) { setMsg(e); }
-  };
-  return (
-    <>
-      <PageHead title="Roles" sub="Access levels and what each role may do" action="Add role" onAction={() => setEdit({})} />
-      <Notice error={msg || null} />
-      <Loading s={list} />
-      {list.data && (
-        <DataTable cols={['Role', 'Key', 'Scope', 'Permissions', 'Status', '']} rows={list.data.map((r) => [
-          r.name + (r.isSystem ? ' (system)' : ''), r.key, r.scope, r.permissions.length ? r.permissions.join(', ') : '—', r.isActive ? 'active' : 'inactive',
-          <span className="row-actions" key={r._id}>
-            <button className="btn sm" onClick={() => setEdit(r)}>Edit</button>
-            {!r.isSystem && <button className="btn sm danger" onClick={() => remove(r)}>Delete</button>}
-          </span>
-        ])} />
-      )}
-      {edit && <RoleForm role={edit} catalog={list.meta?.permissions || []} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); list.reload(); }} />}
-    </>
-  );
-}
-
-function RoleForm({ role, catalog, onClose, onSaved }) {
-  const creating = !role._id;
-  const [scope, setScope] = useState(role.scope || 'hotel');
-  const [perms, setPerms] = useState(role.permissions || []);
-  const [err, setErr] = useState(null);
-  const avail = catalog.filter((c) => c.scope === scope);
-  const submit = async (e) => {
-    e.preventDefault();
-    const f = Object.fromEntries(new FormData(e.target));
-    const body = { name: f.name, permissions: perms.filter((p) => avail.some((a) => a.key === p)) };
-    if (creating) Object.assign(body, { key: f.key, scope }); else body.isActive = f.isActive === 'on';
-    try { await api(creating ? '/roles' : `/roles/${role._id}`, { method: creating ? 'POST' : 'PATCH', body }); onSaved(); } catch (x) { setErr(x); }
-  };
-  const fe = (k) => err?.fields?.[k];
-  return (
-    <Modal title={creating ? 'New role' : `Edit ${role.name}`} onClose={onClose}>
-      <form className="form" onSubmit={submit}>
-        <Field label="Name" error={fe('name')}><input name="name" defaultValue={role.name} required /></Field>
-        {creating && <Field label="Key (lowercase, underscores)" error={fe('key')}><input name="key" required /></Field>}
-        {creating && <Field label="Scope"><select value={scope} onChange={(e) => { setScope(e.target.value); setPerms([]); }}><option value="hotel">Hotel staff</option><option value="self">Customer (own data)</option></select></Field>}
-        <fieldset className="full">
-          <legend>Permissions</legend>
-          {avail.length === 0 && <p className="muted">This scope has no assignable permissions.</p>}
-          {avail.map((p) => (
-            <label className="check" key={p.key}>
-              <input type="checkbox" checked={perms.includes(p.key)} onChange={() => setPerms(perms.includes(p.key) ? perms.filter((x) => x !== p.key) : [...perms, p.key])} />{p.name}
-            </label>
-          ))}
-          <Notice error={fe('permissions')} />
-        </fieldset>
-        {!creating && <label className="check full"><input type="checkbox" name="isActive" defaultChecked={role.isActive} />Role is active</label>}
-        <div className="full"><Notice error={err && !err.fields ? err : null} /></div>
-        <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" type="submit">Save</button></div>
-      </form>
-    </Modal>
+    </Screen>
   );
 }
 
@@ -292,12 +227,14 @@ function RoleForm({ role, catalog, onClose, onSaved }) {
 export function Coupons() {
   const [filters, setFilters] = useState({});
   const list = useApi(`/promotions?${qs({ ...filters, limit: 50 })}`);
-  const [edit, setEdit] = useState(null);
+  const E = useEditPage(list.data);
   const [msg, setMsg] = useState('');
   const act = async (fn) => { try { await fn(); setMsg(''); list.reload(); } catch (e) { setMsg(e); } };
+  if (E.missing) return <WaitScreen loading={list.loading} onClose={E.close} />;
+  if (E.open) return <CouponForm coupon={E.open} onClose={E.close} onSaved={() => { list.reload(); E.close(); }} />;
   return (
     <>
-      <PageHead title="Coupons" sub="Promotions and discount codes for your hotel" action="Create coupon" onAction={() => setEdit({})} />
+      <PageHead title="Coupons" sub="Promotions and discount codes for your hotel" action="Create coupon" onAction={E.add} />
       <Filters onApply={setFilters} statuses={['active', 'inactive']} />
       <Notice error={msg || null} />
       <Loading s={list} />
@@ -306,14 +243,13 @@ export function Coupons() {
           c.code, c.discountType === 'percentage' ? `${c.discountValue}%` : money(c.discountValue), c.minimumSpend ? money(c.minimumSpend) : '—',
           `${c.usageCount} / ${c.usageLimit}`, `${dateLabel(c.startDate)} – ${dateLabel(c.endDate)}`, c.isActive ? 'active' : 'inactive',
           <span className="row-actions" key={c._id}>
-            <button className="btn sm" onClick={() => setEdit(c)}>Edit</button>
+            <button className="btn sm" onClick={() => E.edit(c)}>Edit</button>
             <button className={`btn sm${c.isActive ? ' danger' : ''}`} onClick={() => act(() => api(`/promotions/${c._id}`, { method: 'PATCH', body: { isActive: !c.isActive } }))}>{c.isActive ? 'Disable' : 'Enable'}</button>
             <button className="btn sm danger" onClick={() => confirm(`Delete ${c.code}?`) && act(() => api(`/promotions/${c._id}`, { method: 'DELETE' }))}>Delete</button>
           </span>
         ])} />
       )}
       {list.data?.length === 0 && <p className="empty muted">No coupons yet.</p>}
-      {edit && <CouponForm coupon={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); list.reload(); }} />}
     </>
   );
 }
@@ -329,7 +265,7 @@ function CouponForm({ coupon, onClose, onSaved }) {
     try { await api(creating ? '/promotions' : `/promotions/${coupon._id}`, { method: creating ? 'POST' : 'PATCH', body }); onSaved(); } catch (x) { setErr(x); }
   };
   return (
-    <Modal title={creating ? 'New coupon' : `Edit ${coupon.code}`} onClose={onClose}>
+    <Screen title={creating ? 'New coupon' : `Edit ${coupon.code}`} onClose={onClose}>
       <form className="form" onSubmit={submit}>
         <Field label="Code" error={fe('code')}><input name="code" defaultValue={coupon.code} required /></Field>
         <Field label="Type" error={fe('discountType')}><select name="discountType" defaultValue={coupon.discountType || 'percentage'}><option value="percentage">Percentage (1 to 100)</option><option value="fixed">Fixed amount (VND)</option></select></Field>
@@ -343,7 +279,7 @@ function CouponForm({ coupon, onClose, onSaved }) {
         <div className="full"><Notice error={err && !err.fields ? err : null} /></div>
         <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" type="submit">Save</button></div>
       </form>
-    </Modal>
+    </Screen>
   );
 }
 
@@ -431,13 +367,17 @@ export function Occupancy() {
   );
 }
 
-/* ---------------- Profile & password (UC03), shared by both shells ---------------- */
-export function Profile() {
-  const { user, setUser, signOut } = useAuth();
+/* ---------------- Profile (UC03) and Change Password: two pages, shared by both shells ---------------- */
+const ProfileTabs = ({ base, on }) => (
+  <nav className="subnav" aria-label="Account">
+    <a href={base} className={on === 'profile' ? 'on' : ''} aria-current={on === 'profile' ? 'page' : undefined}>Personal details</a>
+    <a href={`${base}/password`} className={on === 'password' ? 'on' : ''} aria-current={on === 'password' ? 'page' : undefined}>Change password</a>
+  </nav>
+);
+export function Profile({ base = '#/profile' }) {
+  const { user, setUser } = useAuth();
   const [err, setErr] = useState(null);
   const [ok, setOk] = useState('');
-  const [pErr, setPErr] = useState(null);
-  const [pOk, setPOk] = useState('');
   const cp = user.customerProfile || {};
   const save = async (e) => {
     e.preventDefault();
@@ -445,52 +385,47 @@ export function Profile() {
     try { const r = await api('/profile', { method: 'PATCH', body: { fullName: f.fullName, phone: f.phone, address: f.address, dateOfBirth: f.dateOfBirth, ...(f.email ? { email: f.email } : {}) } }); setUser(r.data); setErr(null); setOk(r.message || 'Profile saved.'); }
     catch (x) { setErr(x); setOk(''); }
   };
-  const pw = async (e) => {
+  return (
+    <>
+      <PageHead title="My profile" sub={`${user.roleName} · ${user.email}`} />
+      <ProfileTabs base={base} on="profile" />
+      <form className="panel form one" onSubmit={save} style={{ maxWidth: 560 }}>
+        <Field label="Full name" error={err?.fields?.fullName}><input name="fullName" defaultValue={cp.fullName} required minLength={2} maxLength={50} /></Field>
+        {/* UC03 4b: only a Customer changes the e-mail, through a link sent to the new address (BR-24) */}
+        {user.role === 'customer' && <Field label={user.pendingEmail ? `E-mail (waiting for verification: ${user.pendingEmail})` : 'E-mail'} error={err?.fields?.email}><input name="email" type="email" defaultValue={user.email} required /></Field>}
+        <Field label="Phone" error={err?.fields?.phone}><input name="phone" defaultValue={user.phone} pattern="([0-9]{10,11}|\+[0-9]{8,15})" title="10-11 digits, or + and 8-15 digits with the country code." /></Field>
+        <Field label="Address" error={err?.fields?.address}><input name="address" defaultValue={cp.address} /></Field>
+        <Field label="Date of birth" error={err?.fields?.dateOfBirth}><input name="dateOfBirth" type="date" defaultValue={inputDate(cp.dateOfBirth)} /></Field>
+        <Notice error={err && !err.fields ? err : null} ok={ok} />
+        <div className="modal-actions"><button className="btn primary" type="submit">Save changes</button></div>
+      </form>
+    </>
+  );
+}
+export function ChangePassword({ base = '#/profile' }) {
+  const [err, setErr] = useState(null);
+  const [ok, setOk] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
-    try { const r = await api('/profile/password', { method: 'PUT', body: { currentPassword: f.currentPassword, newPassword: f.newPassword } }); e.target.reset(); setPErr(null); setPOk(r.data.message); }
-    catch (x) { setPErr(x); setPOk(''); }
+    if (f.newPassword !== f.confirmPassword) { setErr({ message: 'Passwords do not match.', fields: { confirmPassword: 'Passwords do not match.' } }); return; }
+    setBusy(true);
+    try { const r = await api('/profile/password', { method: 'PUT', body: { currentPassword: f.currentPassword, newPassword: f.newPassword } }); e.target.reset(); setErr(null); setOk(r.data.message); }
+    catch (x) { setErr(x); setOk(''); }
+    finally { setBusy(false); }
   };
   return (
     <>
-      <PageHead
-        title="My profile"
-        sub={`${user.roleName} · ${user.email}`}
-        extra={
-          <button
-            className="btn danger"
-            style={{ background: '#dc2626', color: '#ffffff', border: 'none', padding: '0.5rem 1.25rem', borderRadius: '6px', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
-            type="button"
-            onClick={async () => {
-              await signOut();
-              location.hash = '#/login';
-            }}
-          >
-            🚪 Sign out
-          </button>
-        }
-      />
-      <div className="two">
-        <form className="panel form one" onSubmit={save}>
-          <h2>Personal details</h2>
-          <Field label="Full name" error={err?.fields?.fullName}><input name="fullName" defaultValue={cp.fullName} required /></Field>
-          {/* UC03 4b: only a Customer changes the e-mail, through a link sent to the new address (BR-24) */}
-          {user.role === 'customer' && <Field label={user.pendingEmail ? `E-mail (waiting for verification: ${user.pendingEmail})` : 'E-mail'} error={err?.fields?.email}><input name="email" type="email" defaultValue={user.email} required /></Field>}
-          <Field label="Phone" error={err?.fields?.phone}><input name="phone" defaultValue={user.phone} /></Field>
-          <Field label="Address" error={err?.fields?.address}><input name="address" defaultValue={cp.address} /></Field>
-          <Field label="Date of birth" error={err?.fields?.dateOfBirth}><input name="dateOfBirth" type="date" defaultValue={inputDate(cp.dateOfBirth)} /></Field>
-          <Notice error={err && !err.fields ? err : null} ok={ok} />
-          <button className="btn primary" type="submit">Save changes</button>
-        </form>
-        <form className="panel form one" onSubmit={pw}>
-          <h2>Change password</h2>
-          <Field label="Current password" error={pErr?.fields?.currentPassword}><input name="currentPassword" type="password" autoComplete="current-password" required /></Field>
-          <Field label="New password (8+ characters, upper and lower case, a number)" error={pErr?.fields?.newPassword}><input name="newPassword" type="password" autoComplete="new-password" required /></Field>
-          <Notice error={pErr && !pErr.fields ? pErr : null} ok={pOk} />
-          <button className="btn primary" type="submit">Update password</button>
-        </form>
-        <div className="panel form one full" style={{ gridColumn: "1 / -1", marginTop: "1rem", display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(211, 47, 47, 0.04)", borderColor: "rgba(211, 47, 47, 0.2)" }}><div><h3 style={{ margin: 0, color: "#d32f2f" }}>Sign out</h3><p className="muted" style={{ margin: "0.25rem 0 0" }}>End your current session on this device.</p></div><button type="button" className="btn" style={{ color: "#d32f2f", borderColor: "#d32f2f", background: "transparent" }} onClick={async () => { await signOut(); location.hash = "#/"; }}>Sign out</button></div>
-      </div>
+      <PageHead title="Change password" sub="Use 8 or more characters with an upper-case letter, a lower-case letter and a number." />
+      <ProfileTabs base={base} on="password" />
+      <form className="panel form one" onSubmit={submit} style={{ maxWidth: 560 }}>
+        <Field label="Current password" error={err?.fields?.currentPassword}><input name="currentPassword" type="password" autoComplete="current-password" required /></Field>
+        <Field label="New password" error={err?.fields?.newPassword}><input name="newPassword" type="password" autoComplete="new-password" minLength={8} maxLength={128} required /></Field>
+        <Field label="Confirm new password" error={err?.fields?.confirmPassword}><input name="confirmPassword" type="password" autoComplete="new-password" required /></Field>
+        <Notice error={err && !err.fields ? err : null} ok={ok} />
+        <div className="modal-actions"><button className="btn primary" type="submit" disabled={busy}>{busy ? 'Updating…' : 'Update password'}</button></div>
+      </form>
     </>
   );
 }

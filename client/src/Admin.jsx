@@ -9,13 +9,13 @@ import AdHocCleaningRequest from './AdHocCleaningRequest.jsx';
 import StayRequests from './StayRequests.jsx';
 import Invoices from './Invoices.jsx';
 import RoomAvailability from './RoomAvailability.jsx';
-import NotificationBell from './Notifications.jsx';
+import NotificationBell, { NotificationsPage } from './Notifications.jsx';
 import { AuditLog, Catalog, Reviews, StaffPermissions } from './ManagerPages.jsx';
 import './admin.css';
 import { useAuth } from './context/Auth.jsx';
-import { Badge, DataTable, Field, LineChart, Modal, Notice, PageHead, useApi } from './ui.jsx';
+import { Badge, DataTable, Field, LineChart, Notice, PageHead, Screen, useApi, useScreen } from './ui.jsx';
 import { AuthShell, SignIn, ForgotPassword } from './AuthForms.jsx';
-import { Coupons, DepositPolicy, Occupancy, Profile, Revenue, Roles, Users } from './AdminPages.jsx';
+import { Coupons, DepositPolicy, Occupancy, Profile, ChangePassword, Revenue, Users } from './AdminPages.jsx';
 import { Cancellations, Refunds } from './Cancellations.jsx';
 import { api, dateLabel, money } from './api/client.js';
 
@@ -84,7 +84,7 @@ function Topbar({ onMenu }) {
     <header className="atop" ref={ref}>
       <button className="ibtn burger" aria-label="Open menu" onClick={onMenu}><Icon n="menu" /></button>
       <span className="atop-gap" />
-      <NotificationBell />
+      <NotificationBell allHref="#/admin/notifications" />
       <div className="aprofile">
         <button aria-expanded={menu} aria-haspopup="true" onClick={() => setMenu(!menu)}>
           <span className="avatar">{initials}</span><span className="who"><b>{name}</b><small>{user.roleName}</small></span>
@@ -151,27 +151,27 @@ function Dashboard() {
   const rev = useApi(`/reports/revenue?from=${vnDay(-13)}&to=${vnDay(0)}&groupBy=day`, canRev);
   const rooms = useApi('/rooms?limit=100', user.role === 'manager');
   const cx = useApi('/frontdesk/cancellations', user.permissions.includes('cancellations.review'));
-  const [checkingIn, setCheckingIn] = useState(null);
-  const [checkingOut, setCheckingOut] = useState(null);
+  const sc = useScreen();
   const series = rev.data?.series || [];
   const roomList = (rooms.data || []).filter((r) => r.isActive !== false);
   const count = (s) => roomList.filter((r) => r.status === s).length;
   const occupancy = roomList.length ? `${Math.round((count('occupied') / roomList.length) * 100)}%` : null;
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Asia/Ho_Chi_Minh' });
+  if (sc.name) return <BookingScreen sc={sc} onDone={fd.reload} />;
   return (
     <>
       <PageHead title={`Hello, ${name}`} sub={`${today} · ${user.roleName}`} />
       <div className="kpis">
-        {desk && <Stat label="Arrivals today" value={fd.arrivals.data?.length} hint="Confirmed, not checked in" href="#/admin/frontdesk" />}
-        {desk && <Stat label="Departures today" value={fd.inHouse.data ? fd.departures.length : null} hint="Due to check out" href="#/admin/frontdesk" />}
+        {desk && <Stat label="Arrivals today" value={fd.arrivals.data?.length} hint="Confirmed, not checked in" href="#/admin/bookings?view=arrivals" />}
+        {desk && <Stat label="Departures today" value={fd.inHouse.data ? fd.departures.length : null} hint="Due to check out" href="#/admin/bookings?view=departures" />}
         {desk && <Stat label="In-house guests" value={fd.inHouse.data?.length} hint="Checked in now" href="#/admin/bookings" />}
         {cx.data && <Stat label="Cancellation requests" value={cx.data.length} hint="Waiting for review" href="#/admin/cancellations" />}
         {occupancy && <Stat label="Occupancy now" value={occupancy} hint={`${count('occupied')} of ${roomList.length} rooms`} href="#/admin/rooms" />}
         {canRev && <Stat label="Revenue today" value={series.length ? money(series[series.length - 1].net) : null} hint="Receipts minus refunds" href="#/admin/revenue" />}
       </div>
       {desk && <div className="qgrid">
-        <Queue title="Today’s arrivals" rows={fd.arrivals.data || []} loading={fd.arrivals.loading} empty="No arrivals waiting." action="Check in" onAction={user.permissions.includes('stays.check_in') ? setCheckingIn : null} />
-        <Queue title="Today’s departures" rows={fd.departures} loading={fd.inHouse.loading} empty="No departures due." action="Check out" onAction={user.permissions.includes('stays.check_out') ? setCheckingOut : null} />
+        <Queue title="Today’s arrivals" rows={fd.arrivals.data || []} loading={fd.arrivals.loading} empty="No arrivals waiting." action="Check in" onAction={user.permissions.includes('stays.check_in') ? (b) => sc.go('check-in', b._id) : null} />
+        <Queue title="Today’s departures" rows={fd.departures} loading={fd.inHouse.loading} empty="No departures due." action="Check out" onAction={user.permissions.includes('stays.check_out') ? (b) => sc.go('check-out', b._id) : null} />
       </div>}
       <div className="dgrid">
         {canRev && (
@@ -192,24 +192,17 @@ function Dashboard() {
         )}
       </div>
       {!desk && !canRev && <p className="empty">Use the menu to open your tasks.</p>}
-      {checkingIn && <CheckInBooking booking={checkingIn} onClose={() => { setCheckingIn(null); fd.reload(); }} />}
-      {checkingOut && <CheckOutBooking booking={checkingOut} onClose={() => { setCheckingOut(null); fd.reload(); }} />}
     </>
   );
 }
 
 function Bookings() {
   const { user } = useAuth();
-  const [f, setF] = useState('all');
+  // The filter lives in the URL (#/admin/bookings?view=arrivals), so a link and the dashboard cards open the right list.
+  const f = new URLSearchParams(location.hash.split('?')[1] || '').get('view') || 'all';
+  const setF = (v) => { location.hash = v === 'all' ? '#/admin/bookings' : `#/admin/bookings?view=${v}`; };
   const [search, setSearch] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [cancelling, setCancelling] = useState(null);
-  const [checkingIn, setCheckingIn] = useState(null);
-  const [changingRoom, setChangingRoom] = useState(null);
-  const [addingService, setAddingService] = useState(null);
-  const [checkingOut, setCheckingOut] = useState(null);
-  const [penalizing, setPenalizing] = useState(null);
+  const sc = useScreen();
   const [notice, setNotice] = useState(null);
   // UC20 7a: generate the invoice again after a failure (an existing invoice is returned as it is).
   const generateInvoice = async (b) => {
@@ -217,10 +210,14 @@ function Bookings() {
     catch (x) { setNotice({ error: x }); }
   };
 
-  const statusParam = f !== 'all' ? `&status=${f}` : '';
+  // Arrivals and departures are views of the same list (they replace the separate Check-in / Check-out page).
+  const statusParam = f === 'arrivals' ? `&status=confirmed&checkInTo=${endOfToday()}` : f === 'departures' ? '&status=checked_in' : f !== 'all' ? `&status=${f}` : '';
   const searchParam = search ? `&reference=${encodeURIComponent(search)}` : '';
   const live = useApi(`/bookings/search?limit=100${statusParam}${searchParam}`);
-  const bookingsList = live.data || [];
+  const dayEnd = new Date(`${vnDay(0)}T23:59:59+07:00`);
+  const bookingsList = (live.data || []).filter((b) => f !== 'departures' || new Date(b.checkOutDate) <= dayEnd);
+  if (sc.name === 'new') return <WalkInBooking onClose={() => { live.reload(); sc.close(); }} />;
+  if (sc.name) return <BookingScreen sc={sc} onDone={live.reload} />;
 
   return (
     <>
@@ -228,11 +225,11 @@ function Bookings() {
         title="Bookings"
         sub="All reservations, newest first"
         action={user.role === 'receptionist' || user.role === 'admin' ? 'New booking' : null}
-        onAction={() => setCreating(true)}
+        onAction={() => sc.go('new')}
       />
       <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap' }}>
         <div className="chips" role="group" aria-label="Filter by status" style={{ margin: 0 }}>
-          {['all', 'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled'].map((s) => (
+          {['all', 'arrivals', 'departures', 'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled'].map((s) => (
             <button key={s} className={f === s ? 'chip on' : 'chip'} aria-pressed={f === s} onClick={() => setF(s)}>{s.replace('_', ' ')}</button>
           ))}
         </div>
@@ -254,28 +251,30 @@ function Bookings() {
           money(b.totalAmount),
           b.status,
           <RowActions key={b._id} actions={[
-            b.status === 'confirmed' && ['Check in', () => setCheckingIn(b)],
-            b.status === 'checked_in' && ['Check out', () => setCheckingOut(b)],
-            ['pending', 'confirmed', 'checked_in', 'checked_out'].includes(b.status) && [b.status === 'checked_in' ? 'Extend / edit' : 'Edit', () => setEditing(b)],
-            ['confirmed', 'checked_in'].includes(b.status) && [b.status === 'confirmed' ? 'Change room type' : 'Change room', () => setChangingRoom(b)],
-            b.status === 'checked_in' && ['Add service', () => setAddingService(b)],
-            ['checked_in', 'checked_out'].includes(b.status) && ['Penalties', () => setPenalizing(b)],
+            b.status === 'confirmed' && ['Check in', () => sc.go('check-in', b._id)],
+            b.status === 'checked_in' && ['Check out', () => sc.go('check-out', b._id)],
+            ['pending', 'confirmed', 'checked_in', 'checked_out'].includes(b.status) && [b.status === 'checked_in' ? 'Extend / edit' : 'Edit', () => sc.go('edit', b._id)],
+            ['confirmed', 'checked_in'].includes(b.status) && [b.status === 'confirmed' ? 'Change room type' : 'Change room', () => sc.go('change-room', b._id)],
+            b.status === 'checked_in' && ['Add service', () => sc.go('service', b._id)],
+            ['checked_in', 'checked_out'].includes(b.status) && ['Penalties', () => sc.go('penalties', b._id)],
             b.status === 'checked_out' && ['Generate invoice', () => generateInvoice(b)],
-            b.status === 'confirmed' && ['Cancel', () => setCancelling(b)],
+            b.status === 'confirmed' && ['Cancel', () => sc.go('cancel', b._id)],
           ].filter(Boolean)} />
         ])}
       />
       {!live.loading && bookingsList.length === 0 && <p className="empty">No bookings match this filter.</p>}
-      {creating && <WalkInBooking onClose={() => { setCreating(false); live.reload(); }} />}
-      {editing && <EditBooking booking={editing} onClose={() => { setEditing(null); live.reload(); }} />}
-      {cancelling && <CancelBooking booking={cancelling} onClose={() => { setCancelling(null); live.reload(); }} />}
-      {checkingIn && <CheckInBooking booking={checkingIn} onClose={() => { setCheckingIn(null); live.reload(); }} />}
-      {changingRoom && <ChangeRoom booking={changingRoom} onClose={() => { setChangingRoom(null); live.reload(); }} />}
-      {addingService && <AddService booking={addingService} onClose={() => { setAddingService(null); live.reload(); }} />}
-      {checkingOut && <CheckOutBooking booking={checkingOut} onClose={() => { setCheckingOut(null); live.reload(); }} />}
-      {penalizing && <Penalties booking={penalizing} onClose={() => { setPenalizing(null); live.reload(); }} />}
     </>
   );
+}
+
+// Every front-desk task on a booking is its own page: #/admin/bookings?screen=check-in&id=...
+const BOOKING_TASKS = { 'check-in': CheckInBooking, 'check-out': CheckOutBooking, cancel: CancelBooking, edit: EditBooking, 'change-room': ChangeRoom, service: AddService, penalties: Penalties };
+function BookingScreen({ sc, onDone }) {
+  const b = useApi(`/bookings/${sc.id}`);
+  const Task = BOOKING_TASKS[sc.name];
+  if (!Task) return <Screen title="Not found" onClose={sc.close}><p className="muted">This page does not exist.</p></Screen>;
+  if (b.loading || b.error) return <Screen title="Booking" onClose={sc.close}>{b.loading ? <p className="muted">Loading booking…</p> : <Notice error={b.error} />}</Screen>;
+  return <Task booking={b.data} onClose={() => { onDone(); sc.close(); }} />;
 }
 
 // First action as a button, the rest in a "More" menu, so a row never turns into a wall of buttons.
@@ -296,20 +295,21 @@ function RowActions({ actions }) {
 }
 
 function CustomerAccounts() {
-  const [query, setQuery] = useState(''); const [status, setStatus] = useState(''); const [selected, setSelected] = useState(null);
+  const [query, setQuery] = useState(''); const [status, setStatus] = useState(''); const sc = useScreen();
   const list = useApi(`/customers?limit=100&q=${encodeURIComponent(query)}${status ? `&status=${status}` : ''}`);
+  const selected = (list.data || []).find((u) => u._id === sc.id);
+  if (sc.name === 'status') return selected ? <CustomerStatus customer={selected} onClose={() => { list.reload(); sc.close(); }} /> : <Screen title="Customer" onClose={sc.close}><p className="muted">{list.loading ? 'Loading…' : 'Customer not found.'}</p></Screen>;
   return <><PageHead title="Customer accounts" sub="Search customers and manage the blacklist" />
     <form className="chips" onSubmit={(e) => e.preventDefault()}><input aria-label="Search customers" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Name, username or email" /><select aria-label="Customer status" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="suspended">Blacklisted</option></select></form>
     <Notice error={list.error} />
-    <DataTable cols={['Name', 'Username', 'Email', 'Phone', 'Status', '']} rows={(list.data || []).map((u) => [u.customerProfile?.fullName || '—', u.username, u.email, u.phone || '—', u.status, <button key={u._id} className={`btn sm${u.status === 'active' ? ' danger' : ''}`} onClick={() => setSelected(u)}>{u.status === 'active' ? 'Blacklist' : 'Restore'}</button>])} />
-    {selected && <CustomerStatus customer={selected} onClose={() => { setSelected(null); list.reload(); }} />}
+    <DataTable cols={['Name', 'Username', 'Email', 'Phone', 'Status', '']} rows={(list.data || []).map((u) => [u.customerProfile?.fullName || '—', u.username, u.email, u.phone || '—', u.status, <button key={u._id} className={`btn sm${u.status === 'active' ? ' danger' : ''}`} onClick={() => sc.go('status', u._id)}>{u.status === 'active' ? 'Blacklist' : 'Restore'}</button>])} />
   </>;
 }
 
 function CustomerStatus({ customer, onClose }) {
   const [reason, setReason] = useState(''); const [error, setError] = useState(null); const [saving, setSaving] = useState(false); const blacklisting = customer.status === 'active';
   const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); try { await api(`/customers/${customer._id}/blacklist`, { method: 'PATCH', body: { action: blacklisting ? 'blacklist' : 'restore', reason } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
-  return <Modal title={blacklisting ? 'Blacklist customer' : 'Restore customer'} onClose={onClose}><form className="form" onSubmit={submit}><p className="full muted">{customer.customerProfile?.fullName || customer.username}</p><Field label="Reason"><input value={reason} onChange={(e) => setReason(e.target.value)} required /></Field><div className="full"><Notice error={error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : blacklisting ? 'Blacklist customer' : 'Restore customer'}</button></div></form></Modal>;
+  return <Screen title={blacklisting ? 'Blacklist customer' : 'Restore customer'} onClose={onClose}><form className="form" onSubmit={submit}><p className="full muted">{customer.customerProfile?.fullName || customer.username}</p><Field label="Reason"><input value={reason} onChange={(e) => setReason(e.target.value)} required /></Field><div className="full"><Notice error={error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : blacklisting ? 'Blacklist customer' : 'Restore customer'}</button></div></form></Screen>;
 }
 
 // UC11: the balance is split over cash, POS and bank transfer until it is 0 (BR-14: never online, BR-21).
@@ -347,14 +347,14 @@ function CheckOutBooking({ booking, onClose }) {
     try { const r = await api(`/front-desk/bookings/${booking._id}/check-out`, { method: 'POST', body: skip ? { skipInspection: true } : {} }); setDone(r); }
     catch (x) { setError(x); load(); } finally { setSaving(false); }
   };
-  if (done) return <Modal title={`Checked out · ${booking.bookingReference}`} onClose={onClose}>
+  if (done) return <Screen title={`Checked out · ${booking.bookingReference}`} onClose={onClose}>
     <Notice ok={done.message} error={done.warning} />
     {done.data.invoice && <p>Invoice <strong>{done.data.invoice.invoiceNumber}</strong> · {money(done.data.invoice.totalAmount)}. Print it from Invoices.</p>}
     <div className="modal-actions"><button className="btn primary" onClick={onClose}>Close</button></div>
-  </Modal>;
-  if (!bill) return <Modal title="Check out customer" onClose={onClose}>{error ? <Notice error={error} /> : <p className="muted">Requesting the room inspection and preparing the final bill…</p>}</Modal>;
+  </Screen>;
+  if (!bill) return <Screen title="Check out customer" onClose={onClose}>{error ? <Notice error={error} /> : <p className="muted">Requesting the room inspection and preparing the final bill…</p>}</Screen>;
   const inspected = bill.inspection?.status === 'completed';
-  return <Modal title={`Check out · ${booking.bookingReference}`} onClose={onClose}>
+  return <Screen title={`Check out · ${booking.bookingReference}`} onClose={onClose}>
     <dl className="sum">
       {bill.feeLines.map((f, i) => <div key={i}><dt>{FEE_LABEL[f.type]}</dt><dd>{money(f.amount)}</dd></div>)}
       <div><dt>Total</dt><dd>{money(bill.totalAmount)}</dd></div>
@@ -369,7 +369,7 @@ function CheckOutBooking({ booking, onClose }) {
       <div className="full"><Notice error={error} /></div>
       <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || bill.balance > 0 || bill.proposedPenalties > 0 || (!inspected && !skip)} title={bill.balance > 0 ? 'Record the payments first' : undefined}>{saving ? 'Checking out…' : 'Complete check-out'}</button></div>
     </form>
-  </Modal>;
+  </Screen>;
 }
 
 // UC38: record a damage / loss item, or confirm (possibly reduced) / waive one proposed by Housekeeping.
@@ -380,7 +380,7 @@ function Penalties({ booking, onClose }) {
   const submit = async (e) => { e.preventDefault(); const form = e.target; const f = Object.fromEntries(new FormData(form)); if (await act(`/frontdesk/bookings/${booking._id}/penalties`, 'POST', { itemName: pick && pick !== 'other' ? `${(catalog.data || []).find((i) => i._id === pick)?.name}${Number(qty) > 1 ? ` x${qty}` : ''}` : f.itemName, amount: Number(amt), description: f.description || undefined })) form.reset(); setPick(''); setQty(1); setAmt(''); };
   const confirm = (p) => { const value = window.prompt(`Confirmed amount (at most ${p.proposedAmount})`, p.proposedAmount); if (value !== null) act(`/frontdesk/penalties/${p._id}`, 'PATCH', { action: 'confirm', amount: Number(value) }); };
   const waive = (p) => { const reason = window.prompt('Reason for waiving this penalty'); if (reason) act(`/frontdesk/penalties/${p._id}`, 'PATCH', { action: 'waive', reason }); };
-  return <Modal title={`Penalties · ${booking.bookingReference}`} onClose={onClose}>
+  return <Screen title={`Penalties · ${booking.bookingReference}`} onClose={onClose}>
     {list.loading ? <p className="muted">Loading penalties…</p> : <DataTable cols={['Item', 'Proposed', 'Charged', 'Status', '']} rows={(list.data || []).map((p) => [p.itemName + (p.afterCheckout ? ' (after check-out)' : ''), money(p.proposedAmount), p.amount == null ? '—' : money(p.amount), p.status, ['proposed', 'confirmed'].includes(p.status) ? <span className="row-actions">{p.status === 'proposed' && <button className="btn sm" disabled={saving} onClick={() => confirm(p)}>Confirm</button>}<button className="btn sm danger" disabled={saving} onClick={() => waive(p)}>Waive</button></span> : p.waivedReason || ''])} />}
     {after && bill.data && bill.data.totalAmount - (bill.data.paidAmount || 0) > 0 && <>
       <p><strong>Guest owes {money(bill.data.totalAmount - (bill.data.paidAmount || 0))} after check-out.</strong> Record the payment when it arrives; a supplementary invoice is issued.</p>
@@ -394,20 +394,20 @@ function Penalties({ booking, onClose }) {
       <Field label="Description"><input name="description" maxLength={500} /></Field>
       <div className="full"><Notice error={list.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Close</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Record penalty'}</button></div>
     </form>
-  </Modal>;
+  </Screen>;
 }
 
 function AddService({ booking, onClose }) {
   const services = useApi('/front-desk/services'); const detail = useApi(`/bookings/${booking._id}`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
   const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${booking._id}/services`, { method: 'POST', body: { ...f, quantity: Number(f.quantity) } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
   const voidLine = async (line) => { const reason = window.prompt(`Reason for voiding ${line.name}:`); if (!reason) return; try { await api(`/front-desk/bookings/${booking._id}/services/${line._id}/void`, { method: 'POST', body: { reason } }); detail.reload(); } catch (x) { setError(x); } };
-  return <Modal title={`Add service · ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
+  return <Screen title={`Add service · ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
     <Field label="Service"><select name="serviceId" required disabled={services.loading}><option value="">Select a service</option>{services.data?.map((s) => <option key={s._id} value={s._id}>{s.name} · {money(s.unitPrice)}</option>)}</select></Field>
     <Field label="Quantity"><input name="quantity" type="number" min="1" max="100" defaultValue="1" required /></Field>
     <div className="full"><Notice error={services.error || detail.error || error} /></div>
     <div className="full">{detail.data?.services?.length > 0 && <DataTable cols={['Recorded service', 'Amount', 'Status', '']} rows={detail.data.services.map((line) => [line.name, money(line.amount), line.status || 'active', line.status !== 'voided' ? <button type="button" className="btn sm danger" onClick={() => voidLine(line)}>Void</button> : ''])} />}</div>
     <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || services.loading}>{saving ? 'Adding…' : 'Add service'}</button></div>
-  </form></Modal>;
+  </form></Screen>;
 }
 
 // UC18: during the stay a room of the same or a higher-priced type (an upgrade is always charged); before check-in the
@@ -423,14 +423,14 @@ function ChangeRoom({ booking, onClose }) {
     catch (x) { setError(x); } finally { setSaving(false); }
   };
   const diff = (o) => (o.difference > 0 ? ` · +${money(o.difference)}` : o.difference < 0 ? ` · −${money(-o.difference)}` : ' · same price');
-  return <Modal title={`${byType ? 'Change room type' : 'Change room'} · ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
+  return <Screen title={`${byType ? 'Change room type' : 'Change room'} · ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
     <p className="full muted">{byType ? 'Before check-in the room type changes for the whole stay; the deposit does not change. The room itself is chosen at check-in.' : 'The remaining nights are charged at the new room type; the old room goes to cleaning.'}</p>
     {options.meta?.onlyLower && <p className="full note">No room of the booked or a higher-priced type is free: only lower-priced types are offered.</p>}
     <Field label={byType ? 'Available room type' : 'Available room'}><select value={pick} onChange={(e) => setPick(e.target.value)} required disabled={options.loading}><option value="">{byType ? 'Select a room type' : 'Select a room'}</option>{options.data?.map((o) => <option key={o._id} value={o._id}>{byType ? o.roomType.name : `Room ${o.roomNumber} · ${o.roomType?.name}`}{diff(o)}</option>)}</select></Field>
     {chosen?.lower && <label className="check full"><input type="checkbox" checked={agrees} onChange={(e) => setAgrees(e.target.checked)} required /> The guest agrees to the lower-priced room type</label>}
     {byType && booking.couponCode && <label className="check full"><input type="checkbox" checked={dropCoupon} onChange={(e) => setDropCoupon(e.target.checked)} /> If the coupon {booking.couponCode} no longer applies, the guest agrees to continue without the discount</label>}
     <div className="full"><Notice error={options.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || options.loading || !options.data?.length}>{saving ? 'Saving…' : 'Confirm change'}</button></div>
-  </form></Modal>;
+  </form></Screen>;
 }
 
 // UC17: an approved check-in request pre-fills the guests and the ID number, which are checked against the document.
@@ -438,13 +438,13 @@ function CheckInBooking({ booking, onClose }) {
   const rooms = useApi(`/front-desk/bookings/${booking._id}/available-rooms`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
   const pre = rooms.meta?.request;
   const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${booking._id}/check-in`, { method: 'POST', body: { ...f, guestCount: Number(f.guestCount) } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
-  if (rooms.loading) return <Modal title={`Check in ${booking.bookingReference}`} onClose={onClose}><p className="muted">Loading rooms…</p></Modal>;
-  return <Modal title={`Check in ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
+  if (rooms.loading) return <Screen title={`Check in ${booking.bookingReference}`} onClose={onClose}><p className="muted">Loading rooms…</p></Screen>;
+  return <Screen title={`Check in ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
     {pre && <p className="full note">Pre-filled from the guest's check-in request: verify it against the original ID document.</p>}
     <Field label="Available room"><select name="roomId" required><option value="">Select a room</option>{rooms.data?.map((r) => <option key={r._id} value={r._id}>Room {r.roomNumber} · Floor {r.floor}</option>)}</select></Field>
     <Field label="Number of guests"><input name="guestCount" type="number" min="1" defaultValue={pre?.guestCount || booking.rooms?.[0]?.guestCount || 1} required /></Field><Field label="ID / passport number"><input name="idDocumentNo" defaultValue={pre?.idDocumentNo || ''} required /></Field>
     <div className="full"><Notice error={rooms.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || !rooms.data?.length}>{saving ? 'Checking in…' : 'Confirm check-in'}</button></div>
-  </form></Modal>;
+  </form></Screen>;
 }
 
 // UC16 at the desk: the ID document is checked here; the bank account for a refund is asked later, in UC21 (BR-17).
@@ -456,27 +456,27 @@ function CancelBooking({ booking, onClose }) {
     try { setDone((await api(`/front-desk/bookings/${booking._id}/cancel`, { method: 'POST', body: hotel ? { hotelCaused: true, ...(f.reason ? { reason: f.reason } : {}) } : { reason: f.reason } })).message); }
     catch (x) { setError(x); } finally { setSaving(false); }
   };
-  if (done) return <Modal title={`Cancel ${booking.bookingReference}`} onClose={onClose}><Notice ok={done} /><p className="muted">A paid deposit is reviewed in Cancellations; a refund is then handled in Refunds, where the customer's bank account is entered.</p><div className="modal-actions"><button className="btn primary" onClick={onClose}>Close</button></div></Modal>;
-  return <Modal title={`Cancel ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
+  if (done) return <Screen title={`Cancel ${booking.bookingReference}`} onClose={onClose}><Notice ok={done} /><p className="muted">A paid deposit is reviewed in Cancellations; a refund is then handled in Refunds, where the customer's bank account is entered.</p><div className="modal-actions"><button className="btn primary" onClick={onClose}>Close</button></div></Screen>;
+  return <Screen title={`Cancel ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
     <p className="full muted">Check that the ID document matches the name of the person who made the booking. For a request by phone use Cancellations (code sent by e-mail).</p>
     <label className="check full"><input type="checkbox" checked={hotel} onChange={(e) => setHotel(e.target.checked)} /> The hotel cannot provide the room (100% refund, approved at once)</label>
     <Field label={hotel ? 'Reason (optional)' : 'Cancellation reason'}><input name="reason" required={!hotel} maxLength={500} /></Field>
     <div className="full"><Notice error={error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Confirm cancellation'}</button></div>
-  </form></Modal>;
+  </form></Screen>;
 }
 
 function EditBooking({ booking, onClose }) {
   const detail = useApi(`/bookings/${booking._id}`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
-  if (detail.loading) return <Modal title="Modify booking" onClose={onClose}><p className="muted">Loading booking…</p></Modal>;
+  if (detail.loading) return <Screen title="Modify booking" onClose={onClose}><p className="muted">Loading booking…</p></Screen>;
   const b = detail.data || booking; const checkedOut = b.status === 'checked_out';
   const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${b._id}`, { method: 'PATCH', body: { fullName: f.fullName, phone: f.phone, ...(f.idDocumentNo ? { idDocumentNo: f.idDocumentNo } : {}), ...(checkedOut ? {} : { ...(b.status === 'checked_in' ? {} : { checkInDate: f.checkInDate }), checkOutDate: f.checkOutDate, guestCount: Number(f.guestCount) }), ...(f.dropCoupon ? { dropCoupon: true } : {}) } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
-  return <Modal title={b.status === 'checked_in' ? 'Extend or edit stay' : 'Modify booking'} onClose={onClose}><form className="form" onSubmit={submit}>
+  return <Screen title={b.status === 'checked_in' ? 'Extend or edit stay' : 'Modify booking'} onClose={onClose}><form className="form" onSubmit={submit}>
     {!checkedOut && <p className="full muted">{b.status === 'checked_in' ? 'Extra nights are priced at the rate of each night and need no deposit.' : 'The deposit already paid does not change; the difference is paid at check-out.'}</p>}
     {!checkedOut && b.couponCode && <label className="check full"><input type="checkbox" name="dropCoupon" /> If the coupon {b.couponCode} no longer applies to the new stay, the guest agrees to continue without the discount</label>}
     <Field label="Guest full name"><input name="fullName" defaultValue={b.guestName} required /></Field><Field label="Phone"><input name="phone" defaultValue={b.guestPhone} required /></Field>{['checked_in', 'checked_out'].includes(b.status) && <Field label="ID / passport number"><input name="idDocumentNo" defaultValue={b.guestIdDocumentNo} required /></Field>}
     {!checkedOut && <><Field label="Check-in"><input name="checkInDate" type="date" defaultValue={b.checkInDate?.slice(0, 10)} required disabled={b.status === 'checked_in'} /></Field><Field label="Check-out"><input name="checkOutDate" type="date" defaultValue={b.checkOutDate?.slice(0, 10)} required /></Field><Field label="Guests"><input name="guestCount" type="number" min="1" defaultValue={b.rooms?.[0]?.guestCount || 1} required /></Field></>}
     <div className="full"><Notice error={detail.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
-  </form></Modal>;
+  </form></Screen>;
 }
 
 function WalkInBooking({ onClose }) {
@@ -488,7 +488,7 @@ function WalkInBooking({ onClose }) {
     try { await api('/front-desk/bookings', { method: 'POST', body: { ...f, guestCount: Number(f.guestCount) } }); onClose(); }
     catch (x) { setError(x); } finally { setSaving(false); }
   };
-  return <Modal title="Create walk-in booking" onClose={onClose}>
+  return <Screen title="Create walk-in booking" onClose={onClose}>
     <form className="form" onSubmit={submit}>
       <p className="full muted">Walk-in booking · no deposit required</p>
       <Field label="Check-in"><input name="checkInDate" type="date" required /></Field>
@@ -502,28 +502,7 @@ function WalkInBooking({ onClose }) {
       <div className="full"><Notice error={types.error || error} /></div>
       <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || types.loading}>{saving ? 'Creating…' : 'Create booking'}</button></div>
     </form>
-  </Modal>;
-}
-
-function FrontDesk() {
-  const { user } = useAuth();
-  const fd = useFrontDesk(true);
-  const [checkingIn, setCheckingIn] = useState(null);
-  const [checkingOut, setCheckingOut] = useState(null);
-  const done = (set) => () => { set(null); fd.reload(); };
-  return (
-    <>
-      <PageHead title="Check-in / Check-out" sub="Today’s arrivals and departures, including overdue ones" />
-      <Notice error={fd.arrivals.error || fd.inHouse.error} />
-      <div className="qgrid">
-        <Queue title="Arrivals" rows={fd.arrivals.data || []} loading={fd.arrivals.loading} empty="No arrivals waiting." action="Check in" onAction={user.permissions.includes('stays.check_in') ? setCheckingIn : null} />
-        <Queue title="Departures" rows={fd.departures} loading={fd.inHouse.loading} empty="No departures due today." action="Check out" onAction={user.permissions.includes('stays.check_out') ? setCheckingOut : null} />
-        <div className="qfull"><Queue title="In-house guests" rows={fd.inHouse.data || []} loading={fd.inHouse.loading} empty="Nobody is checked in." /></div>
-      </div>
-      {checkingIn && <CheckInBooking booking={checkingIn} onClose={done(setCheckingIn)} />}
-      {checkingOut && <CheckOutBooking booking={checkingOut} onClose={done(setCheckingOut)} />}
-    </>
-  );
+  </Screen>;
 }
 
 const METHOD = { cash: 'Cash', pos: 'Card (POS)', credit_card: 'Card', e_wallet: 'E-wallet', bank_transfer: 'Bank transfer' };
@@ -597,13 +576,13 @@ const PAGES = {
   '#/admin/customers': CustomerAccounts,
   '#/admin/users': Users,
   '#/admin/staff': Users,
-  '#/admin/roles': Roles,
   '#/admin/coupons': Coupons,
   '#/admin/revenue': Revenue,
   '#/admin/occupancy': Occupancy,
-  '#/admin/profile': Profile,
+  '#/admin/notifications': () => <NotificationsPage bookingHref="#/admin/bookings" />,
+  '#/admin/profile': () => <Profile base="#/admin/profile" />,
+  '#/admin/profile/password': () => <ChangePassword base="#/admin/profile" />,
   '#/admin/bookings': Bookings,
-  '#/admin/frontdesk': FrontDesk,
   '#/admin/payments': Payments,
   '#/admin/invoices': Invoices,
   '#/admin/rooms': AdminRoomMap,
@@ -625,9 +604,10 @@ const PAGES = {
 
 const Forbidden = () => <><PageHead title="No access" sub="Your role does not include this area." /><a className="btn" href="#/admin">Back to dashboard</a></>;
 
-const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/roles': 'roles.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read', '#/admin/occupancy': 'revenue.read', '#/admin/policy': 'policies.manage', '#/admin/cancellations': 'cancellations.review', '#/admin/refunds': 'refunds.handle', '#/admin/room-availability': 'rooms.search', '#/admin/cleaning': 'cleaning_tasks.own.read', '#/admin/cleaning-request': 'cleaning_tasks.ad_hoc.create', '#/admin/stay-requests': 'stay_requests.manage' };
+const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read', '#/admin/occupancy': 'revenue.read', '#/admin/policy': 'policies.manage', '#/admin/cancellations': 'cancellations.review', '#/admin/refunds': 'refunds.handle', '#/admin/room-availability': 'rooms.search', '#/admin/cleaning': 'cleaning_tasks.own.read', '#/admin/cleaning-request': 'cleaning_tasks.ad_hoc.create', '#/admin/stay-requests': 'stay_requests.manage' };
 
-export default function Admin({ route }) {
+export default function Admin({ route: fullRoute }) {
+  const route = fullRoute.split('?')[0];
   const { user, loading } = useAuth();
   const [drawer, setDrawer] = useState(false);
   if (loading) return <p className="muted center-msg">Loading…</p>;

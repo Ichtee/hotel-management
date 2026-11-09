@@ -1,14 +1,14 @@
 import { useState } from 'react';
 import { api, dateLabel, inputDate, money } from '../api/client.js';
-import { DataTable, Field, Modal, Notice, PageHead, useApi } from '../ui.jsx';
+import { DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useEditPage, useScreen } from '../ui.jsx';
 
 const BEDS = ['King bed', 'Queen bed', '2 single beds', '2 queen beds'];
 
 /* UC24 room types (add, edit, deactivate, delete when nothing is linked) and UC25 seasonal prices. */
 export default function AdminRoomTypes() {
   const list = useApi('/room-types?limit=100');
-  const [edit, setEdit] = useState(null); // {} = new
-  const [pricing, setPricing] = useState(null);
+  const E = useEditPage(list.data);
+  const sc = useScreen();
   const [msg, setMsg] = useState(null);
   const done = (text) => { setMsg(text); list.reload(); };
   const toggle = async (t) => {
@@ -20,9 +20,15 @@ export default function AdminRoomTypes() {
     try { await api(`/room-types/${t._id}`, { method: 'DELETE' }); done(`${t.name} deleted.`); }
     catch (x) { setMsg(null); alert(x.message); }
   };
+  if (E.missing) return <WaitScreen loading={list.loading} onClose={E.close} />;
+  if (E.open) return <RoomTypeForm type={E.open} onClose={E.close} onSaved={(text) => { done(text); E.close(); }} />;
+  if (sc.name === 'rates') {
+    const t = (list.data || []).find((x) => x._id === sc.id);
+    return t ? <SeasonalRates type={t} onClose={() => { list.reload(); sc.close(); }} /> : <WaitScreen loading={list.loading} onClose={sc.close} />;
+  }
   return (
     <>
-      <PageHead title="Room types" sub="Categories, capacity, amenities and base price. Seasonal rates override the base price for their dates." action="Add room type" onAction={() => setEdit({})} />
+      <PageHead title="Room types" sub="Categories, capacity, amenities and base price. Seasonal rates override the base price for their dates." action="Add room type" onAction={E.add} />
       <Notice error={list.error} ok={msg} />
       {list.loading ? <p className="muted">Loading…</p> : !list.data?.length ? <p className="empty">No room types yet.</p> : (
         <DataTable cols={['', 'Room type', 'Bed & guests', 'Base / night', 'Status', '']} rows={list.data.map((t) => [
@@ -32,8 +38,8 @@ export default function AdminRoomTypes() {
           <span key="p" style={{ whiteSpace: 'nowrap' }}>{money(t.basePrice)}<small className="muted" style={{ display: 'block' }}>{t.seasonalPricing?.length ? `+ ${t.seasonalPricing.length} seasonal rate${t.seasonalPricing.length > 1 ? 's' : ''}` : 'Base price only'}</small></span>,
           t.isActive ? 'active' : 'inactive',
           <span key="a" className="row-actions">
-            <button className="btn sm" onClick={() => setEdit(t)}>Edit</button>
-            <button className="btn sm" onClick={() => setPricing(t)}>Rates</button>
+            <button className="btn sm" onClick={() => E.edit(t)}>Edit</button>
+            <button className="btn sm" onClick={() => sc.go('rates', t._id)}>Rates</button>
             <details className="rowmenu">
               <summary className="btn sm" aria-label="More actions">More ▾</summary>
               <div>
@@ -44,8 +50,6 @@ export default function AdminRoomTypes() {
           </span>,
         ])} />
       )}
-      {edit && <RoomTypeForm type={edit} onClose={() => setEdit(null)} onSaved={(text) => { setEdit(null); done(text); }} />}
-      {pricing && <SeasonalRates type={pricing} onClose={() => { setPricing(null); list.reload(); }} />}
     </>
   );
 }
@@ -69,7 +73,7 @@ function RoomTypeForm({ type, onClose, onSaved }) {
     } catch (x) { setError(x); } finally { setSaving(false); }
   };
   const fe = error?.fields || {};
-  return <Modal title={isNew ? 'Add room type' : `Edit ${type.name}`} onClose={onClose}><form className="form-grid" onSubmit={submit}>
+  return <Screen title={isNew ? 'Add room type' : `Edit ${type.name}`} onClose={onClose}><form className="form-grid" onSubmit={submit}>
     <div className="full"><Field label="Name" error={fe.name}><input name="name" defaultValue={type.name} required maxLength={100} /></Field></div>
     <Field label="Bed" error={fe.bedType}><select name="bedType" defaultValue={type.bedType || 'King bed'}>{[...new Set([...BEDS, type.bedType].filter(Boolean))].map((b) => <option key={b}>{b}</option>)}</select></Field>
     <Field label="Size (m²)" error={fe.roomSizeSqm}><input name="roomSizeSqm" type="number" min="1" defaultValue={type.roomSizeSqm || 30} required /></Field>
@@ -80,7 +84,7 @@ function RoomTypeForm({ type, onClose, onSaved }) {
     <div className="full"><Field label="Description" error={fe.description}><textarea name="description" maxLength={5000} defaultValue={type.description || ''} /></Field></div>
     <div className="full"><Notice error={error} /></div>
     <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button></div>
-  </form></Modal>;
+  </form></Screen>;
 }
 
 // UC25: rates for date periods; overlapping rates are refused (MSG-60). Existing bookings keep their price (BR-35).
@@ -101,7 +105,7 @@ function SeasonalRates({ type, onClose }) {
   };
   const remove = (r) => confirm(`Delete the rate "${r.description || 'Custom'}"? Its dates go back to the base price; existing bookings keep their price.`)
     && save(rates.filter((x) => x !== r), 'Rate deleted.');
-  return <Modal title={`Seasonal rates · ${type.name}`} onClose={onClose}>
+  return <Screen title={`Seasonal rates · ${type.name}`} onClose={onClose}>
     <p className="muted">Base price {money(type.basePrice)} / night applies on every date without a rate.</p>
     {rates.length ? <DataTable cols={['Rate', 'From', 'To', 'Price / night', '']} rows={rates.map((r, i) => [
       r.description || 'Custom', dateLabel(r.startDate), dateLabel(r.endDate), money(r.price),
@@ -115,5 +119,5 @@ function SeasonalRates({ type, onClose }) {
       <div className="full"><Notice error={error} ok={ok} /></div>
       <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Close</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Add rate'}</button></div>
     </form>
-  </Modal>;
+  </Screen>;
 }

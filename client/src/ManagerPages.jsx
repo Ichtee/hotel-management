@@ -1,20 +1,23 @@
 import { useState } from 'react';
 import { api, dateLabel, money } from './api/client.js';
-import { DataTable, Field, Modal, Notice, PageHead, useApi } from './ui.jsx';
+import { DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useEditPage, useScreen } from './ui.jsx';
 
 /* UC34: catalogs of additional services and compensation items. Entries are deactivated, never deleted (BR-43). */
 export function Catalog() {
-  const [tab, setTab] = useState('services');
-  const [edit, setEdit] = useState(null);
+  const tab = new URLSearchParams(location.hash.split('?')[1] || '').get('tab') || 'services'; // in the URL so a refresh keeps the tab
+  const setTab = (k) => { location.hash = `#/admin/catalog?tab=${k}`; };
   const list = useApi(`/catalog/${tab}`);
+  const E = useEditPage(list.data);
   const [msg, setMsg] = useState(null);
   const toggle = async (e) => {
     try { await api(`/catalog/${tab}/${e._id}`, { method: 'PATCH', body: { isActive: !e.isActive } }); setMsg(`${e.name} ${e.isActive ? 'deactivated' : 'reactivated'}.`); list.reload(); } catch (x) { setMsg(null); alert(x.message); }
   };
   const label = tab === 'services' ? 'service' : 'compensation item';
+  if (E.missing) return <WaitScreen loading={list.loading} onClose={E.close} />;
+  if (E.open) return <CatalogEntry tab={tab} label={label} entry={E.open} onClose={E.close} onSaved={(m) => { setMsg(m); list.reload(); E.close(); }} />;
   return (
     <>
-      <PageHead title="Services & compensation items" sub="What the front desk can add to a bill: extra services, and the price of damaged or missing items" action={`Add ${label}`} onAction={() => setEdit({})} />
+      <PageHead title="Services & compensation items" sub="What the front desk can add to a bill: extra services, and the price of damaged or missing items" action={`Add ${label}`} onAction={E.add} />
       <div className="seg" role="tablist" style={{ maxWidth: 420, marginBottom: '1rem' }}>
         {[['services', 'Services'], ['compensation-items', 'Compensation items']].map(([k, l]) => (
           <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => { setTab(k); setMsg(null); }}>{l}</button>
@@ -24,11 +27,10 @@ export function Catalog() {
       {list.loading ? <p className="muted">Loading…</p> : !list.data?.length ? <p className="empty">No entries yet.</p> : (
         <DataTable cols={['Name', tab === 'services' ? 'Unit price' : 'Compensation price', 'Status', '']} rows={list.data.map((e) => [
           e.name, money(e.price), e.isActive ? 'active' : 'inactive',
-          <span key="a" className="row-actions"><button className="btn sm" onClick={() => setEdit(e)}>Edit</button><button className={`btn sm${e.isActive ? ' danger' : ''}`} onClick={() => toggle(e)}>{e.isActive ? 'Deactivate' : 'Reactivate'}</button></span>,
+          <span key="a" className="row-actions"><button className="btn sm" onClick={() => E.edit(e)}>Edit</button><button className={`btn sm${e.isActive ? ' danger' : ''}`} onClick={() => toggle(e)}>{e.isActive ? 'Deactivate' : 'Reactivate'}</button></span>,
         ])} />
       )}
       <p className="muted" style={{ marginTop: '.75rem' }}>An entry already used on a booking keeps its recorded amount; deactivating only hides it from new bills.</p>
-      {edit && <CatalogEntry tab={tab} label={label} entry={edit} onClose={() => setEdit(null)} onSaved={(m) => { setEdit(null); setMsg(m); list.reload(); }} />}
     </>
   );
 }
@@ -45,14 +47,14 @@ function CatalogEntry({ tab, label, entry, onClose, onSaved }) {
     } catch (x) { setError(x); setSaving(false); }
   };
   return (
-    <Modal title={entry._id ? `Edit ${label}` : `Add ${label}`} onClose={onClose}>
+    <Screen title={entry._id ? `Edit ${label}` : `Add ${label}`} onClose={onClose}>
       <form className="form" onSubmit={submit}>
         <Field label="Name" error={error?.fields?.name}><input name="name" defaultValue={entry.name} maxLength="120" required autoFocus /></Field>
         <Field label="Price (VND)" error={error?.fields?.price}><input name="price" type="number" min={tab === 'services' ? 0 : 1} step="1000" defaultValue={entry.price} required /></Field>
         <div className="full"><Notice error={error} /></div>
         <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button></div>
       </form>
-    </Modal>
+    </Screen>
   );
 }
 
@@ -98,12 +100,17 @@ export function StaffPermissions() {
 /* UC12 / BR-23: the manager hides a review that breaks the rules (with a reason) or shows it again. */
 export function Reviews() {
   const types = useApi('/room-types?limit=100');
-  const [typeId, setTypeId] = useState('');
+  const typeId = new URLSearchParams(location.hash.split('?')[1] || '').get('type') || '';
+  const setTypeId = (v) => { location.hash = `#/admin/reviews?type=${v}`; };
   const id = typeId || types.data?.[0]?._id;
   const list = useApi(id ? `/room-types/${id}/reviews?limit=50` : null, Boolean(id));
-  const [hiding, setHiding] = useState(null); const [msg, setMsg] = useState(null);
+  const sc = useScreen(); const [msg, setMsg] = useState(null);
   const show = async (r) => { try { await api(`/reviews/${r._id}/visibility`, { method: 'PATCH', body: { hidden: false } }); setMsg('Review is visible again.'); list.reload(); } catch (x) { alert(x.message); } };
   const s = list.meta?.summary;
+  if (sc.name === 'hide') {
+    const r = (list.data || []).find((x) => x._id === sc.id);
+    return r ? <HideReview review={r} onClose={sc.close} onDone={() => { setMsg('Review hidden.'); list.reload(); sc.close(); }} /> : <WaitScreen loading={list.loading} onClose={sc.close} />;
+  }
   return (
     <>
       <PageHead title="Guest reviews" sub="Hide a review with offensive language, personal data or spam; guests then no longer see it" />
@@ -116,10 +123,9 @@ export function Reviews() {
         <DataTable cols={['Date', 'Rating', 'Review', 'Status', '']} rows={list.data.map((r) => [
           dateLabel(r.createdAt), '★'.repeat(r.rating), <span key="t"><b>{r.title}</b>{r.title && r.comment ? ' — ' : ''}{r.comment}{r.hiddenReason && <small className="muted"><br />Hidden: {r.hiddenReason}</small>}</span>,
           r.status === 'hidden' ? 'hidden' : 'visible',
-          r.status === 'hidden' ? <button key="s" className="btn sm" onClick={() => show(r)}>Show</button> : <button key="h" className="btn sm" onClick={() => setHiding(r)}>Hide</button>,
+          r.status === 'hidden' ? <button key="s" className="btn sm" onClick={() => show(r)}>Show</button> : <button key="h" className="btn sm" onClick={() => sc.go('hide', r._id)}>Hide</button>,
         ])} />
       )}
-      {hiding && <HideReview review={hiding} onClose={() => setHiding(null)} onDone={() => { setHiding(null); setMsg('Review hidden.'); list.reload(); }} />}
     </>
   );
 }
@@ -131,13 +137,13 @@ function HideReview({ review, onClose, onDone }) {
     try { await api(`/reviews/${review._id}/visibility`, { method: 'PATCH', body: { hidden: true, reason } }); onDone(); } catch (x) { setError(x); }
   };
   return (
-    <Modal title="Hide review" onClose={onClose}>
+    <Screen title="Hide review" onClose={onClose}>
       <form className="form" onSubmit={submit}>
         <Field label="Reason"><select name="reason" required defaultValue=""><option value="" disabled>Choose a reason</option><option>Offensive language</option><option>Personal data</option><option>Spam or advertising</option><option>Not about this stay</option></select></Field>
         <div className="full"><Notice error={error} /></div>
         <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary">Hide review</button></div>
       </form>
-    </Modal>
+    </Screen>
   );
 }
 

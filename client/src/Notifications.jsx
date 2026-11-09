@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api/client.js';
-import { useApi } from './ui.jsx';
+import { PageHead, useApi } from './ui.jsx';
 
 const ago = (iso) => {
   const m = Math.round((Date.now() - new Date(iso)) / 60000);
@@ -11,7 +11,7 @@ const ago = (iso) => {
 };
 
 /* UC13: the signed-in user's notifications (BR-28). Opening one marks it read. */
-export default function NotificationBell({ bookingHref }) {
+export default function NotificationBell({ bookingHref, allHref }) {
   const list = useApi('/notifications');
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -47,8 +47,35 @@ export default function NotificationBell({ bookingHref }) {
                 ))}
               </ul>
             )}
+          {allHref && <a className="bell-all" href={allHref} onClick={() => setOpen(false)}>View all notifications</a>}
         </div>
       )}
     </div>
+  );
+}
+
+export function NotificationsPage({ bookingHref }) {
+  const list = useApi('/notifications');
+  const [unreadOnly, setUnreadOnly] = useState(false);
+  const read = async (body) => { try { await api('/notifications/read', { method: 'POST', body }); list.reload(); } catch { /* the list simply stays unread */ } };
+  const unread = list.meta?.unread || 0;
+  const items = (list.data || []).filter((n) => !unreadOnly || !n.isRead);
+  const open = (n) => { if (!n.isRead) read({ id: n._id }); if (n.bookingId && bookingHref) location.hash = bookingHref; };
+  return (
+    <>
+      <PageHead title="Notifications" sub={unread ? `${unread} unread` : 'You are all caught up'} extra={unread > 0 ? <button className="btn" onClick={() => read({})}>Mark all as read</button> : null} />
+      <div className="chips" role="group" aria-label="Filter notifications">
+        {[[false, 'All'], [true, 'Unread']].map(([v, l]) => <button key={l} className={unreadOnly === v ? 'chip on' : 'chip'} aria-pressed={unreadOnly === v} onClick={() => setUnreadOnly(v)}>{l}</button>)}
+      </div>
+      {list.loading ? <p className="muted">Loading…</p> : list.error ? <p role="alert" className="note bad-note">Could not load notifications.</p> : !items.length ? <p className="empty">{unreadOnly ? 'No unread notifications.' : 'You have no notifications.'}</p> : (
+        <ul className="notif-list">
+          {items.map((n) => (
+            <li key={n._id} className={n.isRead ? '' : 'unread'}>
+              <button type="button" onClick={() => open(n)}><b>{n.title}</b><span>{n.message}</span><small>{ago(n.createdAt)}</small></button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }

@@ -17,6 +17,78 @@ export const Field = ({ label, error, children }) => (
   <label className={error ? 'has-err' : ''}>{label}{children}{error && <small className="err">{error}</small>}</label>
 );
 
+// A task is its own page with its own URL: #/path?screen=name&id=123. Back, refresh and a copied link all work.
+const hashParts = () => { const [base, qs = ''] = location.hash.split('?'); return [base, new URLSearchParams(qs)]; };
+let navigated = false;
+export function useScreen() {
+  const read = () => { const [, q] = hashParts(); return { name: q.get('screen') || '', id: q.get('id') || '' }; };
+  const [s, setS] = useState(read);
+  useEffect(() => {
+    const on = () => setS(read());
+    addEventListener('hashchange', on);
+    return () => removeEventListener('hashchange', on);
+  }, []);
+  const go = (name, id = '') => {
+    const [base, q] = hashParts();
+    q.set('screen', name);
+    if (id) q.set('id', id); else q.delete('id');
+    navigated = true;
+    location.hash = `${base}?${q}`;
+  };
+  const close = () => {
+    if (navigated) { navigated = false; history.back(); return; }
+    const [base, q] = hashParts();
+    q.delete('screen'); q.delete('id');
+    location.hash = q.toString() ? `${base}?${q}` : base;
+  };
+  return { ...s, go, close };
+}
+// New / edit pages of a list: #/path?screen=new, or ?screen=edit&id=... (items are the loaded list).
+export function useEditPage(items) {
+  const sc = useScreen();
+  const open = sc.name === 'new' ? {} : sc.name === 'edit' ? (items || []).find((x) => x._id === sc.id) : undefined;
+  return { open, missing: sc.name === 'edit' && !open, add: () => sc.go('new'), edit: (x) => sc.go('edit', x._id), close: sc.close };
+}
+export function Dialog({ title, onClose, children }) {
+  const heading = useRef(null);
+  useEffect(() => {
+    const before = document.activeElement;
+    heading.current?.focus();
+    document.body.classList.add('dlg-open');
+    const esc = (e) => { if (e.key === 'Escape') onClose(); };
+    addEventListener('keydown', esc);
+    return () => { removeEventListener('keydown', esc); document.body.classList.remove('dlg-open'); before?.focus?.(); };
+  }, []);
+  return createPortal(
+    <div className="dlg-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+        <div className="dlg-head"><h2 id="dlg-title" tabIndex={-1} ref={heading}>{title}</h2><button type="button" className="btn sm" aria-label="Close" onClick={onClose}>✕</button></div>
+        <div className="dlg-body">{children}</div>
+      </div>
+    </div>, document.body);
+}
+export const WaitScreen = ({ loading, onClose }) => (
+  <Screen title={loading ? 'Loading…' : 'Not found'} onClose={onClose}><p className="muted">{loading ? 'Loading…' : 'This item was not found.'}</p></Screen>
+);
+export function Screen({ title, onClose, children }) {
+  const heading = useRef(null);
+  useEffect(() => {
+    heading.current?.focus();
+    const esc = (e) => { if (e.key === 'Escape') onClose(); };
+    addEventListener('keydown', esc);
+    return () => removeEventListener('keydown', esc);
+  }, []);
+  return (
+    <section className="screen">
+      <div className="screen-head">
+        <button type="button" className="btn back" onClick={onClose}><span aria-hidden="true">←</span> Back</button>
+        <h1 tabIndex={-1} ref={heading}>{title}</h1>
+      </div>
+      <div className="screen-body">{children}</div>
+    </section>
+  );
+}
+
 // A task opens as its own screen in the page area (no overlay): the page behind is hidden, the header shows "Back",
 // and the browser Back button returns to the list. One history entry is pushed per screen and removed when it closes.
 let screens = 0;

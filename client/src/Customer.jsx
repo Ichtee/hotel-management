@@ -1,20 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from './context/Auth.jsx';
 import { AuthShell, AuthTabs, SignIn, Register, ForgotPassword, Captcha } from './AuthForms.jsx';
-import { Profile } from './AdminPages.jsx';
+import { ChangePassword, Profile } from './AdminPages.jsx';
 import { MyBookings } from './Bookings.jsx';
 import { roomApi } from './api/roomApi.js';
 import { PaymentPage, PaymentResult, SandboxGateway } from './Payments.jsx';
 import { api, money } from './api/client.js';
 import './resort.css';
-import NotificationBell from './Notifications.jsx';
+import NotificationBell, { NotificationsPage } from './Notifications.jsx';
 import { Notice } from './ui.jsx';
 
 const NAV = [
   { label: 'Home', href: '#/' },
   { label: 'Rooms', items: [['#/rooms', 'All rooms', 'Compare every room type'], ['#/rooms?cat=standard', 'Standard rooms', 'Deluxe & Superior'], ['#/rooms?cat=suite', 'Suites', 'Family & Presidential']] },
-  { label: 'Offers', href: '#/offers' },
-  { label: 'Help', items: [['#/offers', 'Booking policies', 'Deposit and cancellation']] }
+  { label: 'Offers & policies', href: '#/offers' }
 ];
 
 const parse = (route) => {
@@ -69,7 +68,7 @@ function SiteHeader({ route }) {
             {user ? (
               <>
                 <a className="btn gold" href="#/rooms" onClick={done}>Book now</a>
-                <NotificationBell bookingHref="#/my-bookings" />
+                <NotificationBell bookingHref="#/my-bookings" allHref="#/notifications" />
                 <div className="dd account">
                   <button className="acct" aria-expanded={open === 'acct'} aria-haspopup="true" onClick={() => setOpen(open === 'acct' ? null : 'acct')}>
                     <span className="avatar" aria-hidden="true">{(name || 'U')[0].toUpperCase()}</span>
@@ -576,7 +575,7 @@ function SiteFooter() {
   );
 }
 
-const PROTECTED = ['#/checkout', '#/confirmation', '#/my-bookings', '#/profile'];
+const PROTECTED = ['#/checkout', '#/confirmation', '#/my-bookings', '#/profile', '#/profile/password', '#/notifications'];
 
 export default function Customer({ route }) {
   const { user, loading } = useAuth();
@@ -585,7 +584,9 @@ export default function Customer({ route }) {
   let page;
   if (loading) page = <p className="muted c-wrap c-section">Loading…</p>;
   else if ((PROTECTED.includes(path) || path.startsWith('#/pay/')) && !user) { sessionStorage.setItem('next', route); page = <Auth note="Please sign in to continue." />; }
-  else if (path === '#/profile') page = <div className="c-wrap c-section"><Profile /></div>;
+  else if (path === '#/notifications') page = <div className="c-wrap c-section narrow"><NotificationsPage bookingHref="#/my-bookings" /></div>;
+  else if (path === '#/profile') page = <div className="c-wrap c-section"><Profile base="#/profile" /></div>;
+  else if (path === '#/profile/password') page = <div className="c-wrap c-section"><ChangePassword base="#/profile" /></div>;
   else
   if (path === '#/pay/result') page = <PaymentResult paymentId={q.payment} back={q.r} />;
   else if (path.startsWith('#/pay/sandbox/')) page = <SandboxGateway orderId={path.split('/')[3]} paymentId={q.payment} />;

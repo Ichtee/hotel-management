@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, dateLabel } from './api/client.js';
-import { DataTable, Field, Modal, Notice, PageHead, useApi } from './ui.jsx';
+import { DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useScreen } from './ui.jsx';
 
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date());
 const endOfMonth = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(Date.now() + 30 * 864e5));
@@ -8,7 +8,7 @@ const endOfMonth = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_C
 export default function HousekeepingAssignments() {
   const plans = useApi('/housekeeping-assignments?isActive=true&limit=100');
   const options = useApi('/housekeeping-assignments/options');
-  const [creating, setCreating] = useState(false);
+  const sc = useScreen();
   const [error, setError] = useState(null);
   const staff = options.data?.staff || [];
   const rooms = options.data?.rooms || [];
@@ -18,12 +18,12 @@ export default function HousekeepingAssignments() {
     if (!window.confirm(`Revoke ${labelFor(plan.staffId)}'s ${plan.shift} assignment?`)) return;
     try { await api(`/housekeeping-assignments/${plan._id}`, { method: 'DELETE', body: {} }); plans.reload(); } catch (x) { setError(x); }
   };
+  if (sc.name === 'new') return options.loading ? <WaitScreen loading onClose={sc.close} /> : <CreateAssignment staff={staff} rooms={rooms} onClose={sc.close} onSaved={() => { plans.reload(); sc.close(); }} />;
   return <>
-    <PageHead title="Housekeeping assignments" sub="Assign responsibility by room or floor and shift. Open tasks are automatically reassigned when a plan changes." action="New assignment" onAction={() => setCreating(true)} />
+    <PageHead title="Housekeeping assignments" sub="Assign responsibility by room or floor and shift. Open tasks are automatically reassigned when a plan changes." action="New assignment" onAction={() => sc.go('new')} />
     <Notice error={error || plans.error || options.error} />
     {plans.loading || options.loading ? <p className="muted">Loading assignments...</p> : <DataTable cols={['Staff member', 'Shift', 'Responsibility', 'Effective period', '']} rows={(plans.data || []).map((plan) => [labelFor(plan.staffId), plan.shift, roomScope(plan), `${dateLabel(plan.effectiveFrom)} - ${dateLabel(plan.effectiveTo)}`, <button className="btn sm danger" onClick={() => revoke(plan)}>Revoke</button>])} />}
     {!plans.loading && !plans.error && !(plans.data || []).length && <p className="muted center-msg">No active assignments. Create one so cleaning tasks can be assigned automatically.</p>}
-    {creating && <CreateAssignment staff={staff} rooms={rooms} onClose={() => setCreating(false)} onSaved={() => { setCreating(false); plans.reload(); }} />}
   </>;
 }
 
@@ -38,7 +38,7 @@ function CreateAssignment({ staff, rooms, onClose, onSaved }) {
     event.preventDefault(); const f = Object.fromEntries(new FormData(event.currentTarget)); setSaving(true); setError(null);
     try { await api('/housekeeping-assignments', { method: 'POST', body: { ...f, roomIds, floors } }); onSaved(); } catch (x) { setError(x); } finally { setSaving(false); }
   };
-  return <Modal title="New housekeeping assignment" onClose={onClose}>
+  return <Screen title="New housekeeping assignment" onClose={onClose}>
     <form className="form-grid" onSubmit={submit}>
       <Field label="Housekeeping staff" error={error?.fields?.staffId}><select name="staffId" required defaultValue=""><option value="">Select staff member</option>{staff.map((person) => <option value={person._id} key={person._id}>{person.customerProfile?.fullName || person.email}</option>)}</select></Field>
       <Field label="Shift" error={error?.fields?.shift}><select name="shift" defaultValue="morning"><option value="morning">Morning</option><option value="afternoon">Afternoon</option><option value="night">Night</option></select></Field>
@@ -48,5 +48,5 @@ function CreateAssignment({ staff, rooms, onClose, onSaved }) {
       <fieldset className="full"><legend>Specific rooms (optional when a floor is selected)</legend><div className="chips">{rooms.map((room) => <label key={room._id} className="check"><input type="checkbox" checked={roomIds.includes(room._id)} onChange={() => toggle(room._id, roomIds, setRoomIds)} /> {room.roomNumber}</label>)}</div></fieldset>
       <div className="full"><Notice error={error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving...' : 'Save assignment'}</button></div>
     </form>
-  </Modal>;
+  </Screen>;
 }

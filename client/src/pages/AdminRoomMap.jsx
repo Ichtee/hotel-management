@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { roomApi } from '../api/roomApi.js';
-import { Modal } from '../ui.jsx';
+import { Screen, WaitScreen, useScreen } from '../ui.jsx';
 
 const STATUS_CONFIG = {
   available: { label: 'Available', color: '#1f7a4c', desc: 'Ready for guest check-in' },
@@ -13,8 +13,8 @@ export default function AdminRoomMap() {
   const [rooms, setRooms] = useState([]);
   const [roomTypes, setRoomTypes] = useState([]);
   const [filterStatus, setFilterStatus] = useState('all');
-  const [selectedRoom, setSelectedRoom] = useState(null);
-  const [showAddModal, setShowAddModal] = useState(false);
+  const sc = useScreen();
+  const selectedRoom = sc.name === 'room' ? rooms.find((r) => r._id === sc.id) : null;
   const [newRoomNumber, setNewRoomNumber] = useState('');
   const [newRoomFloor, setNewRoomFloor] = useState('');
   const [newRoomTypeId, setNewRoomTypeId] = useState('');
@@ -83,7 +83,6 @@ export default function AdminRoomMap() {
       const res = await roomApi.updateRoomStatus(roomKey, newStatus);
       const saved = res?.data?.status || newStatus;
       setRooms(prev => prev.map(r => (r._id === roomKey || r.no === targetRoom.no) ? { ...r, status: saved } : r));
-      if (selectedRoom && (selectedRoom._id === roomKey || selectedRoom.no === targetRoom.no)) setSelectedRoom(prev => ({ ...prev, status: saved }));
       showToast(`Room ${targetRoom.no} is now "${STATUS_CONFIG[saved]?.label || saved}"`);
     } catch (err) {
       alert(err.message);
@@ -111,7 +110,7 @@ export default function AdminRoomMap() {
     try {
       await roomApi.createRoom(payload);
       showToast(`Room ${payload.roomNumber} created`);
-      setShowAddModal(false);
+      sc.close();
       setNewRoomNumber('');
       loadData();
     } catch (err) {
@@ -127,7 +126,7 @@ export default function AdminRoomMap() {
         await roomApi.deleteRoom(targetRoom._id);
       }
       setRooms(prev => prev.filter(r => r.no !== targetRoom.no));
-      setSelectedRoom(null);
+      sc.close();
       showToast(`Room ${targetRoom.no} deactivated`);
     } catch (err) {
       alert(err.message);
@@ -145,74 +144,8 @@ export default function AdminRoomMap() {
     maintenance: rooms.filter(r => r.status === 'maintenance').length
   };
 
-  return (
-    <div className="room-map-page">
-      {toastMessage && (
-        <div style={{
-          position: 'fixed', bottom: '24px', right: '24px', zIndex: 9999,
-          background: '#0f2742', color: '#fff', padding: '12px 20px', borderRadius: '10px',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.2)', fontSize: '0.9rem', fontWeight: 600
-        }}>
-          ✓ {toastMessage}
-        </div>
-      )}
-
-      <div className="page-head">
-        <div>
-          <h1>Room map</h1>
-          <p>Live status of every room. Put a room into Maintenance, add or deactivate rooms.</p>
-        </div>
-        <div className="head-actions">
-          <button className="btn primary" onClick={() => setShowAddModal(true)}>+ Add room</button>
-        </div>
-      </div>
-
-      {/* One row of filters: each count is a button, its dot is the colour key of the map (no colour-only meaning: the label is there too). */}
-      <div className="room-filters" role="group" aria-label="Filter rooms by status">
-        <button type="button" className={`room-filter ${filterStatus === 'all' ? 'on' : ''}`} aria-pressed={filterStatus === 'all'} onClick={() => setFilterStatus('all')}>
-          <span>All rooms</span><strong>{counts.total}</strong>
-        </button>
-        {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-          <button key={key} type="button" className={`room-filter ${filterStatus === key ? 'on' : ''}`} aria-pressed={filterStatus === key} onClick={() => setFilterStatus(filterStatus === key ? 'all' : key)}>
-            <span><i className={`dot s-${key}`} aria-hidden="true" />{cfg.label}</span><strong>{counts[key]}</strong>
-          </button>
-        ))}
-      </div>
-
-      {/* Floors grid */}
-      {floors.map(fl => {
-        const floorRooms = filteredRooms.filter(r => String(r.no)[0] === fl);
-        if (floorRooms.length === 0) return null;
-        return (
-          <section key={fl} className="floor" style={{ background: '#fff', padding: '1.25rem', borderRadius: '14px', border: '1px solid var(--line)', marginBottom: '1.25rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-              <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Floor {fl}</h2>
-              <span className="muted" style={{ fontSize: '0.85rem' }}>{floorRooms.length} room{floorRooms.length === 1 ? "" : "s"}</span>
-            </div>
-            <div className="rooms">
-              {floorRooms.map(r => (
-                <button
-                  key={r.no}
-                  onClick={() => setSelectedRoom(r)}
-                  className={`room s-${r.status}`}
-                  style={{
-                    position: 'relative',
-                    cursor: 'pointer',
-                    outline: selectedRoom?.no === r.no ? '3px solid #ffd700' : 'none'
-                  }}
-                  title={`Room ${r.no} (${STATUS_CONFIG[r.status]?.label})`}
-                >
-                  <b>{r.no}</b>
-                  <small>{STATUS_CONFIG[r.status]?.label || r.status}</small>
-                </button>
-              ))}
-            </div>
-          </section>
-        );
-      })}
-
-      {selectedRoom && (
-        <Modal title={`Room ${selectedRoom.no}`} onClose={() => setSelectedRoom(null)}>
+  if (sc.name === 'room') return selectedRoom ? (
+        <Screen title={`Room ${selectedRoom.no}`} onClose={sc.close}>
           <p className="muted" style={{ marginTop: 0 }}>Floor {selectedRoom.floor}{selectedRoom.typeName ? ` · ${selectedRoom.typeName}` : ''}</p>
           <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '10px', marginBottom: '1.25rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
@@ -242,13 +175,12 @@ export default function AdminRoomMap() {
           </div>
           <div className="modal-actions">
             <button className="btn danger" onClick={() => handleDeleteRoom(selectedRoom)}>Deactivate room</button>
-            <button className="btn primary" onClick={() => setSelectedRoom(null)}>Done</button>
+            <button className="btn primary" onClick={sc.close}>Done</button>
           </div>
-        </Modal>
-      )}
-
-      {showAddModal && (
-        <Modal title="Add room" onClose={() => setShowAddModal(false)}>
+        </Screen>
+  ) : <WaitScreen loading={loading} onClose={sc.close} />;
+  if (sc.name === 'new') return (
+        <Screen title="Add room" onClose={sc.close}>
           <form onSubmit={handleAddRoom} className="form">
             <p className="muted" style={{ marginTop: 0 }}>A new room starts as Available.</p>
             <label>
@@ -266,12 +198,78 @@ export default function AdminRoomMap() {
               </select>
             </label>
             <div className="modal-actions">
-              <button type="button" className="btn" onClick={() => setShowAddModal(false)}>Cancel</button>
+              <button type="button" className="btn" onClick={sc.close}>Cancel</button>
               <button type="submit" className="btn primary">Create room</button>
             </div>
           </form>
-        </Modal>
+        </Screen>
+  );
+  return (
+    <div className="room-map-page">
+      {toastMessage && (
+        <div style={{
+          position: 'fixed', bottom: '24px', right: '24px', zIndex: 9999,
+          background: '#0f2742', color: '#fff', padding: '12px 20px', borderRadius: '10px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.2)', fontSize: '0.9rem', fontWeight: 600
+        }}>
+          ✓ {toastMessage}
+        </div>
       )}
+
+      <div className="page-head">
+        <div>
+          <h1>Room map</h1>
+          <p>Live status of every room. Put a room into Maintenance, add or deactivate rooms.</p>
+        </div>
+        <div className="head-actions">
+          <button className="btn primary" onClick={() => sc.go('new')}>+ Add room</button>
+        </div>
+      </div>
+
+      {/* One row of filters: each count is a button, its dot is the colour key of the map (no colour-only meaning: the label is there too). */}
+      <div className="room-filters" role="group" aria-label="Filter rooms by status">
+        <button type="button" className={`room-filter ${filterStatus === 'all' ? 'on' : ''}`} aria-pressed={filterStatus === 'all'} onClick={() => setFilterStatus('all')}>
+          <span>All rooms</span><strong>{counts.total}</strong>
+        </button>
+        {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
+          <button key={key} type="button" className={`room-filter ${filterStatus === key ? 'on' : ''}`} aria-pressed={filterStatus === key} onClick={() => setFilterStatus(filterStatus === key ? 'all' : key)}>
+            <span><i className={`dot s-${key}`} aria-hidden="true" />{cfg.label}</span><strong>{counts[key]}</strong>
+          </button>
+        ))}
+      </div>
+
+      {/* Floors grid */}
+      {floors.map(fl => {
+        const floorRooms = filteredRooms.filter(r => String(r.no)[0] === fl);
+        if (floorRooms.length === 0) return null;
+        return (
+          <section key={fl} className="floor" style={{ background: '#fff', padding: '1.25rem', borderRadius: '14px', border: '1px solid var(--line)', marginBottom: '1.25rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Floor {fl}</h2>
+              <span className="muted" style={{ fontSize: '0.85rem' }}>{floorRooms.length} room{floorRooms.length === 1 ? "" : "s"}</span>
+            </div>
+            <div className="rooms">
+              {floorRooms.map(r => (
+                <button
+                  key={r.no}
+                  onClick={() => sc.go('room', r._id)}
+                  className={`room s-${r.status}`}
+                  style={{
+                    position: 'relative',
+                    cursor: 'pointer',
+                    outline: selectedRoom?.no === r.no ? '3px solid #ffd700' : 'none'
+                  }}
+                  title={`Room ${r.no} (${STATUS_CONFIG[r.status]?.label})`}
+                >
+                  <b>{r.no}</b>
+                  <small>{STATUS_CONFIG[r.status]?.label || r.status}</small>
+                </button>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+
     </div>
   );
 }

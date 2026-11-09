@@ -1,4 +1,5 @@
 const { Resend } = require("resend");
+const emailjs = require("./emailjs");
 
 let resendInstance = null;
 
@@ -170,6 +171,15 @@ function buildVerificationHtml({ fullName, verificationUrl }) {
 async function sendVerificationEmail({ email, fullName, token }) {
   const clientUrl = getClientUrl();
   const verificationUrl = `${clientUrl}/#/verify-email?token=${token}&email=${encodeURIComponent(email)}`;
+  if (emailjs.enabled()) {
+    try {
+      await emailjs.sendMail({ to: email, subject: "GrandStay - Verify your email address", html: buildVerificationHtml({ fullName, verificationUrl }) });
+      return { success: true };
+    } catch (err) {
+      console.error("[EmailJS] Verification email failed:", err.message);
+      return { success: false, error: err.message, verificationUrl };
+    }
+  }
   // SMTP_URL (e.g. Gmail app password) needs no verified domain, so it wins over Resend.
   if (process.env.SMTP_URL) {
     try {

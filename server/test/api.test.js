@@ -1540,3 +1540,25 @@ test("forgot password generates token, rejects invalid/expired token, resets pas
     password: "BrandNewPass123!",
   }).expect(200);
 });
+
+test("EmailJS adapter posts the generic template and reports a rejected send", async () => {
+  const emailjs = require("../src/services/emailjs");
+  const keys = ["EMAILJS_SERVICE_ID", "EMAILJS_TEMPLATE_ID", "EMAILJS_PUBLIC_KEY", "EMAILJS_PRIVATE_KEY"];
+  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+  const realFetch = global.fetch;
+  try {
+    assert.equal(emailjs.enabled(), false);
+    Object.assign(process.env, { EMAILJS_SERVICE_ID: "svc", EMAILJS_TEMPLATE_ID: "tpl", EMAILJS_PUBLIC_KEY: "pub", EMAILJS_PRIVATE_KEY: "priv" });
+    assert.equal(emailjs.enabled(), true);
+    let body;
+    global.fetch = async (url, opts) => { body = JSON.parse(opts.body); return { ok: true }; };
+    await emailjs.sendMail({ to: "a@b.c", subject: "Hi", text: "x <y>\nz" });
+    assert.deepEqual([body.service_id, body.template_id, body.user_id, body.accessToken], ["svc", "tpl", "pub", "priv"]);
+    assert.deepEqual(body.template_params, { to_email: "a@b.c", subject: "Hi", message: "x <y>\nz", html: "x &lt;y&gt;<br>z" });
+    global.fetch = async () => ({ ok: false, status: 403, text: async () => "forbidden" });
+    await assert.rejects(emailjs.sendMail({ to: "a@b.c", subject: "Hi" }), /EmailJS 403: forbidden/);
+  } finally {
+    global.fetch = realFetch;
+    for (const k of keys) saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k]);
+  }
+});

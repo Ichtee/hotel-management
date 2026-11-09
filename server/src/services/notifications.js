@@ -42,6 +42,7 @@ const events = {
       : `Your ${d.type === "check_in" ? "check-in" : "check-out"} request for booking ${d.reference} was rejected.${d.note ? ` ${d.note}` : ""}`,
   ],
 };
+const emailjs = require("./emailjs");
 let transport;
 // SMTP_URL wins; otherwise the Resend API key already used for e-mail verification also sends notifications.
 const resendTransport = () => {
@@ -52,7 +53,9 @@ const resendTransport = () => {
   } };
 };
 const getTransport = () =>
-  (transport ??= process.env.SMTP_URL
+  (transport ??= emailjs.enabled()
+    ? { sendMail: emailjs.sendMail }
+    : process.env.SMTP_URL
     ? require("nodemailer").createTransport(process.env.SMTP_URL)
     : resendTransport() || null);
 // Tests (or another mail provider) can replace the transport.

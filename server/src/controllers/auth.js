@@ -4,7 +4,7 @@ const Role = require("../models/Role");
 const v = require("../utils/validation");
 const { hashPassword, verifyPassword } = require("../utils/password");
 const { publicUser, issueToken, clearToken, tokenClaims } = require("../middleware/auth");
-const { sendVerificationEmail } = require("../services/resendService");
+const { sendVerificationEmail, getClientUrl } = require("../services/resendService");
 const { verifyCaptcha, getSiteKey } = require("../services/captchaService");
 const AuditLog = require("../models/AuditLog");
 const MAX_FAILED_LOGINS = 5;
@@ -339,11 +339,11 @@ async function forgotPassword(req, res) {
       },
     });
   }
-  const token = randomBytes(4).toString("hex").toUpperCase();
+  const token = randomBytes(32).toString("hex");
   const tokenHash = createHash("sha256").update(token).digest("hex");
   user.passwordReset = {
     tokenHash,
-    expiresAt: new Date(Date.now() + 15 * 60 * 1000),
+    expiresAt: new Date(Date.now() + 30 * 60 * 1000), // SRS BR-42: reset valid 30 minutes
   };
   await user.save();
 
@@ -352,8 +352,8 @@ async function forgotPassword(req, res) {
     if (typeof sendMail === "function") {
       await sendMail(
         user._id,
-        "GrandStay - Password Reset Code",
-        `Your password reset code is: ${token}. This code expires in 15 minutes.`,
+        "GrandStay - Reset your password",
+        `Open this link to choose a new password: ${getClientUrl()}/#/reset-password?token=${token}&email=${encodeURIComponent(email)}\nThe link is valid for 30 minutes and can be used once.`,
       );
     }
   } catch (e) {
@@ -364,7 +364,6 @@ async function forgotPassword(req, res) {
     data: {
       message:
         "If your email is registered, you will receive password reset instructions.",
-      resetToken: token,
     },
   });
 }
@@ -386,7 +385,7 @@ async function resetPassword(req, res) {
     v.fail("Invalid or expired reset token.", "token");
   }
   const tokenHash = createHash("sha256")
-    .update(token.trim().toUpperCase())
+    .update(token.trim())
     .digest("hex");
   if (
     !user.passwordReset?.tokenHash ||

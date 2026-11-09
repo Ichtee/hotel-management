@@ -126,10 +126,11 @@ export function SignIn({ onDone, hint, onForgot }) {
   );
 }
 
-export function ForgotPassword({ onDone, onCancel }) {
-  const [step, setStep] = useState('request');
-  const [email, setEmail] = useState('');
-  const [token, setToken] = useState('');
+// With `link` ({ email, token } from the e-mailed link) the form asks only for the new password.
+export function ForgotPassword({ onDone, onCancel, link }) {
+  const step = link ? 'reset' : 'request';
+  const [email, setEmail] = useState(link?.email || '');
+  const token = link?.token || '';
   const [pw, setPw] = useState('');
   const [err, setErr] = useState(null);
   const [ok, setOk] = useState(null);
@@ -147,13 +148,7 @@ export function ForgotPassword({ onDone, onCancel }) {
     try {
       const res = await api('/auth/forgot-password', { method: 'POST', body: { email: em } });
       setEmail(em);
-      if (res.data?.resetToken) {
-        setToken(res.data.resetToken);
-        setOk(`Reset code generated! For testing: your code is ${res.data.resetToken}`);
-      } else {
-        setOk(res.data?.message || 'If an account exists, a reset code was sent.');
-      }
-      setStep('reset');
+      setOk(res.data?.message || 'If an account exists, a reset link was sent. It is valid for 30 minutes.');
     } catch (x) {
       setErr(x);
     } finally {
@@ -166,11 +161,6 @@ export function ForgotPassword({ onDone, onCancel }) {
     setErr(null);
     const f = Object.fromEntries(new FormData(e.target));
 
-    if (!f.token || !f.token.trim()) {
-      setErr({ message: 'Reset code is required.', fields: { token: 'Reset code is required.' } });
-      return;
-    }
-
     if (f.newPassword !== f.confirmPassword) {
       setErr({ message: 'Passwords do not match.', fields: { confirmPassword: 'Passwords do not match.' } });
       return;
@@ -182,7 +172,7 @@ export function ForgotPassword({ onDone, onCancel }) {
         method: 'POST',
         body: {
           email,
-          token: f.token.trim(),
+          token,
           newPassword: f.newPassword,
           confirmPassword: f.confirmPassword,
         }
@@ -212,7 +202,7 @@ export function ForgotPassword({ onDone, onCancel }) {
           </Field>
           <Notice error={err} ok={ok} />
           <button className="btn primary wide" type="submit" disabled={busy}>
-            {busy ? 'Sending code…' : 'Send reset code'}
+            {busy ? 'Sending link…' : 'Send reset link'}
           </button>
           <button type="button" className="btn wide" onClick={onCancel} style={{ marginTop: '0.25rem' }}>
             Back to Sign in
@@ -223,15 +213,6 @@ export function ForgotPassword({ onDone, onCancel }) {
           <p className="muted" style={{ fontSize: '0.9rem', margin: 0 }}>
             Resetting password for: <strong>{email}</strong>
           </p>
-          <Field label="Reset code" error={fe('token')}>
-            <input
-              name="token"
-              defaultValue={token}
-              placeholder="e.g. 4A2F8B1C"
-              required
-              autoFocus
-            />
-          </Field>
           <PasswordField
             label="New password"
             name="newPassword"

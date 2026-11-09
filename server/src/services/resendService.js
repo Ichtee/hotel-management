@@ -143,7 +143,7 @@ function buildVerificationHtml({ fullName, verificationUrl }) {
           <a href="${verificationUrl}" class="btn" target="_blank">Verify Email</a>
         </div>
         <div class="notice">
-          ⏱ <strong>Important:</strong> This verification link will expire in <strong>15 minutes</strong>.
+          ⏱ <strong>Important:</strong> This verification link will expire in <strong>24 hours</strong>.
         </div>
         <div class="fallback">
           If the button above does not work, copy and paste this link into your browser:<br>

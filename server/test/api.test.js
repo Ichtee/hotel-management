@@ -1498,11 +1498,18 @@ test("forgot password generates token, rejects invalid/expired token, resets pas
     email: "nonexistent@example.com",
   }).expect(200);
 
+  const { setTransport } = require("../src/services/notifications");
+  const mails = [];
+  setTransport({ sendMail: async (m) => mails.push(m) });
   const res = await send(request(app), "post", "/api/auth/forgot-password", {
     email: "customer@example.com",
   }).expect(200);
-  assert.ok(res.body.data.resetToken);
-  const token = res.body.data.resetToken;
+  setTransport(null);
+  // The token must travel only inside the e-mailed link, never in the response.
+  assert.equal(res.body.data.resetToken, undefined);
+  assert.equal(mails.length, 1);
+  const token = mails[0].text.match(/#\/reset-password\?token=([0-9a-f]{64})&email=/)?.[1];
+  assert.ok(token);
 
   await send(request(app), "post", "/api/auth/reset-password", {
     email: "customer@example.com",

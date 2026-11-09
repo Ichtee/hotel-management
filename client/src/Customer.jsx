@@ -550,6 +550,16 @@ function VerifyEmail({ token, email }) {
   );
 }
 
+// Target of the link in the password-reset e-mail: #/reset-password?token=…&email=…
+function ResetPassword({ token, email }) {
+  return (
+    <AuthShell>
+      <h1>Choose a new password</h1>
+      <ForgotPassword link={{ token: token || '', email: email || '' }} onDone={() => { location.hash = '#/login'; }} onCancel={() => { location.hash = '#/login'; }} />
+    </AuthShell>
+  );
+}
+
 function SiteFooter() {
   const hotel = useHotel();
   return (
@@ -586,6 +596,7 @@ export default function Customer({ route }) {
   else if (path === '#/confirmation') page = <Confirmation q={q} />;
   else if (path === '#/my-bookings') page = <MyBookings />;
   else if (path === '#/login') page = <Auth />;
+  else if (path === '#/reset-password') page = <ResetPassword token={q.token} email={q.email} />;
   else if (path === '#/verify-email') page = <VerifyEmail token={q.token} email={q.email} />;
   else page = <Home />;
 

@@ -43,12 +43,13 @@ function username(value) {
 function password(value, field = "password") {
   if (
     typeof value !== "string" ||
-    value.length < 10 ||
+    value.length < 8 ||
     value.length > 128 ||
-    !/[a-zA-Z]/.test(value) ||
+    !/[a-z]/.test(value) ||
+    !/[A-Z]/.test(value) ||
     !/\d/.test(value)
   )
-    fail("Use 10–128 characters with a letter and a number.", field);
+    fail("Use 8–128 characters with an upper-case letter, a lower-case letter and a number.", field); // CR-12
   return value;
 }
 function phone(value, required = false) {

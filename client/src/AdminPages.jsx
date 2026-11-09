@@ -332,8 +332,8 @@ function CouponForm({ coupon, onClose, onSaved }) {
     <Modal title={creating ? 'New coupon' : `Edit ${coupon.code}`} onClose={onClose}>
       <form className="form" onSubmit={submit}>
         <Field label="Code" error={fe('code')}><input name="code" defaultValue={coupon.code} required /></Field>
-        <Field label="Type" error={fe('discountType')}><select name="discountType" defaultValue={coupon.discountType || 'percentage'}><option value="percentage">Percentage</option></select></Field>
-        <Field label="Discount value" error={fe('discountValue')}><input name="discountValue" type="number" min="0.01" max="100" step="any" defaultValue={coupon.discountValue} required /></Field>
+        <Field label="Type" error={fe('discountType')}><select name="discountType" defaultValue={coupon.discountType || 'percentage'}><option value="percentage">Percentage (1 to 100)</option><option value="fixed">Fixed amount (VND)</option></select></Field>
+        <Field label="Discount value" error={fe('discountValue')}><input name="discountValue" type="number" min="1" step="1" defaultValue={coupon.discountValue} required /></Field>
         <Field label="Usage limit" error={fe('usageLimit')}><input name="usageLimit" type="number" min="1" defaultValue={coupon.usageLimit} required /></Field>
         <Field label="Minimum spend (VND)" error={fe('minimumSpend')}><input name="minimumSpend" type="number" min="0" defaultValue={coupon.minimumSpend || 0} /></Field>
         <span />
@@ -485,7 +485,7 @@ export function Profile() {
         <form className="panel form one" onSubmit={pw}>
           <h2>Change password</h2>
           <Field label="Current password" error={pErr?.fields?.currentPassword}><input name="currentPassword" type="password" autoComplete="current-password" required /></Field>
-          <Field label="New password (10+ characters, a letter and a number)" error={pErr?.fields?.newPassword}><input name="newPassword" type="password" autoComplete="new-password" required /></Field>
+          <Field label="New password (8+ characters, upper and lower case, a number)" error={pErr?.fields?.newPassword}><input name="newPassword" type="password" autoComplete="new-password" required /></Field>
           <Notice error={pErr && !pErr.fields ? pErr : null} ok={pOk} />
           <button className="btn primary" type="submit">Update password</button>
         </form>

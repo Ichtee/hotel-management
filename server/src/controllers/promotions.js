@@ -22,6 +22,7 @@ function validate(body, coupon) {
   if (creating || body.discountType !== undefined)
     data.discountType = v.choice(body.discountType, "discountType", [
       "percentage",
+      "fixed",
     ]);
   if (creating || body.discountValue !== undefined)
     data.discountValue = v.number(body.discountValue, "discountValue", 0.01);
@@ -91,7 +92,7 @@ async function remove(req, res) {
 async function publicListing(req, res) {
   const now = new Date();
   const data = await Coupon.find({ isActive: true, startDate: { $lte: now }, endDate: { $gte: now } })
-    .sort({ discountValue: -1 }).select("code discountValue minimumSpend endDate -_id").lean();
+    .sort({ discountValue: -1 }).select("code discountType discountValue minimumSpend endDate -_id").lean();
   res.json({ data });
 }
 module.exports = { publicListing, listing, create, update, remove };

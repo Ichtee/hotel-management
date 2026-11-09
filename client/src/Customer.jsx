@@ -151,6 +151,7 @@ function usePromos() {
   useEffect(() => { api('/public/promotions').then((x) => setList(x.data)).catch(() => {}); }, []);
   return list;
 }
+const off = (c) => (c.discountType === 'fixed' ? money(c.discountValue) : `${c.discountValue}%`);
 const Pic = ({ src, ...p }) => (src ? <img src={src} {...p} /> : <div className="img-ph" />);
 
 function Home() {
@@ -219,8 +220,8 @@ function Home() {
         <section className="band">
           <div className="c-wrap band-copy">
             <p className="eyebrow">Book direct</p>
-            <h2 className="display light">Save {promos[0].discountValue}% when you book with us</h2>
-            <p>{promos[0].discountValue}% off{promos[0].minimumSpend ? ` stays from ${money(promos[0].minimumSpend)}` : ' your stay'}, applied when you enter the code at checkout.</p>
+            <h2 className="display light">Save {off(promos[0])} when you book with us</h2>
+            <p>{off(promos[0])} off{promos[0].minimumSpend ? ` stays from ${money(promos[0].minimumSpend)}` : ' your stay'}, applied when you enter the code at checkout.</p>
             <div className="promo-actions">
               <a className="btn gold" href="#/rooms">Book your stay</a>
               <span className="promo-code">Code <b>{promos[0].code}</b></span>
@@ -273,7 +274,7 @@ function Offers() {
     <div className="c-wrap c-section narrow">
       <h1 className="title">Booking policies</h1>
       <div className="panel"><h2>Deposit &amp; cancellation</h2><PolicyText p={p} /></div>
-      {promos.length > 0 && <div className="panel mt"><h2>Promo codes</h2><ul className="policy-list">{promos.map((c) => <li key={c.code}><b>{c.code}</b>: {c.discountValue}% off{c.minimumSpend ? ` stays from ${money(c.minimumSpend)}` : ''}, valid until {new Date(c.endDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}. Enter it at checkout.</li>)}</ul></div>}
+      {promos.length > 0 && <div className="panel mt"><h2>Promo codes</h2><ul className="policy-list">{promos.map((c) => <li key={c.code}><b>{c.code}</b>: {off(c)} off{c.minimumSpend ? ` stays from ${money(c.minimumSpend)}` : ''}, valid until {new Date(c.endDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}. Enter it at checkout.</li>)}</ul></div>}
     </div>
   );
 }

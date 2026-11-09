@@ -10,7 +10,7 @@
     "start": "node src/index.js",
     "db:init": "node scripts/initDatabase.js",
     "db:watch": "node scripts/watchDatabase.js",
-    "test": "node test/models.test.js && node --test test/api.test.js test/staff.test.js test/managerOperations.test.js test/emailVerification.test.js test/loginSecurity.test.js",
+    "test": "node test/models.test.js && node --test test/api.test.js test/staff.test.js test/managerOperations.test.js test/emailVerification.test.js test/loginSecurity.test.js test/validation.test.js test/validationFlows.test.js",
     "test:member2": "node test/member2.test.js"
   },
   "dependencies": {

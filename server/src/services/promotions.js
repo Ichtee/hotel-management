@@ -8,6 +8,8 @@ function checkPeriodAndSpend(coupon, subtotal, now) {
   if (coupon.endDate && now >= coupon.endDate) v.fail("Coupon expired.", "couponCode"); // MSG-26
   if (subtotal < coupon.minimumSpend)
     v.fail("The booking amount does not meet the minimum spend required for this coupon.", "couponCode"); // MSG-28
+  // A fixed amount is in whole VND and never exceeds the room charge (BR-09).
+  if (coupon.discountType === "fixed") return Math.min(subtotal, coupon.discountValue);
   return Math.min(subtotal, Math.floor((subtotal * coupon.discountValue) / 100));
 }
 

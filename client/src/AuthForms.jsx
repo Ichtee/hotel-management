@@ -161,6 +161,10 @@ export function ForgotPassword({ onDone, onCancel, link }) {
     setErr(null);
     const f = Object.fromEntries(new FormData(e.target));
 
+    if (!RULES.every(([, ok]) => ok(f.newPassword || ''))) { // CR-12
+      setErr({ message: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.', fields: { newPassword: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.' } });
+      return;
+    }
     if (f.newPassword !== f.confirmPassword) {
       setErr({ message: 'Passwords do not match.', fields: { confirmPassword: 'Passwords do not match.' } });
       return;
@@ -217,7 +221,7 @@ export function ForgotPassword({ onDone, onCancel, link }) {
             label="New password"
             name="newPassword"
             autoComplete="new-password"
-            minLength={10}
+            minLength={8}
             maxLength={128}
             error={fe('newPassword')}
             onChange={(e) => setPw(e.target.value)}
@@ -235,7 +239,7 @@ export function ForgotPassword({ onDone, onCancel, link }) {
             label="Confirm new password"
             name="confirmPassword"
             autoComplete="new-password"
-            minLength={10}
+            minLength={8}
             maxLength={128}
             error={fe('confirmPassword')}
           />
@@ -252,7 +256,7 @@ export function ForgotPassword({ onDone, onCancel, link }) {
   );
 }
 
-const RULES = [['10+ characters', (p) => p.length >= 10], ['A letter', (p) => /[A-Za-z]/.test(p)], ['A number', (p) => /\d/.test(p)]];
+const RULES = [['8+ characters', (p) => p.length >= 8], ['An upper-case letter', (p) => /[A-Z]/.test(p)], ['A lower-case letter', (p) => /[a-z]/.test(p)], ['A number', (p) => /\d/.test(p)]];
 
 export function Register({ onDone, hint }) {
   const [err, setErr] = useState(null);
@@ -296,6 +300,11 @@ export function Register({ onDone, hint }) {
         message: 'Phone number must have 10 to 11 digits, or + and 8 to 15 digits with the country code.',
         fields: { phone: 'Phone number must have 10 to 11 digits, or + and 8 to 15 digits with the country code.' }
       });
+      return;
+    }
+
+    if (!RULES.every(([, ok]) => ok(f.password || ''))) { // CR-12
+      setErr({ message: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.', fields: { password: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.' } });
       return;
     }
 
@@ -364,7 +373,7 @@ export function Register({ onDone, hint }) {
           label="Password"
           name="password"
           autoComplete="new-password"
-          minLength={10}
+          minLength={8}
           maxLength={128}
           error={fe('password')}
           onChange={(e) => setPw(e.target.value)}
@@ -379,7 +388,7 @@ export function Register({ onDone, hint }) {
           label="Confirm password"
           name="confirmPassword"
           autoComplete="new-password"
-          minLength={10}
+          minLength={8}
           maxLength={128}
           error={fe('confirmPassword')}
         />

@@ -86,9 +86,14 @@ class RoomTypeService {
    */
   async updatePricing(id, { basePrice, seasonalPricing }) {
     const update = {};
-    if (basePrice !== undefined) update.basePrice = basePrice;
+    const { HttpError } = require('../utils/validation');
+    // BR-01 / CR-20: prices are whole VND amounts greater than 0.
+    const whole = (n) => typeof n === 'number' && Number.isSafeInteger(n) && n > 0;
+    if (basePrice !== undefined) {
+      if (!whole(basePrice)) throw new HttpError(400, 'The base price must be a whole amount greater than 0.');
+      update.basePrice = basePrice;
+    }
     if (seasonalPricing !== undefined) {
-      const { HttpError } = require('../utils/validation');
       if (!Array.isArray(seasonalPricing)) throw new HttpError(400, 'seasonalPricing must be a list.');
       // UC25: valid dates and price (MSG-23 / MSG-24), and no two rates of a room type overlap (MSG-60).
       const spans = seasonalPricing.map((season) => {
@@ -96,8 +101,8 @@ class RoomTypeService {
         const end = new Date(season.endDate);
         if (Number.isNaN(+start) || Number.isNaN(+end) || end < start)
           throw new HttpError(400, `Rate "${season.description || 'Custom'}": the end date cannot be before the start date.`);
-        if (typeof season.price !== 'number' || !(season.price > 0))
-          throw new HttpError(400, `Rate "${season.description || 'Custom'}": the price must be greater than 0.`);
+        if (!whole(season.price))
+          throw new HttpError(400, `Rate "${season.description || 'Custom'}": the price must be a whole amount greater than 0.`);
         return { name: season.description || 'Custom', start, end };
       }).sort((a, b) => a.start - b.start);
       for (let i = 1; i < spans.length; i++)

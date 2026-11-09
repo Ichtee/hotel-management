@@ -29,27 +29,63 @@ const events = {
   reconciliation: (d) => ["Payment reconciliation", `${d.settled} gateway payment(s) were settled by the daily reconciliation.`],
 };
 let transport;
-const getTransport = () =>
-  (transport ??= process.env.SMTP_URL
-    ? require("nodemailer").createTransport(process.env.SMTP_URL)
-    : null);
+const getTransport = () => {
+  if (transport) return transport;
+  if (process.env.SMTP_URL) {
+    transport = require("nodemailer").createTransport(process.env.SMTP_URL);
+  } else if (process.env.SMTP_USER && (process.env.SMTP_PASS || process.env.SMTP_PASSWORD)) {
+    const user = process.env.SMTP_USER.trim();
+    const pass = (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || "").replace(/\s+/g, "");
+    if (process.env.SMTP_HOST) {
+      transport = require("nodemailer").createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT) || 587,
+        secure: Number(process.env.SMTP_PORT) === 465,
+        auth: { user, pass },
+      });
+    } else {
+      transport = require("nodemailer").createTransport({
+        host: "smtp.gmail.com",
+        port: 465,
+        secure: true, // SSL
+        auth: { user, pass },
+      });
+    }
+  }
+  return transport;
+};
+
 // Tests (or another mail provider) can replace the transport.
 const setTransport = (t) => (transport = t);
-async function email(accountId, title, message) {
+
+async function email(target, title, message, html) {
   const t = getTransport();
-  if (!t) return;
+  if (!t) {
+    console.log(`[Email Service - No SMTP configured] To: ${target} | Subject: ${title} | Code/Msg: ${message}`);
+    return;
+  }
   try {
-    const user = await User.findById(accountId).select("email");
-    if (user)
-      await t.sendMail({
-        from: process.env.MAIL_FROM || "no-reply@hotel.local",
-        to: user.email,
+    let toEmail = null;
+    if (typeof target === "string" && target.includes("@")) {
+      toEmail = target;
+    } else if (target) {
+      const user = await User.findById(target).select("email");
+      toEmail = user?.email;
+    }
+    if (toEmail) {
+      // Gmail SMTP requires the From address to match the authenticated Gmail account
+      const from = `"GrandStay Hotel" <${process.env.SMTP_USER || "no-reply@hotel.local"}>`;
+      const info = await t.sendMail({
+        from,
+        to: toEmail,
         subject: title,
         text: message,
+        html: html || undefined,
       });
+      console.log(`[Email Sent Successfully] To: ${toEmail} | MessageId: ${info.messageId}`);
+    }
   } catch (error) {
-    // A mail outage must never fail the booking or payment that triggered it.
-    console.error("Notification email failed:", error.message);
+    console.error("[Email Send Error]:", error.message || error);
   }
 }
 // refs: optional { bookingId, roomId, roomIssueId } links for the in-app notification.

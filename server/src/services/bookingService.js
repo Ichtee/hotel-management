@@ -107,7 +107,34 @@ class BookingService {
       throw error;
     }
 
+    // Check-in cannot be in the past
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const inMidnight = new Date(inDate);
+    inMidnight.setHours(0, 0, 0, 0);
+    if (inMidnight < today) {
+      const error = new Error('checkInDate cannot be in the past');
+      error.status = 400;
+      throw error;
+    }
+
     const nights = Math.max(1, Math.round((outDate - inDate) / 86400000));
+
+    // Maximum stay duration limit (30 nights)
+    if (nights > 30) {
+      const error = new Error('Maximum stay duration is 30 nights');
+      error.status = 400;
+      throw error;
+    }
+
+    // Advance booking limit (up to 365 days in advance)
+    const maxFuture = new Date(today);
+    maxFuture.setDate(maxFuture.getDate() + 365);
+    if (inDate > maxFuture) {
+      const error = new Error('Reservations can only be made up to 365 days in advance');
+      error.status = 400;
+      throw error;
+    }
 
     // 2. Validate Rooms array
     if (!Array.isArray(rooms) || rooms.length === 0) {
@@ -209,6 +236,13 @@ class BookingService {
         }
       } else {
         const error = new Error('Each room item must have either roomId or roomTypeId');
+        error.status = 400;
+        throw error;
+      }
+
+      // BR-27: Guest count must not exceed room type maximum capacity
+      if (roomReq.guestCount && roomType?.maxOccupancy && roomReq.guestCount > roomType.maxOccupancy) {
+        const error = new Error(`Guest count (${roomReq.guestCount}) exceeds maximum capacity of ${roomType.maxOccupancy} for room type "${roomType.name}" (BR-27)`);
         error.status = 400;
         throw error;
       }
@@ -595,6 +629,24 @@ class BookingService {
 
       if (newOut <= newIn) {
         const error = new Error('checkOutDate must be after checkInDate');
+        error.status = 400;
+        throw error;
+      }
+
+      // Check-in cannot be in the past
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const newInMidnight = new Date(newIn);
+      newInMidnight.setHours(0, 0, 0, 0);
+      if (newInMidnight < today) {
+        const error = new Error('New checkInDate cannot be in the past');
+        error.status = 400;
+        throw error;
+      }
+
+      const modNights = Math.max(1, Math.round((newOut - newIn) / 86400000));
+      if (modNights > 30) {
+        const error = new Error('Maximum stay duration is 30 nights');
         error.status = 400;
         throw error;
       }

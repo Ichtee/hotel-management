@@ -39,13 +39,18 @@ export function AuthProvider({ children }) {
     const res = await api("/auth/login", { method: "POST", body });
     setUser(res.data);
   }
+  async function verifyEmail(body) {
+    const res = await api("/auth/verify-email", { method: "POST", body });
+    setUser(res.data);
+    return res;
+  }
   async function signOut() {
     await api("/auth/logout", { method: "POST", body: {} });
     setUser(null);
   }
   return (
     <Context.Provider
-      value={{ user, setUser, loading, error, refresh, signIn, signOut }}
+      value={{ user, setUser, loading, error, refresh, signIn, verifyEmail, signOut }}
     >
       {children}
     </Context.Provider>

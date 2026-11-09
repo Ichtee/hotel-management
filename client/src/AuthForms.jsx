@@ -248,13 +248,20 @@ export function ForgotPassword({ onDone, onCancel }) {
 const RULES = [['10+ characters', (p) => p.length >= 10], ['A letter', (p) => /[A-Za-z]/.test(p)], ['A number', (p) => /\d/.test(p)]];
 
 export function Register({ onDone, hint }) {
+  const [step, setStep] = useState('form'); // 'form' | 'verify'
+  const [email, setEmail] = useState('');
+  const [otpInput, setOtpInput] = useState('');
   const [err, setErr] = useState(null);
+  const [ok, setOk] = useState(null);
   const [pw, setPw] = useState('');
-  const { signIn } = useAuth();
+  const [busy, setBusy] = useState(false);
+  const { verifyEmail } = useAuth();
   const fe = (k) => err?.fields?.[k];
-  const submit = async (e) => {
+
+  const handleRegisterSubmit = async (e) => {
     e.preventDefault();
     setErr(null);
+    setOk(null);
     const f = Object.fromEntries(new FormData(e.target));
 
     const fullName = (f.fullName || '').trim();
@@ -266,7 +273,7 @@ export function Register({ onDone, hint }) {
       return;
     }
 
-    const username = (f.username || '').trim();
+    const username = (f.username || '').trim().toLowerCase();
     if (username.length < 3 || username.length > 40) {
       setErr({
         message: 'Username must be 3–40 characters.',
@@ -274,17 +281,24 @@ export function Register({ onDone, hint }) {
       });
       return;
     }
-
-    const email = (f.email || '').trim();
-    if (email.length < 3 || email.length > 254) {
+    if (!/^[a-z0-9_.-]+$/.test(username)) {
       setErr({
-        message: 'Email must be 3–254 characters.',
-        fields: { email: 'Email must be 3–254 characters.' }
+        message: 'Username can only contain letters, numbers, dots, hyphens, or underscores (no spaces).',
+        fields: { username: 'Only letters, numbers, dots, hyphens, underscores.' }
       });
       return;
     }
 
-    const phone = (f.phone || '').trim();
+    const targetEmail = (f.email || '').trim().toLowerCase();
+    if (targetEmail.length < 3 || targetEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail)) {
+      setErr({
+        message: 'Please enter a valid email address.',
+        fields: { email: 'Please enter a valid email address.' }
+      });
+      return;
+    }
+
+    const phone = (f.phone || '').trim().replace(/[\s.-]/g, '').replace(/^\+84/, '0');
     if (!/^\d{10,11}$/.test(phone)) {
       setErr({
         message: 'Phone must contain 10–11 digits.',
@@ -301,16 +315,119 @@ export function Register({ onDone, hint }) {
       return;
     }
 
+    if (!f.password || f.password.length < 10 || !/[A-Za-z]/.test(f.password) || !/\d/.test(f.password)) {
+      setErr({
+        message: 'Password must be 10+ characters with at least a letter and a number.',
+        fields: { password: 'Must be 10+ characters with a letter and a number.' }
+      });
+      return;
+    }
+
+    const payload = {
+      fullName,
+      username,
+      email: targetEmail,
+      phone,
+      password: f.password,
+      confirmPassword: f.confirmPassword
+    };
+
+    setBusy(true);
     try {
-      await api('/auth/register', { method: 'POST', body: f });
-      await signIn({ email: f.email, password: f.password });
+      const res = await api('/auth/register', { method: 'POST', body: payload });
+      setEmail(targetEmail);
+      setOk(res.data?.message || 'Verification code sent to your email.');
+      setStep('verify');
+    } catch (x) {
+      setErr(x);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleVerifySubmit = async (e) => {
+    e.preventDefault();
+    setErr(null);
+    setOk(null);
+    const code = (otpInput || '').trim();
+    if (!code) {
+      setErr({ message: 'Please enter the 6-digit verification code.', fields: { otp: 'Code required.' } });
+      return;
+    }
+    setBusy(true);
+    try {
+      await verifyEmail({ email, otp: code });
       onDone();
     } catch (x) {
       setErr(x);
+    } finally {
+      setBusy(false);
     }
   };
+
+  const handleResend = async () => {
+    setErr(null);
+    setOk(null);
+    setBusy(true);
+    try {
+      const res = await api('/auth/resend-verification', { method: 'POST', body: { email } });
+      setOk(res.data?.message || 'A new verification code has been sent to your email.');
+    } catch (x) {
+      setErr(x);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (step === 'verify') {
+    return (
+      <form className="form one" onSubmit={handleVerifySubmit}>
+        <div style={{ textAlign: 'center', marginBottom: '0.75rem' }}>
+          <p style={{ margin: '0 0 0.5rem', fontWeight: 600, color: 'var(--blue)' }}>
+            📬 Check your inbox
+          </p>
+          <p className="muted" style={{ margin: 0, fontSize: '0.9rem' }}>
+            We have sent a 6-digit verification code to <strong>{email}</strong>.<br />
+            Please check your inbox (and Spam folder) to enter the code below.
+          </p>
+        </div>
+
+        <Field label="Enter 6-digit verification code" error={fe('otp')}>
+          <input
+            name="otp"
+            type="text"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            maxLength={6}
+            placeholder="123456"
+            value={otpInput}
+            onChange={(e) => setOtpInput(e.target.value)}
+            style={{ letterSpacing: '6px', fontSize: '1.35rem', textAlign: 'center', fontWeight: 'bold' }}
+            autoFocus
+            required
+          />
+        </Field>
+
+        <Notice error={err} ok={ok} />
+
+        <button className="btn primary wide full" type="submit" disabled={busy}>
+          {busy ? 'Verifying…' : 'Verify & Complete registration'}
+        </button>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.75rem', fontSize: '0.85rem' }}>
+          <button type="button" className="linklike" onClick={handleResend} disabled={busy} style={{ color: 'var(--blue)', textDecoration: 'underline', cursor: 'pointer' }}>
+            Resend code
+          </button>
+          <button type="button" className="linklike" onClick={() => { setStep('form'); setErr(null); setOk(null); }} style={{ color: '#64748b', cursor: 'pointer' }}>
+            ← Back to form
+          </button>
+        </div>
+      </form>
+    );
+  }
+
   return (
-    <form className="form" onSubmit={submit}>
+    <form className="form" onSubmit={handleRegisterSubmit}>
       <Field label="Full name" error={fe('fullName')}>
         <input
           name="fullName"
@@ -327,6 +444,7 @@ export function Register({ onDone, hint }) {
           autoComplete="username"
           minLength={3}
           maxLength={40}
+          placeholder="e.g. johndoe"
           required
         />
       </Field>
@@ -378,8 +496,10 @@ export function Register({ onDone, hint }) {
           error={fe('confirmPassword')}
         />
       </div>
-      <div className="full"><Notice error={err && !err.fields ? err : null} /></div>
-      <button className="btn primary wide full" type="submit">Create account</button>
+      <div className="full"><Notice error={err} /></div>
+      <button className="btn primary wide full" type="submit" disabled={busy}>
+        {busy ? 'Creating account…' : 'Create account'}
+      </button>
       {hint && <div className="full">{hint}</div>}
     </form>
   );

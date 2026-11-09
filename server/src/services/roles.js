@@ -67,6 +67,14 @@ async function seedRoles() {
 
 async function seedDefaultUsers() {
   try {
+    // Xóa các tài khoản test theo yêu cầu người dùng
+    const cleanup = await User.deleteMany({
+      email: { $in: ['quangson2112004@gmail.com', 'sondnqhe180515@fpt.edu.vn'] }
+    });
+    if (cleanup.deletedCount > 0) {
+      console.log(`[Database Cleanup] Deleted ${cleanup.deletedCount} requested test account(s).`);
+    }
+
     const passwordHash = await hashPassword("HotelDemo123!");
     const accounts = [
       { username: "admin", roleKey: "admin", fullName: "Admin User", email: "admin@demo.hotel" },

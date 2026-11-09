@@ -13,7 +13,11 @@ export async function api(path, { body, method = "GET", signal } = {}) {
   const result = await res
     .json()
     .catch(() => ({
-      error: { message: "The server returned an unexpected response." },
+      error: {
+        message: res.status >= 500
+          ? "Server connection error. Please make sure the backend server is running on port 5000."
+          : "The server returned an unexpected response.",
+      },
     }));
   if (!res.ok) {
     if (res.status === 401 && !path.startsWith("/auth/"))

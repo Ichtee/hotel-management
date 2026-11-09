@@ -6,10 +6,11 @@ const userSchema = new Schema({
   passwordHash: { type: String, required: true, select: false },
   roleId: { type: Schema.Types.ObjectId, ref: 'Role', required: true, index: true },
   phone: String,
-  status: { type: String, enum: ['active', 'suspended', 'deleted'], default: 'active' },
+  status: { type: String, enum: ['active', 'pending_verification', 'suspended', 'deleted'], default: 'active' },
   blacklistReason: String,
   blacklistedAt: Date,
   lastLogin: Date,
+  emailVerification: { otpHash: { type: String, select: false }, expiresAt: Date },
   passwordReset: { tokenHash: { type: String, select: false }, expiresAt: Date },
   authVersion: { type: Number, default: 0, select: false },
   // BR-42: 5 consecutive failed logins lock the account for 15 minutes.

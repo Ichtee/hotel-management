@@ -1,9 +1,10 @@
 const mongoose = require("mongoose");
 class HttpError extends Error {
-  constructor(status, message, fields) {
+  constructor(status, message, fields, code) {
     super(message);
     this.status = status;
     this.fields = fields;
+    this.code = code;
   }
 }
 const fail = (message, field, status = 400) => {
@@ -53,9 +54,10 @@ function password(value, field = "password") {
 }
 function phone(value, required = false) {
   if (!required && (value === "" || value === undefined)) return "";
-  if (typeof value !== "string" || !/^\d{10,11}$/.test(value))
+  const cleaned = typeof value === "string" ? value.trim().replace(/[\s.-]/g, "").replace(/^\+84/, "0") : "";
+  if (!/^\d{10,11}$/.test(cleaned))
     fail("Phone must contain 10–11 digits.", "phone");
-  return value;
+  return cleaned;
 }
 function choice(value, field, choices) {
   if (!choices.includes(value)) fail(`Invalid ${field}.`, field);

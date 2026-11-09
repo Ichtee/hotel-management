@@ -9,6 +9,8 @@
     "start": "node src/index.js",
     "db:init": "node scripts/initDatabase.js",
     "db:watch": "node scripts/watchDatabase.js",
+    "db:delete-users": "node scripts/deleteUsers.js",
+    "test:email": "node scripts/testEmail.js",
     "test": "node test/models.test.js && node --test test/api.test.js test/staff.test.js test/managerOperations.test.js",
     "test:member2": "node test/member2.test.js"
   },

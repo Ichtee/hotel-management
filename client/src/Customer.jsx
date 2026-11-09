@@ -100,17 +100,34 @@ function SiteHeader({ route }) {
 }
 
 function SearchBar({ q = {} }) {
+  const [inDate, setInDate] = useState(q.in || day(7));
+  const [outDate, setOutDate] = useState(q.out || day(10));
+  const [guests, setGuests] = useState(q.guests || "2");
+
+  const handleInChange = (e) => {
+    const newIn = e.target.value;
+    setInDate(newIn);
+    if (newIn && outDate && new Date(outDate) <= new Date(newIn)) {
+      const nextDay = new Date(new Date(newIn).getTime() + 86400000).toISOString().slice(0, 10);
+      setOutDate(nextDay);
+    }
+  };
+
   const submit = (e) => {
     e.preventDefault();
-    const f = new FormData(e.target);
-    location.hash = `#/rooms?${new URLSearchParams({ in: f.get('in'), out: f.get('out'), guests: f.get('guests') })}`;
+    if (!inDate || !outDate || new Date(outDate) <= new Date(inDate)) {
+      alert("Check-out date must be after check-in date.");
+      return;
+    }
+    location.hash = `#/rooms?${new URLSearchParams({ in: inDate, out: outDate, guests })}`;
   };
+
   return (
     <form className="c-search" onSubmit={submit}>
       <label>Destination<input defaultValue="GrandStay Da Nang" readOnly /></label>
-      <label>Check-in<input name="in" type="date" min={day(0)} defaultValue={q.in || day(7)} required /></label>
-      <label>Check-out<input name="out" type="date" min={day(1)} defaultValue={q.out || day(10)} required /></label>
-      <label>Guests<select name="guests" defaultValue={q.guests || "2"}>{[1, 2, 3, 4].map((n) => <option key={n}>{n}</option>)}</select></label>
+      <label>Check-in<input name="in" type="date" min={day(0)} value={inDate} onChange={handleInChange} required /></label>
+      <label>Check-out<input name="out" type="date" min={inDate || day(1)} value={outDate} onChange={(e) => setOutDate(e.target.value)} required /></label>
+      <label>Guests<select name="guests" value={guests} onChange={(e) => setGuests(e.target.value)}>{[1, 2, 3, 4].map((n) => <option key={n}>{n}</option>)}</select></label>
       <button className="btn gold" type="submit">Search rooms</button>
     </form>
   );

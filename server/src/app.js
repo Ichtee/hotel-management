@@ -164,6 +164,8 @@ function createApp({
     },
   });
   app.post("/api/auth/register", authLimit, auth.register);
+  app.post("/api/auth/verify-email", authLimit, auth.verifyEmail);
+  app.post("/api/auth/resend-verification", authLimit, auth.resendVerification);
   app.post("/api/auth/login", authLimit, auth.login);
   app.post("/api/auth/logout", auth.logout);
   app.get("/api/public/room-types/:id/reviews", roomTypes.reviews);
@@ -294,21 +296,26 @@ function createApp({
 
   app.use((error, req, res, next) => {
     if (res.headersSent) return next(error);
-    if (error.code === 11000)
-      return res
-        .status(409)
-        .json({
-          error: {
-            message: error.keyPattern?.roomNumber ? "Room number already exists." : "This value is already in use.",
-            ...(error.keyPattern?.roomNumber ? { code: "MSG-20" } : {}),
-            fields: Object.fromEntries(
-              Object.keys(error.keyPattern || {}).map((k) => [
-                k,
-                "Already in use.",
-              ]),
-            ),
-          },
-        });
+    if (error.code === 11000) {
+      const keys = Object.keys(error.keyPattern || error.keyValue || {});
+      const field = keys[0] || "field";
+      const msg = error.keyPattern?.roomNumber
+        ? "Room number already exists."
+        : field === "email"
+          ? "This email is already registered."
+          : field === "username"
+            ? "This username is already taken."
+            : "This value is already in use.";
+      return res.status(409).json({
+        error: {
+          message: msg,
+          ...(error.keyPattern?.roomNumber ? { code: "MSG-20" } : {}),
+          fields: Object.fromEntries(
+            keys.map((k) => [k, `${k === "email" ? "Email" : k === "username" ? "Username" : "This field"} is already in use.`]),
+          ),
+        },
+      });
+    }
     const status =
       error.status ||
       (["ValidationError", "CastError"].includes(error.name) ? 400 : 500);

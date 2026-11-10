@@ -197,3 +197,10 @@
 @media (max-width: 999px) { .cx .c-layout.detail > .book { order: -1; } }
 /* Check-out: room between the payment button and the skip option */
 .cx .pay-row, .acontent .pay-row { margin-bottom: .75rem; }
+
+/* Buttons that are links (Book now, Apply...) keep their label in the middle of the box */
+.cx a.btn, .cx button.btn { display: inline-flex; align-items: center; justify-content: center; line-height: 1.2; text-decoration: none; }
+.cx .c-body .promo-actions { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; margin-top: .75rem; }
+.cx .filters fieldset legend { max-width: 100%; white-space: nowrap; }
+/* The filter list is long: on a wide screen it stays in view and scrolls on its own */
+@media (min-width: 1000px) { .cx details.filters { position: sticky; top: 88px; max-height: calc(100vh - 108px); overflow-y: auto; } }

@@ -342,7 +342,7 @@ function Rooms({ q }) {
           <summary><h2>Filters{active > 0 ? ` (${active})` : ''}</h2></summary>
           <label>Search by name<input type="search" value={f.text} onChange={(e) => set({ text: e.target.value })} placeholder="e.g. Suite" /></label>
           <fieldset>
-            <legend>Price {unit} (VND)</legend>
+            <legend>{searched ? 'Stay price' : 'Night price'} (VND)</legend>
             <div className="price-row">
               <input type="number" min="0" step="100000" aria-label={`Minimum price ${unit}`} placeholder="From" value={f.min} onChange={(e) => set({ min: e.target.value })} />
               <input type="number" min="0" step="100000" aria-label={`Maximum price ${unit}`} placeholder="To" value={f.max} onChange={(e) => set({ max: e.target.value })} />

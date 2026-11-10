@@ -65,7 +65,12 @@ function SiteHeader({ route }) {
             ) : <li key={m.label}><a className={route.split('?')[0] === m.href ? 'active' : ''} href={m.href} onClick={done}>{m.label}</a></li>)}
           </ul>
           <div className="right">
-            {user ? (
+            {staff ? (
+              <>
+                <a className="btn gold" href="#/admin" onClick={done}>Staff portal</a>
+                <button className="signin" onClick={async () => { done(); await signOut(); location.hash = '#/'; }}>Sign out</button>
+              </>
+            ) : user ? (
               <>
                 <a className="btn gold" href="#/rooms" onClick={done}>Book now</a>
                 <NotificationBell bookingHref="#/my-bookings" allHref="#/notifications" />
@@ -80,7 +85,6 @@ function SiteHeader({ route }) {
                       <li className="acct-head"><strong>{name}</strong><small>{user.email}</small></li>
                       <li><a href="#/my-bookings" onClick={done}><strong>My bookings</strong></a></li>
                       <li><a href="#/profile" onClick={done}><strong>My profile</strong></a></li>
-                      {staff && <li><a href="#/admin" onClick={done}><strong>Staff portal</strong></a></li>}
                       <li><button className="signout" onClick={async () => { done(); await signOut(); location.hash = '#/'; }}>Sign out</button></li>
                     </ul>
                   )}
@@ -117,6 +121,8 @@ function SearchBar({ q = {} }) {
 
 // `q` carries the searched stay ("?in=…&out=…&guests=…"): the card then shows the price of that stay, the rooms left and "Book now" (UC04).
 function RoomCard({ r, q = '' }) {
+  const { user } = useAuth();
+  const canBook = !user || user.scope === 'self'; // staff and Admin accounts do not book online (BR-26)
   return (
     <article className="c-card">
       <a className="c-media" href={`#/room/${r.id}${q}`} tabIndex={-1} aria-hidden="true">
@@ -129,7 +135,7 @@ function RoomCard({ r, q = '' }) {
         {r.amenities.length > 0 && <ul className="tags">{r.amenities.map((a) => <li key={a}>{a}</li>)}</ul>}
         {r.nights > 0 && <p className="muted">{r.roomsLeft} room{r.roomsLeft > 1 ? 's' : ''} left for these dates</p>}
         <div className="promo-actions">
-          {r.nights > 0 && <a className="btn gold" href={`#/checkout${q}&room=${r.id}`}>Book now</a>}
+          {r.nights > 0 && canBook && <a className="btn gold" href={`#/checkout${q}&room=${r.id}`}>Book now</a>}
           <a className="more-link" href={`#/room/${r.id}${q}`}>View room <span aria-hidden="true">→</span></a>
         </div>
       </div>
@@ -381,6 +387,8 @@ function useRoomType(id) {
 
 function RoomDetail({ id, q }) {
   const { room: r, loading: roomLoading } = useRoomType(id);
+  const { user: viewer } = useAuth();
+  const staffViewer = viewer && viewer.scope !== 'self';
 
   const [d, setD] = useState({ in: q.in || day(7), out: q.out || day(10), guests: +q.guests || 2 });
   const policies = usePolicies();
@@ -437,8 +445,8 @@ function RoomDetail({ id, q }) {
           </dl>}
           {stay.found === null && <p className="note bad-note" role="alert">No room of this type is available for these dates. Try other dates.</p>}
           {stay.error && <p className="note bad-note" role="alert">{stay.error}</p>}
-          <button className="btn primary" type="submit" disabled={!stay.found}>
-            {!nights ? 'Choose valid dates' : stay.loading ? 'Checking availability…' : stay.found ? 'Book now' : 'Not available'}
+          <button className="btn primary" type="submit" disabled={!stay.found || staffViewer}>
+            {staffViewer ? 'Staff accounts do not book online' : !nights ? 'Choose valid dates' : stay.loading ? 'Checking availability…' : stay.found ? 'Book now' : 'Not available'}
           </button>
           <small className="muted">Promo codes are entered at checkout.</small>
         </form>
@@ -643,8 +651,12 @@ export default function Customer({ route }) {
   const [path, q] = parse(route);
 
   let page;
+  const customerPage = PROTECTED.includes(path) || path.startsWith('#/pay/');
   if (loading) page = <p className="muted c-wrap c-section">Loading…</p>;
-  else if ((PROTECTED.includes(path) || path.startsWith('#/pay/')) && !user) { sessionStorage.setItem('next', route); page = <Auth note="Please sign in to continue." />; }
+  else if (customerPage && user && user.scope !== 'self') {
+    location.replace('#/admin');
+    page = <p className="muted c-wrap c-section">This page is for customers. Opening the staff portal…</p>;
+  } else if (customerPage && !user) { sessionStorage.setItem('next', route); page = <Auth note="Please sign in to continue." />; }
   else if (path === '#/notifications') page = <div className="c-wrap c-section acct"><NotificationsPage bookingHref="#/my-bookings" /></div>;
   else if (path === '#/profile') page = <div className="c-wrap c-section acct"><Profile base="#/profile" /></div>;
   else if (path === '#/profile/password') page = <div className="c-wrap c-section acct"><ChangePassword base="#/profile" /></div>;

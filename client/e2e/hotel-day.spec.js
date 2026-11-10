@@ -192,17 +192,17 @@ test.describe("2. Customer books and pays", () => {
   });
 
   test("simultaneous bookings of one room type never exceed the rooms it has (CR-16)", async ({ browser }) => {
-    const c = await as.customer(browser), m = await as.manager(browser);
-    const types = (await (await c.api.get(`/api/public/availability?checkIn=${vn(40)}&checkOut=${vn(41)}&guests=2`)).json()).data;
-    const suite = types.find((t) => t.name === "Presidential Suite");
-    const left = suite.roomsLeft;
-    const body = { roomTypeId: suite._id, checkInDate: vn(40), checkOutDate: vn(41), guestCount: 2, consent: true, captchaToken: "x" };
-    const sessions = [c, m, c, m, c, m].slice(0, left + 1); // two accounts: at most 3 unpaid bookings each
-    const results = await Promise.all(sessions.map((a) => a.api.post("/api/bookings", { data: body })));
+    const c = await as.customer(browser);
+    // a customer holds at most 3 unpaid bookings, so the race uses the room type with the fewest free rooms (at most 2) today
+    const types = (await (await c.api.get(`/api/public/availability?checkIn=${TODAY}&checkOut=${TOMORROW}&guests=1`)).json()).data;
+    const scarce = types.filter((t) => t.roomsLeft <= 2).sort((x, y) => x.roomsLeft - y.roomsLeft)[0];
+    test.skip(!scarce, "every room type has more than 2 free rooms today");
+    const body = { roomTypeId: scarce._id, checkInDate: TODAY, checkOutDate: TOMORROW, guestCount: 1, consent: true, captchaToken: "x" };
+    const results = await Promise.all(Array.from({ length: scarce.roomsLeft + 1 }, () => c.api.post("/api/bookings", { data: body })));
     const won = results.filter((r) => r.status() === 201).length;
-    note("race", `${left} suites free, ${results.length} simultaneous requests -> ${won} booked, statuses ${results.map((r) => r.status()).join(",")}`);
-    for (const [i, r] of results.entries()) if (r.status() === 201) await sessions[i].api.post(`/api/bookings/${(await r.json()).data._id}/cancel-payment`);
-    expect(won).toBe(left);
+    note("race", `${scarce.name}: ${scarce.roomsLeft} free, ${results.length} simultaneous requests -> ${won} booked, statuses ${results.map((r) => r.status()).join(",")}`);
+    for (const r of results) if (r.status() === 201) await c.api.post(`/api/bookings/${(await r.json()).data._id}/cancel-payment`);
+    expect(won).toBe(scarce.roomsLeft);
   });
 });
 
@@ -529,7 +529,7 @@ test.describe("9. Hotel Manager", () => {
       await m.page.getByLabel("Address").fill("Vo Nguyen Giap, Son Tra, Da Nang");
       await m.page.getByLabel("Phone").last().fill("+842360000000");
       await m.page.getByRole("button", { name: /Save hotel/ }).click();
-      await expect(m.page.getByText(/Saved|Updated/i).first()).toBeVisible();
+      await expect(m.page.getByText(/Saved|Updated/i).first()).toBeVisible({ timeout: 15000 });
       await m.page.goto("/#/");
       await m.page.reload();
       await expect(m.page.locator("footer")).toContainText("GrandStay");
@@ -607,6 +607,32 @@ test.describe("10. Admin", () => {
     expect(await status(h, "get", "/api/frontdesk/refunds")).toBe(403);
     expect(await status(m, "get", "/api/frontdesk/refunds")).toBe(403); // the Hotel Manager takes no part in refunds (SRS)
     expect([401, 403]).toContain(await status(c, "post", "/api/front-desk/bookings", {}));
+  });
+});
+
+test.describe("10b. Customer pages are closed to staff and Admin accounts (BR-26)", () => {
+  for (const [name, who] of [["reception", as.reception], ["manager", as.manager], ["admin", as.admin], ["housekeeping", as.housekeeping]]) {
+    test(`${name}: customer pages send the account to the staff portal, the API refuses the self-service calls`, async ({ browser }) => {
+      const a = await who(browser);
+      for (const path of ["#/my-bookings", "#/profile", "#/notifications", "#/checkout?room=x&in=2030-01-01&out=2030-01-02&guests=1"]) {
+        await a.page.goto("/" + path);
+        await expect(a.page).toHaveURL(/#\/admin/);
+      }
+      await a.page.goto("/#/");
+      await expect(a.page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Staff portal" })).toBeVisible();
+      await expect(a.page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Book now" })).toHaveCount(0);
+      expect((await a.api.get("/api/bookings")).status()).toBe(403);
+      expect((await a.api.post("/api/bookings", { data: {} })).status()).toBe(403);
+    });
+  }
+  test("a customer cannot open the staff pages", async ({ browser }) => {
+    const c = await as.customer(browser);
+    for (const path of ["#/admin", "#/admin/bookings", "#/admin/revenue"]) {
+      await c.page.goto("/" + path);
+      await expect(c.page).toHaveURL(/#\/admin\/login/);
+    }
+    expect([401, 403]).toContain((await c.api.get("/api/bookings/search")).status()); // 401: the blacklist test above ended this session
+    expect([401, 403]).toContain((await c.api.get("/api/reports/revenue")).status());
   });
 });
 

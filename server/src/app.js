@@ -39,6 +39,11 @@ const roomController = require("./controllers/roomController");
 const customerRoutes = require("./routes/customer.routes");
 
 // The gateway calls this server-to-server, so it has no browser Origin or session; its HMAC signature authenticates it.
+// SRS BR-26: booking, payment, review and the other self-service functions need a logged-in Customer; staff and Admin accounts are refused.
+const customerOnly = (req, res, next) => {
+  if (req.role.key !== "customer") throw new HttpError(403, "Only a customer account can use this function.");
+  next();
+};
 const GATEWAY_CALLBACK = "/api/payments/gateway/callback";
 const PUBLIC_HOOKS = [GATEWAY_CALLBACK, "/api/payments/sepay/ipn"];
 // Khởi tạo API với xác thực và kiểm soát quyền tại backend.
@@ -145,17 +150,17 @@ function createApp({
     if (!["manager", "admin"].includes(req.role.key)) return permit("bookings.managed.read")(req, res, next);
     next();
   };
-  app.post("/api/bookings/:id/withdraw-cancellation", cancellations.withdraw); // UC08 2b (same as DELETE /cancel)
-  app.post("/api/bookings/:id/modify", bookingCreation.modifyOwn); // UC07
-  app.patch("/api/bookings/:id/modify", bookingCreation.modifyOwn);
+  app.post("/api/bookings/:id/withdraw-cancellation", customerOnly, cancellations.withdraw); // UC08 2b (same as DELETE /cancel)
+  app.post("/api/bookings/:id/modify", customerOnly, bookingCreation.modifyOwn); // UC07
+  app.patch("/api/bookings/:id/modify", customerOnly, bookingCreation.modifyOwn);
   app.get("/api/bookings/search", staffSearch, bookings.search);
   app.post("/api/bookings/quote", bookingCreation.quote); // UC06 price summary (also the walk-in form, UC14)
   // Front-desk Room Availability screen: physical rooms, so staff only (registered before the manager-only /api/rooms).
   app.get("/api/rooms/search", permit("rooms.search"), roomController.search);
   app.patch("/api/profile", auth.updateProfile);
   // UC12 Submit Review (Customer session)
-  app.post("/api/reviews", roomTypes.submitReview);
-  app.get("/api/reviews/my", roomTypes.customerReviews);
+  app.post("/api/reviews", customerOnly, roomTypes.submitReview);
+  app.get("/api/reviews/my", customerOnly, roomTypes.customerReviews);
   app.get("/api/room-issues/options", permit("room_issues.report"), roomIssues.options);
   app.post("/api/room-issues", permit("room_issues.report"), roomIssues.create);
   app.get("/api/room-issues", requireManager, roomIssues.listing);
@@ -213,10 +218,10 @@ function createApp({
   app.delete("/api/promotions/:id", promotions.remove);
 
   // UC10 View Booking History (Session-authenticated)
-  app.get("/api/bookings", bookings.listing);
+  app.get("/api/bookings", customerOnly, bookings.listing);
   // BR-29 / MSG-81: online bookings are limited per IP address, generously enough for shared networks.
   const bookingLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: "draft-8", legacyHeaders: false, message: { error: { message: "Too many requests. Please try again later." } } });
-  app.post("/api/bookings", bookingLimit, bookingCreation.create);
+  app.post("/api/bookings", customerOnly, bookingLimit, bookingCreation.create);
   // SRS 2.4.3 permissions, so the manager's changes in UC33 apply to these front-desk functions.
   app.post("/api/front-desk/bookings", permit("bookings.walk_in.create"), bookingCreation.createWalkIn);
   app.patch("/api/front-desk/bookings/:id", permit("bookings.managed.update"), bookingCreation.modifyWalkIn);
@@ -234,19 +239,19 @@ function createApp({
   // UC11 View Booking Details
   app.get("/api/bookings/:id", bookings.detail);
   app.get("/api/bookings/:bookingId/invoice", invoices.customerDetail);
-  app.post("/api/bookings/:id/requests", stayRequests.create);
-  app.delete("/api/bookings/:id/requests/:requestId", stayRequests.withdraw);
-  app.post("/api/bookings/:id/reviews", reviews.create);
+  app.post("/api/bookings/:id/requests", customerOnly, stayRequests.create);
+  app.delete("/api/bookings/:id/requests/:requestId", customerOnly, stayRequests.withdraw);
+  app.post("/api/bookings/:id/reviews", customerOnly, reviews.create);
 
-  app.post("/api/bookings/:id/payments/deposit", payments.deposit);
+  app.post("/api/bookings/:id/payments/deposit", customerOnly, payments.deposit);
   app.get("/api/payments/methods", payments.methods);
   app.get("/api/payments/:id", payments.show);
   if (!production || process.env.ENABLE_SANDBOX_GATEWAY === "true") app.post("/api/sandbox-gateway/orders/:orderId", payments.sandbox); // demo deployments only: moves no money
   // UC08 Cancel Reservation (customer)
-  app.get("/api/bookings/:id/refund-estimate", cancellations.estimate);
-  app.post("/api/bookings/:id/cancel", cancellations.requestOnline);
-  app.delete("/api/bookings/:id/cancel", cancellations.withdraw);
-  app.post("/api/bookings/:id/cancel-payment", cancellations.cancelPayment);
+  app.get("/api/bookings/:id/refund-estimate", customerOnly, cancellations.estimate);
+  app.post("/api/bookings/:id/cancel", customerOnly, cancellations.requestOnline);
+  app.delete("/api/bookings/:id/cancel", customerOnly, cancellations.withdraw);
+  app.post("/api/bookings/:id/cancel-payment", customerOnly, cancellations.cancelPayment);
 
   // Front desk money flows: UC11, UC16, UC35, UC21
   // SRS 2.4.3 permissions (UC33 lets the manager change them).

@@ -655,7 +655,7 @@ test("deposit payment: verified callback confirms the booking; forged, mismatche
   const url = `/api/bookings/${booking.id}/payments/deposit`;
   await send(customer, "post", url, { method: "cash" }).expect(400);
   await send(customer, "post", url, { method: "bank_transfer", amount: 1 }).expect(400);
-  await send(manager, "post", url, { method: "bank_transfer" }).expect(404);
+  await send(manager, "post", url, { method: "bank_transfer" }).expect(403); // BR-26: a staff account cannot pay a deposit
   const first = (await send(customer, "post", url, { method: "bank_transfer" }).expect(201)).body.data;
   assert.equal(first.amount, 600);
   assert.match(first.payUrl, /^#\/pay\/sandbox\/ORD/);
@@ -900,7 +900,7 @@ test("UC08: the customer requests a cancellation with a locked refund, withdraws
   const booking = await paidBooking();
   const est = (await customer.get(`/api/bookings/${booking.id}/refund-estimate`).expect(200)).body.data;
   assert.deepEqual([est.depositPaid, est.refundPercent, est.refundableAmount], [600, 100, 600]);
-  await manager.get(`/api/bookings/${booking.id}/refund-estimate`).expect(404);
+  await manager.get(`/api/bookings/${booking.id}/refund-estimate`).expect(403);
   await send(customer, "post", `/api/bookings/${booking.id}/cancel`, { reason: 123 }).expect(400);
   const r = (await send(customer, "post", `/api/bookings/${booking.id}/cancel`, { reason: "Plans changed" }).expect(200)).body;
   assert.equal(r.data.status, "cancellation_requested");
@@ -1639,4 +1639,21 @@ test("front-desk booking list: overdue check-in and check-out views, keyword on 
   await staff.get("/api/bookings/search?q=(").expect(200); // a keyword is never a regular expression
   const page = (await staff.get("/api/bookings/search?q=0977000111&limit=3&page=2").expect(200)).body;
   assert.deepEqual([page.data.length, page.meta.total, page.meta.pages], [1, 4, 2]);
+});
+
+test("BR-26: staff and Admin accounts cannot use the customer self-service functions", async () => {
+  const booking = await payBooking();
+  const stay = { roomTypeId: String(booking.rooms[0].roomTypeId), checkInDate: "2030-01-10", checkOutDate: "2030-01-12", guestCount: 1, consent: true };
+  for (const who of [staff, manager, admin]) {
+    await send(who, "post", "/api/bookings", stay).expect(403);
+    await who.get("/api/bookings").expect(403);
+    await who.get("/api/reviews/my").expect(403);
+    await send(who, "post", "/api/reviews", { bookingId: booking.id, rating: 5, comment: "x" }).expect(403);
+    await send(who, "post", `/api/bookings/${booking.id}/payments/deposit`, { method: "bank_transfer" }).expect(403);
+    await send(who, "post", `/api/bookings/${booking.id}/cancel`, {}).expect(403);
+    await send(who, "post", `/api/bookings/${booking.id}/modify`, { guestCount: 1 }).expect(403);
+    await send(who, "post", `/api/bookings/${booking.id}/requests`, {}).expect(403);
+  }
+  await (await srsUser("br26guest", "customer")).get("/api/bookings").expect(200); // a customer still can (own account: earlier tests changed the shared one)
+  await staff.get("/api/bookings/search").expect(200); // front-desk screens are unaffected
 });

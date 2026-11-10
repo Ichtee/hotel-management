@@ -460,7 +460,7 @@ function StayRequestModal({ booking, type, onClose, onSaved }) {
     <Screen title={`${isIn ? 'Check-in' : 'Check-out'} request · ${booking.bookingReference || ''}`} onClose={onClose}>
       <form className="form" onSubmit={submit}>
         <p className="muted full">{isIn ? 'Tell the front desk when you arrive so the room is ready. Check-in is from 14:00; an earlier time is an early check-in request.' : 'Tell the front desk when you leave so the bill is ready. Check-out is until 12:00; a later time (until 18:00) is a late check-out request.'} A fee applies only if it really takes place.</p>
-        <Field label={`${isIn ? 'Expected arrival' : 'Planned check-out'} time on ${dateLabel(day)}`}><input name="time" type="time" defaultValue={isIn ? '14:00' : '12:00'} required /></Field>
+        <Field label={`${isIn ? 'Expected arrival' : 'Planned check-out'} time on ${dateLabel(day)}`}><input name="time" type="text" inputMode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:mm" maxLength={5} title="24-hour time, for example 14:00" defaultValue={isIn ? '14:00' : '12:00'} required /></Field>
         {isIn && <>
           <Field label="Number of guests"><input name="numberOfGuests" type="number" min="1" max="10" defaultValue={booking.rooms?.[0]?.guestCount || 1} required /></Field>
           <Field label="Main guest full name"><input name="mainGuestName" defaultValue={booking.guestName || ''} minLength={2} maxLength={80} required /></Field>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { api, dateLabel, money } from './api/client.js';
 import { DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useEditPage, useScreen } from './ui.jsx';
 
@@ -102,7 +102,16 @@ export function Reviews() {
   const types = useApi('/room-types?limit=100');
   const typeId = new URLSearchParams(location.hash.split('?')[1] || '').get('type') || '';
   const setTypeId = (v) => { location.hash = `#/admin/reviews?type=${v}`; };
-  const id = typeId || types.data?.[0]?._id;
+  // With no room type chosen, open the first one that has reviews (the first in the list is often empty).
+  const [auto, setAuto] = useState('');
+  useEffect(() => {
+    if (typeId || !types.data?.length) return undefined;
+    let live = true;
+    Promise.all(types.data.map((t) => api(`/room-types/${t._id}/reviews?limit=1`).then((r) => [t._id, r.meta?.summary?.count || 0]).catch(() => [t._id, 0])))
+      .then((rows) => live && setAuto((rows.find(([, n]) => n > 0) || rows[0])[0]));
+    return () => { live = false; };
+  }, [typeId, types.data]);
+  const id = typeId || auto || types.data?.[0]?._id;
   const list = useApi(id ? `/room-types/${id}/reviews?limit=50` : null, Boolean(id));
   const sc = useScreen(); const [msg, setMsg] = useState(null);
   const show = async (r) => { try { await api(`/reviews/${r._id}/visibility`, { method: 'PATCH', body: { hidden: false } }); setMsg('Review is visible again.'); list.reload(); } catch (x) { alert(x.message); } };

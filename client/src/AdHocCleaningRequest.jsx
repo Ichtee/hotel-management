@@ -25,7 +25,7 @@ export default function AdHocCleaningRequest() {
       <Field label="Room" error={error?.fields?.roomId}><select name="roomId" required disabled={rooms.loading}><option value="">Select room</option>{(rooms.data || []).map((room) => <option key={room._id} value={room._id}>Room {room.roomNumber} - Floor {room.floor} ({room.status})</option>)}</select></Field>
       <Field label="Request details" error={error?.fields?.requestContent}><textarea name="requestContent" maxLength="1000" placeholder="Example: Guest requests extra cleaning after lunch." required /></Field>
       <Field label="Priority"><select name="priority" defaultValue="normal"><option value="normal">Normal</option><option value="urgent">Urgent</option></select></Field>
-      <Field label="Preferred time today (empty = as soon as possible)"><input name="time" type="time" /></Field>
+      <Field label="Preferred time today (empty = as soon as possible)"><input name="time" type="text" inputMode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:mm" maxLength={5} title="24-hour time, for example 14:00" /></Field>
       {/* UC37 4a: used only when nobody is responsible for the room in this shift */}
       <Field label="If nobody is responsible for the room: staff on duty"><select name="assignTo" defaultValue=""><option value="">Assign by the responsibility plan</option>{(rooms.meta?.onDuty || []).map((s) => <option key={s._id} value={s._id}>{s.name}</option>)}</select></Field>
       <Notice error={error || rooms.error} ok={ok} />

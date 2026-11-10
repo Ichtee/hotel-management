@@ -39,7 +39,7 @@ const Icon = ({ n, size = 18 }) => (
 );
 
 // A menu entry shows when the user has any of its permissions ('manager.only' = the Hotel Manager role).
-const allowed = (item, perms, role) => !item[3] || item[3].some((p) => (p === 'manager.only' ? role === 'manager' : p === 'admin.only' ? role === 'admin' : perms.includes(p)));
+const allowed = (item, perms, role) => !item[3] || item[3].some((p) => (p === 'manager.only' ? role === 'manager' : p === 'admin.only' ? role === 'admin' : p === 'role.receptionist' ? role === 'receptionist' : perms.includes(p)));
 
 function Sidebar({ route, open, onClose }) {
   const { user, signOut } = useAuth();
@@ -151,6 +151,10 @@ function Dashboard() {
   const rooms = useApi('/rooms?limit=100', user.role === 'manager');
   const cx = useApi('/frontdesk/cancellations', user.permissions.includes('cancellations.review'));
   const sc = useScreen();
+  // Cards without a figure of their own show the number that matters: open tasks for housekeeping, accounts for the admin.
+  const mine = useApi('/housekeeping/tasks/mine', user.permissions.includes('cleaning_tasks.own.read'));
+  const managers = useApi('/users?role=manager&limit=1', user.role === 'admin');
+  const cardValue = (href) => (href === '#/admin/cleaning' && mine.data ? `${mine.data.filter((t) => ['assigned', 'in_progress'].includes(t.status)).length} open` : href === '#/admin/users' && managers.meta ? String(managers.meta.total) : 'Open');
   const series = rev.data?.series || [];
   const roomList = (rooms.data || []).filter((r) => r.isActive !== false);
   const count = (s) => roomList.filter((r) => r.status === s).length;
@@ -192,7 +196,7 @@ function Dashboard() {
       </div>
       {!desk && !canRev && (
         <div className="kpis">
-          {MENU.flatMap((g) => g.items || []).filter(([, , , need]) => (need || []).some((n) => (n === 'admin.only' ? user.role === 'admin' : user.permissions.includes(n)))).map(([href, label, hint]) => <Stat key={href} label={label} value="Open" hint={hint || ''} href={href} />)}
+          {MENU.flatMap((g) => g.items || []).filter((item) => allowed(item, user.permissions, user.role)).map(([href, label, hint]) => <Stat key={href} label={label} value={cardValue(href)} hint={hint || ''} href={href} />)}
         </div>
       )}
     </>
@@ -363,7 +367,7 @@ function SettleBalance({ booking, balance, onPaid }) {
   };
   return <form className="form" onSubmit={submit}>
     <Field label="Payment method"><select value={method} onChange={(e) => setMethod(e.target.value)}><option value="cash">Cash</option><option value="pos">Card (POS)</option><option value="bank_transfer">Bank transfer</option></select></Field>
-    <Field label="Amount (VND)" error={error?.fields?.amount}><input key={balance} name="amount" type="number" min="1" max={balance} step="1" defaultValue={balance} onChange={(e) => setAmount(e.target.value)} required /></Field>
+    <Field label={`Amount (VND) · ${money(Number(amount) || 0)}`} error={error?.fields?.amount}><input key={balance} name="amount" type="number" min="1" max={balance} step="1" defaultValue={balance} onChange={(e) => setAmount(e.target.value)} required /></Field>
     {method === 'cash' && <Field label="Cash received from guest (optional)"><input type="number" min="0" step="1000" value={received} onChange={(e) => setReceived(e.target.value)} /></Field>}
     {method === 'cash' && received !== '' && <p className="full" role="status">{change >= 0 ? <>Change to give back: <strong>{money(change)}</strong></> : <>Still short by <strong>{money(-change)}</strong></>}</p>}
     {method !== 'cash' && <Field label="Transaction reference" error={error?.fields?.transactionRef}><input name="transactionRef" required maxLength={100} /></Field>}
@@ -428,7 +432,7 @@ function Penalties({ booking, onClose }) {
       <Field label="Damaged / lost item"><select value={pick} required onChange={(e) => { setPick(e.target.value); const it = (catalog.data || []).find((i) => i._id === e.target.value); setAmt(it ? String(it.price * qty) : ''); }}><option value="">Select an item…</option>{(catalog.data || []).map((i) => <option key={i._id} value={i._id}>{i.name} · {money(i.price)}</option>)}<option value="other">Other (describe)</option></select></Field>
       {pick === 'other' && <Field label="Item description"><input name="itemName" required maxLength={120} /></Field>}
       {pick && pick !== 'other' && <Field label="Quantity"><input type="number" min="1" step="1" value={qty} onChange={(e) => { setQty(e.target.value); const it = (catalog.data || []).find((i) => i._id === pick); if (it) setAmt(String(it.price * Number(e.target.value || 0))); }} /></Field>}
-      <Field label="Amount (VND)"><input type="number" min="1" step="1" required value={amt} onChange={(e) => setAmt(e.target.value)} /></Field>
+      <Field label={`Amount (VND)${amt ? ` · ${money(Number(amt) || 0)}` : ''}`}><input type="number" min="1" step="1" required value={amt} onChange={(e) => setAmt(e.target.value)} /></Field>
       <Field label="Description"><input name="description" maxLength={500} /></Field>
       <div className="full"><Notice error={list.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Close</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Record penalty'}</button></div>
     </form>

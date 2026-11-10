@@ -95,8 +95,8 @@ function CancellationPolicy() {
       <button type="button" className="btn sm" onClick={() => setRows([...tiers, { minHoursBeforeCheckIn: 0, refundPercent: 0 }])}>+ Add tier</button>
       {err?.fields?.tiers && <p className="err" role="alert">{err.fields.tiers}</p>}
       <div className="tier-row">
-        <Field label="Check-in time" error={err?.fields?.checkInTime}><input name="checkInTime" type="time" defaultValue={cur?.checkInTime || '14:00'} required /></Field>
-        <Field label="Check-out time" error={err?.fields?.checkOutTime}><input name="checkOutTime" type="time" defaultValue={cur?.checkOutTime || '12:00'} required /></Field>
+        <Field label="Check-in time" error={err?.fields?.checkInTime}><input name="checkInTime" type="text" inputMode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:mm" maxLength={5} title="24-hour time, for example 14:00" defaultValue={cur?.checkInTime || '14:00'} required /></Field>
+        <Field label="Check-out time" error={err?.fields?.checkOutTime}><input name="checkOutTime" type="text" inputMode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:mm" maxLength={5} title="24-hour time, for example 14:00" defaultValue={cur?.checkOutTime || '12:00'} required /></Field>
         <Field label="Early check-in fee (VND)" error={err?.fields?.earlyCheckInFee}><input name="earlyCheckInFee" type="number" min="0" step="1000" defaultValue={cur?.earlyCheckInFee ?? 0} required /></Field>
         <Field label="Late check-out fee (VND)" error={err?.fields?.lateCheckOutFee}><input name="lateCheckOutFee" type="number" min="0" step="1000" defaultValue={cur?.lateCheckOutFee ?? 0} required /></Field>
       </div>

@@ -177,3 +177,11 @@
 @media (prefers-reduced-motion: reduce) {
   .cx .c-card img, .cx .more-link { transition: none; }
 }
+.cx .filters fieldset { border: 1px solid var(--line); border-radius: 2px; padding: .6rem .9rem; display: grid; gap: .35rem; margin: 0; min-width: 0; }
+.cx .filters legend { font: 600 .7rem var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--muted); padding: 0 .3rem; }
+.cx .filters fieldset .promo-actions input { min-width: 0; width: 100%; }
+.cx .filters fieldset .check { font-size: .92rem; }
+.cx .filters > label { display: grid; gap: .35rem; }
+.cx .filters select, .cx .filters input[type="search"], .cx .filters input[type="number"] { width: 100%; min-width: 0; }
+.cx .filters .price-row { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+.cx .filters .price-row input { padding: .55rem .7rem; }

@@ -126,7 +126,7 @@ function RoomCard({ r, q = '' }) {
       <div className="c-body">
         <p className="kicker">{[r.bed, r.size && `${r.size} m²`, `Up to ${r.guests} guests`].filter(Boolean).join(' · ')}</p>
         <h3><a href={`#/room/${r.id}${q}`}>{r.name}</a></h3>
-        {r.amenities.length > 0 && <ul className="tags">{r.amenities.slice(0, 3).map((a) => <li key={a}>{a}</li>)}</ul>}
+        {r.amenities.length > 0 && <ul className="tags">{r.amenities.map((a) => <li key={a}>{a}</li>)}</ul>}
         {r.nights > 0 && <p className="muted">{r.roomsLeft} room{r.roomsLeft > 1 ? 's' : ''} left for these dates</p>}
         <div className="promo-actions">
           {r.nights > 0 && <a className="btn gold" href={`#/checkout${q}&room=${r.id}`}>Book now</a>}
@@ -290,9 +290,12 @@ const toCard = (rt) => ({
 });
 const availability = (d) => api(`/public/availability?${new URLSearchParams({ checkIn: d.in, checkOut: d.out, guests: d.guests || 1 })}`).then((res) => res.data || []);
 
+// The amenity tags are typed by the Hotel Manager (Room types); the filter groups them without caring about case or spaces.
+const tagKey = (t) => t.trim().toLowerCase();
+const NO_FILTER = { text: '', min: '', max: '', size: '', guests: '', beds: [], tags: [], sort: 'price_asc' };
+const SORTS = { price_asc: ['Price: low to high', (a, b, cost) => cost(a) - cost(b)], price_desc: ['Price: high to low', (a, b, cost) => cost(b) - cost(a)], size_desc: ['Largest first', (a, b) => (b.size || 0) - (a.size || 0)], guests_desc: ['Most guests first', (a, b) => b.guests - a.guests], name: ['Name A-Z', (a, b) => a.name.localeCompare(b.name)] };
 function Rooms({ q }) {
-  const [price, setPrice] = useState(null); // null = no limit
-  const [wanted, setWanted] = useState([]); // amenities that a room type must all have
+  const [f, setF] = useState(NO_FILTER);
   const [state, setState] = useState({ rooms: null, error: '' });
 
   // With dates: only room types that still have a free room for the whole stay (UC04). Without dates: every active room type.
@@ -306,11 +309,24 @@ function Rooms({ q }) {
   const rooms = state.rooms || [];
   const searched = Boolean(q.in && q.out);
   const cost = (r) => (searched ? r.stayAmount : r.price);
-  const top = Math.max(0, ...rooms.map(cost));
-  const amenities = [...new Set(rooms.flatMap((r) => r.amenities))].sort();
-  const list = rooms.filter((r) => (price === null || cost(r) <= price) && (!q.guests || r.guests >= +q.guests) && wanted.every((a) => r.amenities.includes(a)));
+  const set = (patch) => setF({ ...f, ...patch });
+  const toggle = (key, value) => set({ [key]: f[key].includes(value) ? f[key].filter((x) => x !== value) : [...f[key], value] });
+  // Filter options come from the rooms themselves, so a tag the manager adds shows up here without a code change.
+  const tags = [...new Map(rooms.flatMap((r) => r.amenities).map((t) => [tagKey(t), t.trim()])).values()].sort((x, y) => x.localeCompare(y));
+  const beds = [...new Set(rooms.map((r) => r.bed).filter(Boolean))].sort();
+  const sizes = [...new Set(rooms.map((r) => r.size).filter(Boolean))].sort((x, y) => x - y);
+  const capacities = [...new Set(rooms.map((r) => r.guests))].sort((x, y) => x - y);
+  const text = f.text.trim().toLowerCase();
+  const list = rooms
+    .filter((r) => (!q.guests || r.guests >= +q.guests) && (!f.guests || r.guests >= +f.guests)
+      && (!f.min || cost(r) >= +f.min) && (!f.max || cost(r) <= +f.max)
+      && (!f.size || (r.size || 0) >= +f.size) && (!f.beds.length || f.beds.includes(r.bed))
+      && f.tags.every((t) => r.amenities.some((a) => tagKey(a) === tagKey(t)))
+      && (!text || `${r.name} ${r.desc}`.toLowerCase().includes(text)))
+    .sort((x, y) => SORTS[f.sort][1](x, y, cost));
+  const active = ['text', 'min', 'max', 'size', 'guests'].filter((k) => f[k]).length + f.beds.length + f.tags.length;
   const carry = searched ? `?${new URLSearchParams({ in: q.in, out: q.out, guests: q.guests || 1 })}` : '';
-  const toggle = (a) => setWanted(wanted.includes(a) ? wanted.filter((x) => x !== a) : [...wanted, a]);
+  const unit = searched ? 'for the stay' : 'per night';
 
   return (
     <div className="c-wrap c-section">
@@ -323,13 +339,28 @@ function Rooms({ q }) {
       <div className="c-layout">
         {/* On a phone the filters start folded so the rooms come first; on a wide screen they start open. */}
         <details className="panel filters" open={window.matchMedia('(min-width: 1000px)').matches}>
-          <summary><h2>Filters</h2></summary>
-          {top > 0 && <label>Max {searched ? 'price for the stay' : 'price per night'}: {money(price ?? top)}<input type="range" min="0" max={top} step="100000" value={price ?? top} onChange={(e) => setPrice(+e.target.value >= top ? null : +e.target.value)} /></label>}
-          {amenities.length > 0 && <fieldset><legend>Amenities</legend>{amenities.map((a) => <label className="check" key={a}><input type="checkbox" checked={wanted.includes(a)} onChange={() => toggle(a)} /> {a}</label>)}</fieldset>}
+          <summary><h2>Filters{active > 0 ? ` (${active})` : ''}</h2></summary>
+          <label>Search by name<input type="search" value={f.text} onChange={(e) => set({ text: e.target.value })} placeholder="e.g. Suite" /></label>
+          <fieldset>
+            <legend>Price {unit} (VND)</legend>
+            <div className="price-row">
+              <input type="number" min="0" step="100000" aria-label={`Minimum price ${unit}`} placeholder="From" value={f.min} onChange={(e) => set({ min: e.target.value })} />
+              <input type="number" min="0" step="100000" aria-label={`Maximum price ${unit}`} placeholder="To" value={f.max} onChange={(e) => set({ max: e.target.value })} />
+            </div>
+          </fieldset>
+          <label>Guests<select value={f.guests} onChange={(e) => set({ guests: e.target.value })}><option value="">Any</option>{capacities.map((n) => <option key={n} value={n}>{n}+ guests</option>)}</select></label>
+          {sizes.length > 0 && <label>Room size<select value={f.size} onChange={(e) => set({ size: e.target.value })}><option value="">Any</option>{sizes.map((n) => <option key={n} value={n}>{n} m² or more</option>)}</select></label>}
+          {beds.length > 0 && <fieldset><legend>Bed type</legend>{beds.map((b) => <label className="check" key={b}><input type="checkbox" checked={f.beds.includes(b)} onChange={() => toggle('beds', b)} /> {b}</label>)}</fieldset>}
+          {tags.length > 0 && <fieldset><legend>Amenities</legend>{tags.map((t) => <label className="check" key={t}><input type="checkbox" checked={f.tags.some((x) => tagKey(x) === tagKey(t))} onChange={() => toggle('tags', t)} /> {t}</label>)}</fieldset>}
+          {active > 0 && <button type="button" className="btn" onClick={() => setF({ ...NO_FILTER, sort: f.sort })}>Clear all filters</button>}
         </details>
         <div>
+          <div className="between">
+            <p className="muted" role="status">{state.rooms ? `${list.length} of ${rooms.length} room type${rooms.length === 1 ? '' : 's'}` : ''}</p>
+            <label>Sort by<select value={f.sort} onChange={(e) => set({ sort: e.target.value })}>{Object.entries(SORTS).map(([k, [label]]) => <option key={k} value={k}>{label}</option>)}</select></label>
+          </div>
           <div className="c-grid g2">{list.map((r) => <RoomCard key={r.id} r={r} q={carry} />)}</div>
-          {state.rooms && !list.length && <p className="empty" role={state.error ? 'alert' : undefined}>{state.error || 'No rooms match your dates or filters. Try other dates, fewer guests or fewer filters.'}</p>}
+          {state.rooms && !list.length && <p className="empty" role={state.error ? 'alert' : undefined}>{state.error || 'No rooms match your dates or filters. Try other dates, fewer guests or fewer filters.'}{active > 0 && !state.error && <> <button type="button" className="more-link" onClick={() => setF({ ...NO_FILTER, sort: f.sort })}>Clear all filters</button></>}</p>}
         </div>
       </div>
     </div>

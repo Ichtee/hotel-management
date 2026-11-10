@@ -340,34 +340,13 @@ test("admin manages accounts, cannot demote admin; deactivation takes effect on 
   assert.equal(listing.body.data[0].passwordHash, undefined);
   await admin.get("/api/users?page=-1").expect(400);
 });
-test("legacy role administration validates scope and cannot mutate fixed system roles", async () => {
-  await manager.get("/api/roles").expect(403);
-  await send(admin, "post", "/api/roles", {
-    key: "auditor",
-    name: "Revenue auditor",
-    scope: "hotel",
-    permissions: ["revenue.read"],
-  }).expect(201);
-  await send(admin, "post", "/api/roles", {
-    key: "badrole",
-    name: "Bad role",
-    scope: "hotel",
-    permissions: ["users.manage"],
-  }).expect(400);
-  const r = await Role.findOne({ key: "admin" });
-  await send(admin, "patch", `/api/roles/${r.id}`, { permissions: [] }).expect(
-    403,
-  );
+test("roles are fixed (SRS 2.4.3): there is no role editor; only UC33 changes staff permissions", async () => {
+  await admin.get("/api/roles").expect(404);
+  await send(admin, "post", "/api/roles", { key: "auditor", name: "Revenue auditor", scope: "hotel", permissions: ["revenue.read"] }).expect(404);
   const managerRole = await Role.findOne({ key: "manager" });
-  await send(admin, "patch", `/api/roles/${managerRole.id}`, {
-    permissions: ["staff.manage", "promotions.manage"],
-  }).expect(403);
-  await manager
-    .get("/api/reports/revenue?from=2026-01-01&to=2026-01-31")
-    .expect(200);
-  await send(admin, "delete", `/api/roles/${managerRole.id}`).expect(409);
-  const custom = await Role.findOne({ key: "auditor" });
-  await send(admin, "delete", `/api/roles/${custom.id}`).expect(200);
+  await send(admin, "patch", `/api/roles/${managerRole.id}`, { permissions: [] }).expect(404);
+  await send(admin, "delete", `/api/roles/${managerRole.id}`).expect(404);
+  await manager.get("/api/reports/revenue?from=2026-01-01&to=2026-01-31").expect(200);
 });
 test("staff CRUD validates SRS contact data and blocks manager privilege escalation", async () => {
   await staff.get("/api/staff").expect(403);
@@ -997,7 +976,7 @@ test("UC35 / T20: the receptionist approves a request and a refund case opens; u
   assert.equal((await autoApprove(new Date())).approved, 0);
 });
 
-test("UC38: penalties join the bill, are confirmed, reduced or waived once, and unpaid post-check-out ones are never waived automatically", async () => {
+test("UC38: penalties join the bill, are confirmed, reduced or waived once, and unpaid post-check-out ones are waived after 7 days (System Function 21)", async () => {
   const Penalty = require("../src/models/Penalty");
   const stay = await payBooking({ status: "checked_in", holdExpiresAt: undefined });
   const url = `/api/frontdesk/bookings/${stay.id}/penalties`;
@@ -1029,9 +1008,17 @@ test("UC38: penalties join the bill, are confirmed, reduced or waived once, and 
   await send(staff, "post", `/api/frontdesk/bookings/${left.id}/penalties`, { itemName: "Minibar key", amount: 150 }).expect(201);
   const late = await Penalty.findOne({ bookingId: left._id });
   assert.equal(late.afterCheckout, true);
-  await Penalty.updateOne({ _id: late._id }, { confirmedAt: new Date(Date.now() - 30 * 864e5) });
-  assert.equal((await Penalty.findById(late._id)).status, "confirmed"); // BR-43: only the Receptionist may waive it
-  await send(staff, "patch", `/api/frontdesk/penalties/${late.id}`, { action: "waive", reason: "Guest disputes" }).expect(200);
+  const { waiveUnpaid } = require("../src/services/penalties");
+  await Penalty.updateOne({ _id: late._id }, { confirmedAt: new Date(Date.now() - 6 * 864e5) });
+  await waiveUnpaid();
+  assert.equal((await Penalty.findById(late._id)).status, "confirmed"); // not 7 days yet
+  await Penalty.updateOne({ _id: late._id }, { confirmedAt: new Date(Date.now() - 8 * 864e5) });
+  await Penalty.updateMany({ bookingId: stay._id, status: "paid" }, { afterCheckout: true, confirmedAt: new Date(0) }); // a paid line is never waived
+  assert.deepEqual(await waiveUnpaid(), { waived: 1 });
+  assert.deepEqual(await waiveUnpaid(), { waived: 0 }); // idempotent
+  const waivedLine = await Penalty.findById(late._id);
+  assert.deepEqual([waivedLine.status, waivedLine.waivedReason], ["waived", "Not paid within 7 days"]);
+  assert.ok(await require("../src/models/AuditLog").exists({ action: "penalty.waived_automatically", targetId: late._id }));
   b = await Booking.findById(left._id);
   assert.deepEqual([b.penaltyAmount, b.totalAmount], [0, 2000]);
   await send(staff, "post", `/api/frontdesk/bookings/${(await payBooking()).id}/penalties`, { itemName: "x", amount: 10 }).expect(409); // not checked in
@@ -1111,6 +1098,8 @@ test("UC34 catalogs, UC31 -> UC38 proposed penalty, supplementary invoice after 
   assert.ok((await staff.get("/api/room-issues/options").expect(200)).body.meta.compensationItems.some((i) => i.name === "Lamp shade"));
   const reported = (await send(staff, "post", "/api/room-issues", { roomId: room.id, title: "Lamp shade torn", description: "Found at turnover", severity: "low", chargeItemId: shade._id }).expect(201)).body.data;
   assert.equal(reported.penalty.status, "proposed");
+  const RoomIssue = require("../src/models/RoomIssue");
+  assert.deepEqual([reported.issue, await RoomIssue.countDocuments({ roomId: room._id })], [null, 0]); // UC31 (a): the room stays sellable
   assert.equal(reported.penalty.bookingId, left.id);
   assert.equal(reported.penalty.afterCheckout, true);
   await send(staff, "patch", `/api/frontdesk/penalties/${reported.penalty._id}`, { action: "confirm" }).expect(200);
@@ -1131,6 +1120,10 @@ test("UC34 catalogs, UC31 -> UC38 proposed penalty, supplementary invoice after 
   assert.equal(two.penalty.itemName, "Lamp shade x2");
   assert.equal((await customer.get(`/api/bookings/${left.id}`).expect(200)).body.data.penalties.length, 1);
   await send(staff, "post", "/api/room-issues", { roomId: room.id, title: "Shades", severity: "low", chargeItemId: shade._id, quantity: 0 }).expect(400);
+  // UC31 (b): a room that cannot be used still opens the issue and goes to Maintenance, with the item proposed in the same report
+  const unusable = (await send(staff, "post", "/api/room-issues", { roomId: room.id, title: "Room cannot be used (Lamp shade)", description: "Glass everywhere", severity: "high", chargeItemId: shade._id }).expect(201)).body.data;
+  assert.deepEqual([Boolean(unusable.issue), unusable.maintenanceApplied, unusable.penalty.status], [true, true, "proposed"]);
+  await Room.updateOne({ _id: room._id }, { status: "available" });
 
   // M2 room writes are no longer public
   const anon = request(app);
@@ -1145,7 +1138,7 @@ test("UC34 catalogs, UC31 -> UC38 proposed penalty, supplementary invoice after 
   const priced = (await send(manager, "put", `/api/room-types/${type.id}/pricing`, { seasonalPricing: [rate("Tet", "2027-02-01", "2027-02-09"), rate("Late Tet", "2027-02-10", "2027-02-15")] }).expect(200)).body.data;
   assert.deepEqual(priced.seasonalPricing.map((r) => r.description), ["Tet", "Late Tet"]);
   await send(manager, "put", `/api/room-types/${type.id}/pricing`, { seasonalPricing: [] }).expect(200);
-  await anon.get("/api/rooms/search").expect(200);
+  await anon.get("/api/rooms/search").expect(401); // physical rooms are staff-only; guests use /api/public/availability
 });
 
 test("UC32: only the Admin reads the audit log, filtered by action and date", async () => {
@@ -1199,6 +1192,7 @@ test("jobs endpoint: off without JOB_SECRET, then needs the secret", async () =>
     await request(app).post("/api/jobs/toString").set("X-Job-Secret", "job-secret-value").expect(404);
     const ok = await request(app).post("/api/jobs/cancellation-auto-approval").set("X-Job-Secret", "job-secret-value").expect(200);
     assert.equal(typeof ok.body.data.approved, "number");
+    for (const name of ["penalty-waiver", "housekeeping-tick", "routine-tasks"]) await request(app).post(`/api/jobs/${name}`).set("X-Job-Secret", "job-secret-value").expect(200);
   } finally {
     saved === undefined ? delete process.env.JOB_SECRET : (process.env.JOB_SECRET = saved);
   }
@@ -1568,4 +1562,81 @@ test("EmailJS adapter posts the generic template and reports a rejected send", a
     global.fetch = realFetch;
     for (const k of keys) saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k]);
   }
+});
+
+test("room holding: a pending cancellation keeps its room (BR-36), an expired hold frees it without the job (BR-29), two guests cannot take the last room (CR-16)", async () => {
+  const RoomType = require("../src/models/RoomType");
+  const Room = require("../src/models/Room");
+  const a = await srsUser("holdguest1", "customer"), b = await srsUser("holdguest2", "customer");
+  const me = await User.findOne({ username: "holdguest1" });
+  const type = await RoomType.create({ name: "Hold Single", basePrice: 1000, maxOccupancy: 2 });
+  type.rooms = [await Room.create({ roomNumber: "HOLD-1", roomTypeId: type._id, floor: 9 })];
+  const stay = { roomTypeId: type.id, checkInDate: "2028-01-10", checkOutDate: "2028-01-12", guestCount: 1, consent: true };
+  const offered = async () => (await request(app).get("/api/public/availability?checkIn=2028-01-10&checkOut=2028-01-12&guests=1").expect(200)).body.data.find((t) => t._id === type.id);
+  const held = await srsBooking(me._id, type, { checkInDate: "2028-01-10", checkOutDate: "2028-01-12", roomAmount: 2000, totalAmount: 2000, status: "cancellation_requested" });
+  await send(b, "post", "/api/bookings", stay).expect(409); // MSG-30: the request may still be withdrawn
+  assert.equal(await offered(), undefined);
+  // An unpaid hold that ended 5 minutes ago may still be at the gateway; after 15 more minutes it no longer counts, job or not.
+  await Booking.updateOne({ _id: held._id }, { status: "pending", holdExpiresAt: new Date(Date.now() - 5 * 60000) });
+  await send(b, "post", "/api/bookings", stay).expect(409);
+  await Booking.updateOne({ _id: held._id }, { holdExpiresAt: new Date(Date.now() - 16 * 60000) });
+  const free = await offered();
+  assert.deepEqual([free.roomsLeft, free.nights, free.stayAmount, free.seasonalPricing], [1, 2, 2000, undefined]);
+  const both = await Promise.all([send(a, "post", "/api/bookings", stay), send(b, "post", "/api/bookings", stay)]);
+  assert.deepEqual(both.map((r) => r.status).sort(), [201, 409]);
+  // UC04 input checks; physical rooms are for staff only
+  await request(app).get("/api/public/availability?checkIn=2028-01-12&checkOut=2028-01-10").expect(400);
+  await request(app).get("/api/rooms/search").expect(401);
+  await a.get("/api/rooms/search").expect(403);
+  await staff.get("/api/rooms/search").expect(200);
+});
+
+test("UC06 quote and UC14 walk-in coupon: the server prices every night, a bad coupon only drops the discount", async () => {
+  const RoomType = require("../src/models/RoomType");
+  const guest = await srsUser("quoteguest", "customer");
+  const { Q } = await srsRooms("QT", { Q: 1000 });
+  const today = vnDay(), tomorrow = vnDay(1), after = vnDay(2);
+  await RoomType.updateOne({ _id: Q._id }, { seasonalPricing: [{ startDate: tomorrow, endDate: tomorrow, price: 3000 }] });
+  await Coupon.create({ code: "QUOTE10", discountType: "percentage", discountValue: 10, usageLimit: 5, minimumSpend: 0, startDate: new Date(Date.now() - 864e5), endDate: new Date(Date.now() + 30 * 864e5), isActive: true });
+  const ask = (agent, couponCode) => send(agent, "post", "/api/bookings/quote", { roomTypeId: Q.id, checkInDate: today, checkOutDate: after, couponCode });
+  const q = (await ask(guest, "QUOTE10").expect(200)).body.data;
+  assert.deepEqual([q.roomAmount, q.discountAmount, q.totalAmount, q.depositPercent, q.depositRequired, q.available], [4000, 400, 3600, 50, 1800, true]);
+  assert.deepEqual(q.nights.map((n) => n.price), [1000, 3000]);
+  const bad = (await ask(guest, "NOPE").expect(200)).body.data;
+  assert.match(bad.couponError, /invalid/);
+  assert.deepEqual([bad.discountAmount, bad.totalAmount], [0, 4000]);
+  assert.equal((await ask(staff, "QUOTE10").expect(200)).body.data.depositRequired, 0); // walk-in: no deposit
+  await request(app).post("/api/bookings/quote").set("Origin", origin).send({}).expect(401);
+  // UC14 step 3: the walk-in booking takes the coupon and counts one use; cancelling gives the use back
+  const walkIn = { roomTypeId: Q.id, checkInDate: today, checkOutDate: after, guestCount: 1, fullName: "Walk In", phone: "0912345678", idDocumentNo: "012345678" };
+  await send(staff, "post", "/api/front-desk/bookings", { ...walkIn, couponCode: "NOPE" }).expect(400);
+  const made = (await send(staff, "post", "/api/front-desk/bookings", { ...walkIn, couponCode: "quote10" }).expect(201)).body.data;
+  assert.deepEqual([made.couponCode, made.discountAmount, made.totalAmount], ["QUOTE10", 400, 3600]);
+  assert.equal((await Coupon.findOne({ code: "QUOTE10" })).usageCount, 1);
+  await send(staff, "post", `/api/front-desk/bookings/${made._id}/cancel`, { reason: "Guest left" }).expect(200);
+  assert.equal((await Coupon.findOne({ code: "QUOTE10" })).usageCount, 0);
+});
+
+test("front-desk booking list: overdue check-in and check-out views, keyword on code, name or phone, pages", async () => {
+  const me = await User.findOne({ username: "quoteguest" });
+  const { V } = await srsRooms("VW", { V: 1000 });
+  const mk = (guestName, extra) => srsBooking(me._id, V, { guestName, guestPhone: "0977000111", roomAmount: 1000, totalAmount: 1000, ...extra });
+  const late = await mk("Late Arrival", { status: "confirmed", checkInDate: vnDay(-2), checkOutDate: vnDay(1) });
+  const due = await mk("Due Today", { status: "confirmed", checkInDate: vnDay(0), checkOutDate: vnDay(1) });
+  const over = await mk("Over Stay", { status: "checked_in", checkInDate: vnDay(-3), checkOutDate: vnDay(-1) });
+  const inHouse = await mk("In House", { status: "checked_in", checkInDate: vnDay(-1), checkOutDate: vnDay(2) });
+  const ids = async (query) => (await staff.get(`/api/bookings/search?limit=100&${query}`).expect(200)).body.data.map((b) => b._id);
+  const mine = [late, due, over, inHouse].map((b) => b.id);
+  const only = async (query) => (await ids(query)).filter((id) => mine.includes(id));
+  assert.deepEqual(await only("view=overdue_check_in"), [late.id]);
+  assert.deepEqual(await only("view=overdue_check_out"), [over.id]);
+  assert.deepEqual(await only("view=arrivals"), [late.id, due.id]); // oldest check-in first
+  assert.deepEqual(await only("view=departures"), [over.id]);
+  assert.deepEqual(await only("q=late+arr"), [late.id]);
+  assert.equal((await only("q=0977000111")).length, 4);
+  assert.deepEqual(await only(`q=${late.bookingReference}`), [late.id]);
+  await staff.get("/api/bookings/search?view=bogus").expect(400);
+  await staff.get("/api/bookings/search?q=(").expect(200); // a keyword is never a regular expression
+  const page = (await staff.get("/api/bookings/search?q=0977000111&limit=3&page=2").expect(200)).body;
+  assert.deepEqual([page.data.length, page.meta.total, page.meta.pages], [1, 4, 2]);
 });

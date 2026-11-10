@@ -167,7 +167,7 @@
 @media (min-width: 720px) {
   .cx .perks { grid-template-columns: repeat(2, 1fr); }
   .cx .quotes { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-  .cx .c-search { grid-template-columns: 1.6fr 1fr 1fr .8fr auto; }
+  .cx .c-search { grid-template-columns: 1fr 1fr .8fr auto; }
 }
 @media (min-width: 1000px) {
   .cx .intro { grid-template-columns: 1fr 1fr; gap: 5rem; }

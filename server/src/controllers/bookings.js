@@ -7,6 +7,7 @@ const CheckInOutRequest = require("../models/CheckInOutRequest");
 require("../models/RoomType");
 require("../models/Room");
 const v = require("../utils/validation");
+const { hotelDay } = require("../services/roomInventory");
 // SRS 2.6 booking payment status, from the verified (success) payments only (BR-14): Unpaid -> Deposit Paid -> Fully Paid.
 function paymentStatus(booking, payments) {
   const paid = payments.filter((p) => p.status === "success").reduce((s, p) => s + p.amount, 0);
@@ -56,4 +57,27 @@ async function detail(req, res) {
   ]);
   res.json({ data: { ...booking, ...paymentStatus(booking, payments), payments, refunds, penalties, invoices, requests } });
 }
-module.exports = { listing, detail };
+// Front-desk booking list: status, keyword (booking code, guest name or phone, UC16) and the views of the day.
+// A stay date is stored as a moment of its UTC day (midnight for bookings made through the API), so "due today or earlier"
+// is "before tomorrow 00:00 UTC" and "overdue" is "before today 00:00 UTC".
+const VIEWS = {
+  arrivals: (today, tomorrow) => ({ status: "confirmed", checkInDate: { $lt: tomorrow } }),
+  departures: (today, tomorrow) => ({ status: "checked_in", checkOutDate: { $lt: tomorrow } }),
+  overdue_check_in: (today) => ({ status: "confirmed", checkInDate: { $lt: today } }), // confirmed, check-in date passed, guest not arrived
+  overdue_check_out: (today) => ({ status: "checked_in", checkOutDate: { $lt: today } }), // still in house after the check-out date
+};
+async function search(req, res) {
+  v.keys(req.query, ["status", "view", "q", "page", "limit"]);
+  const today = new Date(`${hotelDay()}T00:00:00Z`);
+  const filter = req.query.view ? VIEWS[v.choice(req.query.view, "view", Object.keys(VIEWS))](today, new Date(today.getTime() + 864e5)) : {};
+  if (req.query.status) filter.status = v.choice(req.query.status, "status", Booking.schema.path("status").enumValues);
+  if (req.query.q) { const q = v.search(req.query); filter.$or = [{ bookingReference: q }, { guestName: q }, { guestPhone: q }]; }
+  const { page, limit } = v.pagination(req.query);
+  const [data, total] = await Promise.all([
+    Booking.find(filter).populate("rooms.roomTypeId", "name basePrice").populate("rooms.roomId", "roomNumber floor")
+      .sort(req.query.view ? { checkInDate: 1, _id: 1 } : { createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+    Booking.countDocuments(filter),
+  ]);
+  res.json({ data, meta: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) } });
+}
+module.exports = { listing, detail, search };

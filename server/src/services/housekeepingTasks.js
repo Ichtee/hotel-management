@@ -196,11 +196,12 @@ async function createInspectionTasks(session, events, now) {
 }
 
 // Runs housekeeping schedules and assigns Pending tasks without moving active work between shifts.
-async function runHousekeepingTick(now = new Date()) {
+// `routine: true` forces the 07:00 routine tasks (one per room and day, so a repeat adds nothing): used by the external cron.
+async function runHousekeepingTick(now = new Date(), { routine } = {}) {
   const local = new Date(now.getTime() + 7 * 3600000);
   const result = await hotelTransaction(async (session) => {
     const events = [];
-    const routineCreated = local.getUTCHours() === 7 && local.getUTCMinutes() === 0
+    const routineCreated = (routine ?? (local.getUTCHours() === 7 && local.getUTCMinutes() === 0))
       ? await createRoutineTasks(session, events, now) : 0;
     const inspectionCreated = await createInspectionTasks(session, events, now);
     await reconcileTasks(session, events, { now });

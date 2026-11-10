@@ -5,14 +5,14 @@ import { ChangePassword, Profile } from './AdminPages.jsx';
 import { MyBookings } from './Bookings.jsx';
 import { roomApi } from './api/roomApi.js';
 import { PaymentPage, PaymentResult, SandboxGateway } from './Payments.jsx';
-import { api, money } from './api/client.js';
+import { api, dateLabel, money } from './api/client.js';
 import './resort.css';
 import NotificationBell, { NotificationsPage } from './Notifications.jsx';
 import { Notice } from './ui.jsx';
 
 const NAV = [
   { label: 'Home', href: '#/' },
-  { label: 'Rooms', items: [['#/rooms', 'All rooms', 'Compare every room type'], ['#/rooms?cat=standard', 'Standard rooms', 'Deluxe & Superior'], ['#/rooms?cat=suite', 'Suites', 'Family & Presidential']] },
+  { label: 'Rooms', href: '#/rooms' },
   { label: 'Offers & policies', href: '#/offers' }
 ];
 
@@ -100,7 +100,6 @@ function SiteHeader({ route }) {
 }
 
 function SearchBar({ q = {} }) {
-  const hotel = useHotel();
   const submit = (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
@@ -108,7 +107,6 @@ function SearchBar({ q = {} }) {
   };
   return (
     <form className="c-search" onSubmit={submit}>
-      <label>Destination<input value={hotel ? [hotel.name, hotel.city].filter(Boolean).join(' ') : ''} readOnly /></label>
       <label>Check-in<input name="in" type="date" min={day(0)} defaultValue={q.in || day(7)} required /></label>
       <label>Check-out<input name="out" type="date" min={day(1)} defaultValue={q.out || day(10)} required /></label>
       <label>Guests<select name="guests" defaultValue={q.guests || "2"}>{[1, 2, 3, 4].map((n) => <option key={n}>{n}</option>)}</select></label>
@@ -117,19 +115,23 @@ function SearchBar({ q = {} }) {
   );
 }
 
+// `q` carries the searched stay ("?in=…&out=…&guests=…"): the card then shows the price of that stay, the rooms left and "Book now" (UC04).
 function RoomCard({ r, q = '' }) {
   return (
     <article className="c-card">
       <a className="c-media" href={`#/room/${r.id}${q}`} tabIndex={-1} aria-hidden="true">
         <Pic src={r.img} alt="" loading="lazy" width="900" height="1125" />
-        <span className="c-price">From <b>{money(r.price)}</b> / night</span>
+        <span className="c-price">{r.nights ? <><b>{money(r.stayAmount)}</b> for {r.nights} night{r.nights > 1 ? 's' : ''}</> : <>From <b>{money(r.price)}</b> / night</>}</span>
       </a>
       <div className="c-body">
         <p className="kicker">{[r.bed, r.size && `${r.size} m²`, `Up to ${r.guests} guests`].filter(Boolean).join(' · ')}</p>
         <h3><a href={`#/room/${r.id}${q}`}>{r.name}</a></h3>
-        {r.rating && <Stars n={r.rating} />}
         {r.amenities.length > 0 && <ul className="tags">{r.amenities.slice(0, 3).map((a) => <li key={a}>{a}</li>)}</ul>}
-        <a className="more-link" href={`#/room/${r.id}${q}`}>View room <span aria-hidden="true">→</span></a>
+        {r.nights > 0 && <p className="muted">{r.roomsLeft} room{r.roomsLeft > 1 ? 's' : ''} left for these dates</p>}
+        <div className="promo-actions">
+          {r.nights > 0 && <a className="btn gold" href={`#/checkout${q}&room=${r.id}`}>Book now</a>}
+          <a className="more-link" href={`#/room/${r.id}${q}`}>View room <span aria-hidden="true">→</span></a>
+        </div>
       </div>
     </article>
   );
@@ -155,7 +157,7 @@ const Pic = ({ src, ...p }) => (src ? <img src={src} {...p} /> : <div className=
 
 function Home() {
   const perks = [
-    ['Best price guarantee', 'Coupons and seasonal rates applied automatically.', 'M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z M7 7h.01'],
+    ['Best price guarantee', 'Seasonal rates are applied automatically; enter a promo code at checkout.', 'M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z M7 7h.01'],
     ['Verified reviews', 'Only guests who stayed can review.', 'M12 2l3 6.3 6.9.9-5 4.8 1.2 6.9L12 17.5 5.9 20.9 7.1 14 2.1 9.2l6.9-.9z'],
     ['Secure payment', 'Pay a deposit online, the rest when you check out.', 'M5 11h14v10H5z M8 11V7a4 4 0 0 1 8 0v4']
   ];
@@ -278,60 +280,56 @@ function Offers() {
   );
 }
 
-// Room-type card shape used by the room list, detail and checkout pages.
+// Room-type card shape used by the room list, detail and checkout pages. A search result also has the price of the
+// stay, its nights and the rooms left (GET /public/availability).
 const toCard = (rt) => ({
   id: rt._id, _id: rt._id, name: rt.name, price: rt.basePrice, guests: rt.maxOccupancy,
-  bed: rt.bedType || '', size: rt.roomSizeSqm || null, rating: rt.rating || null, amenities: rt.amenities || [],
-  img: rt.images?.[0] || '',
-  desc: rt.description || '', cat: rt.name.toLowerCase().includes('suite') ? 'suite' : 'standard',
+  bed: rt.bedType || '', size: rt.roomSizeSqm || null, amenities: rt.amenities || [],
+  img: rt.images?.[0] || '', desc: rt.description || '',
+  stayAmount: rt.stayAmount, nights: rt.nights, roomsLeft: rt.roomsLeft,
 });
+const availability = (d) => api(`/public/availability?${new URLSearchParams({ checkIn: d.in, checkOut: d.out, guests: d.guests || 1 })}`).then((res) => res.data || []);
 
 function Rooms({ q }) {
-  const [price, setPrice] = useState(10000000);
-  const [cat, setCat] = useState(q.cat || 'all');
-  const [isSearchingApi, setIsSearchingApi] = useState(false);
-  const [apiRooms, setApiRooms] = useState(null);
+  const [price, setPrice] = useState(null); // null = no limit
+  const [wanted, setWanted] = useState([]); // amenities that a room type must all have
+  const [state, setState] = useState({ rooms: null, error: '' });
 
-  useEffect(() => setCat(q.cat || 'all'), [q.cat]);
-
-  const [loadError, setLoadError] = useState(false);
-  // With dates: only room types that still have a free room (UC04 / T06). Without dates: every active room type.
+  // With dates: only room types that still have a free room for the whole stay (UC04). Without dates: every active room type.
   useEffect(() => {
-    setIsSearchingApi(true); setLoadError(false);
-    const load = q.in && q.out
-      ? roomApi.searchRooms({ checkIn: q.in, checkOut: q.out, guests: q.guests }).then((res) => {
-          const types = new Map();
-          for (const r of res.data || []) if (r.roomTypeId && !types.has(String(r.roomTypeId._id))) types.set(String(r.roomTypeId._id), r.roomTypeId);
-          return [...types.values()];
-        })
-      : api('/public/room-types').then((res) => res.data || []);
-    load.then((types) => setApiRooms(types.map(toCard)))
-      .catch(() => { setApiRooms([]); setLoadError(true); })
-      .finally(() => setIsSearchingApi(false));
+    setState({ rooms: null, error: '' });
+    (q.in && q.out ? availability(q) : api('/public/room-types').then((res) => res.data || []))
+      .then((types) => setState({ rooms: types.map(toCard), error: '' }))
+      .catch((x) => setState({ rooms: [], error: x.status === 400 ? x.message : 'Rooms could not be loaded. Please try again in a moment.' }));
   }, [q.in, q.out, q.guests]);
 
-  const guests = +q.guests || 2;
-  const sourceList = apiRooms || [];
-  const list = sourceList.filter((r) => r.price <= price && r.guests >= guests && (cat === 'all' || r.cat === cat));
-  const carry = q.in ? `?${new URLSearchParams({ in: q.in, out: q.out, guests: q.guests })}` : '';
+  const rooms = state.rooms || [];
+  const searched = Boolean(q.in && q.out);
+  const cost = (r) => (searched ? r.stayAmount : r.price);
+  const top = Math.max(0, ...rooms.map(cost));
+  const amenities = [...new Set(rooms.flatMap((r) => r.amenities))].sort();
+  const list = rooms.filter((r) => (price === null || cost(r) <= price) && (!q.guests || r.guests >= +q.guests) && wanted.every((a) => r.amenities.includes(a)));
+  const carry = searched ? `?${new URLSearchParams({ in: q.in, out: q.out, guests: q.guests || 1 })}` : '';
+  const toggle = (a) => setWanted(wanted.includes(a) ? wanted.filter((x) => x !== a) : [...wanted, a]);
 
   return (
     <div className="c-wrap c-section">
       <div className="between">
-        <h1 className="title">Available rooms</h1>
-        {isSearchingApi && <small className="muted">Checking room availability live...</small>}
+        <h1 className="title">{searched ? 'Available rooms' : 'Rooms & suites'}</h1>
+        {!state.rooms && <small className="muted">Checking room availability live...</small>}
       </div>
       <SearchBar key={route0(q)} q={q} />
+      {!searched && <p className="muted">Choose your dates and search to see prices, rooms left and book.</p>}
       <div className="c-layout">
         {/* On a phone the filters start folded so the rooms come first; on a wide screen they start open. */}
         <details className="panel filters" open={window.matchMedia('(min-width: 1000px)').matches}>
           <summary><h2>Filters</h2></summary>
-          <label>Max price: {money(price)}<input type="range" min="1000000" max="10000000" step="500000" value={price} onChange={(e) => setPrice(+e.target.value)} /></label>
-          <label>Category<select value={cat} onChange={(e) => setCat(e.target.value)}><option value="all">All</option><option value="standard">Standard</option><option value="suite">Suites</option></select></label>
+          {top > 0 && <label>Max {searched ? 'price for the stay' : 'price per night'}: {money(price ?? top)}<input type="range" min="0" max={top} step="100000" value={price ?? top} onChange={(e) => setPrice(+e.target.value >= top ? null : +e.target.value)} /></label>}
+          {amenities.length > 0 && <fieldset><legend>Amenities</legend>{amenities.map((a) => <label className="check" key={a}><input type="checkbox" checked={wanted.includes(a)} onChange={() => toggle(a)} /> {a}</label>)}</fieldset>}
         </details>
         <div>
           <div className="c-grid g2">{list.map((r) => <RoomCard key={r.id} r={r} q={carry} />)}</div>
-          {!isSearchingApi && !list.length && <p className="empty">{loadError ? 'Rooms could not be loaded. Please try again in a moment.' : 'No rooms match your dates or filters. Try other dates or raise the maximum price.'}</p>}
+          {state.rooms && !list.length && <p className="empty" role={state.error ? 'alert' : undefined}>{state.error || 'No rooms match your dates or filters. Try other dates, fewer guests or fewer filters.'}</p>}
         </div>
       </div>
     </div>
@@ -353,22 +351,31 @@ function useRoomType(id) {
 function RoomDetail({ id, q }) {
   const { room: r, loading: roomLoading } = useRoomType(id);
 
-  const [d, setD] = useState({ in: q.in || day(7), out: q.out || day(10), guests: +q.guests || 2, coupon: '' });
+  const [d, setD] = useState({ in: q.in || day(7), out: q.out || day(10), guests: +q.guests || 2 });
   const policies = usePolicies();
   const nights = nightsBetween(d.in, d.out);
-  const coupon = d.coupon.trim().toUpperCase();
-  const total = nights * (r?.price || 0);
   const set = (k) => (e) => setD({ ...d, [k]: e.target.value });
+  // UC05: the price of the selected dates and the rooms left; "Book now" only while the room type is available (BR-10).
+  const [stay, setStay] = useState({ loading: true });
+  useEffect(() => {
+    if (!nights) { setStay({}); return undefined; }
+    let live = true;
+    setStay({ loading: true });
+    availability(d).then((types) => live && setStay({ found: types.find((t) => t._id === id) || null })).catch((x) => live && setStay({ error: x.message }));
+    return () => { live = false; };
+  }, [id, d.in, d.out, d.guests]);
+  const [reviews, setReviews] = useState(null);
+  useEffect(() => { api(`/public/room-types/${id}/reviews?limit=5`).then(setReviews).catch(() => setReviews(null)); }, [id]);
 
   const go = (e) => {
     e.preventDefault();
-    // Use MongoDB _id when available so Checkout can send correct roomTypeId to backend
-    const roomKey = r._id || r.id;
-    location.hash = `#/checkout?${new URLSearchParams({ room: roomKey, in: d.in, out: d.out, guests: d.guests, coupon })}`;
+    location.hash = `#/checkout?${new URLSearchParams({ room: r._id, in: d.in, out: d.out, guests: d.guests })}`;
   };
 
   if (roomLoading) return <div className="c-wrap c-section"><p className="muted">Loading room details…</p></div>;
   if (!r) return <div className="c-wrap c-section"><p className="empty">This room is no longer available. <a href="#/rooms">See all rooms</a></p></div>;
+  const summary = reviews?.meta?.summary;
+  const rated = summary?.count > 0;
 
   return (
     <div className="c-wrap c-section">
@@ -376,28 +383,33 @@ function RoomDetail({ id, q }) {
       <div className="c-layout detail">
         <div>
           <Pic className="hero-img" src={r.img} alt={`${r.name} room`} width="900" height="600" />
-          <div className="between mt"><h1 className="title">{r.name}</h1>{r.rating && <Stars n={r.rating} />}</div>
+          <div className="between mt"><h1 className="title">{r.name}</h1>{rated && <span><Stars n={summary.averageRating} /> <small className="muted">{summary.averageRating.toFixed(1)} · {summary.count} review{summary.count > 1 ? 's' : ''}</small></span>}</div>
           <p className="kicker">{[r.bed, r.size && `${r.size} m²`, `Up to ${r.guests} guests`].filter(Boolean).join(' · ')}</p>
           <p>{r.desc}</p>
           <h2>Amenities</h2>
           <ul className="tags big">{r.amenities.map((a) => <li key={a}>{a}</li>)}</ul>
           <h2 className="mt">Policies</h2>
           <PolicyText p={policies} />
+          <h2 className="mt">Guest reviews</h2>
+          {rated
+            ? <ul className="policy-list">{reviews.data.map((v) => <li key={v._id}><Stars n={v.rating} /> <small className="muted">{dateLabel(v.createdAt)}</small>{(v.comment || v.title) && <p>{v.comment || v.title}</p>}</li>)}</ul>
+            : <p className="muted">No reviews yet. Only guests who completed a stay can review.</p>}
         </div>
         <form className="panel book" onSubmit={go}>
           <p className="price"><strong>{money(r.price)}</strong> <span className="muted">/ night</span></p>
           <label>Check-in<input type="date" value={d.in} min={day(0)} onChange={set('in')} required /></label>
           <label>Check-out<input type="date" value={d.out} min={d.in} onChange={set('out')} required /></label>
           <label>Guests<select value={d.guests} onChange={set('guests')}>{Array.from({ length: r.guests }, (_, i) => <option key={i}>{i + 1}</option>)}</select></label>
-          <label>Promo code (optional)<input value={d.coupon} onChange={set('coupon')} placeholder="Code" autoCapitalize="characters" /></label>
-          {coupon && <small className="muted">The code is checked when your booking is created.</small>}
-          <dl className="sum">
-            <div><dt>{money(r.price)} × {nights} night(s)</dt><dd>{money(nights * r.price)}</dd></div>
-            <div className="tot"><dt>{coupon ? 'Total before discount' : 'Total'}</dt><dd>{money(total)}</dd></div>
-          </dl>
-          <button className="btn primary" type="submit" disabled={!nights}>
-            {nights ? 'Continue to checkout' : 'Choose valid dates'}
+          {stay.found && <dl className="sum">
+            <div className="tot"><dt>{nights} night{nights > 1 ? 's' : ''}</dt><dd>{money(stay.found.stayAmount)}</dd></div>
+            <div><dt>Rooms left</dt><dd>{stay.found.roomsLeft}</dd></div>
+          </dl>}
+          {stay.found === null && <p className="note bad-note" role="alert">No room of this type is available for these dates. Try other dates.</p>}
+          {stay.error && <p className="note bad-note" role="alert">{stay.error}</p>}
+          <button className="btn primary" type="submit" disabled={!stay.found}>
+            {!nights ? 'Choose valid dates' : stay.loading ? 'Checking availability…' : stay.found ? 'Book now' : 'Not available'}
           </button>
+          <small className="muted">Promo codes are entered at checkout.</small>
         </form>
       </div>
     </div>
@@ -412,8 +424,19 @@ function Checkout({ q, user }) {
   const { room: r, loading: checkoutLoading } = useRoomType(q.room);
   const policies = usePolicies();
   const nights = nightsBetween(q.in, q.out);
-  const total = nights * (r?.price || 0);
   const [saving, setSaving] = useState(false);
+  // UC06 steps 2-4: the server prices the stay (every night at its rate, coupon, deposit). A coupon that is not valid is
+  // reported and the booking continues without the discount (4a).
+  const [typed, setTyped] = useState(q.coupon || ''); const [coupon, setCoupon] = useState(q.coupon || '');
+  const [quote, setQuote] = useState({ loading: true });
+  useEffect(() => {
+    let live = true;
+    setQuote({ loading: true });
+    api('/bookings/quote', { method: 'POST', body: { roomTypeId: q.room, checkInDate: q.in, checkOutDate: q.out, ...(coupon ? { couponCode: coupon } : {}) } })
+      .then((res) => live && setQuote({ data: res.data })).catch((x) => live && setQuote({ error: x.message }));
+    return () => { live = false; };
+  }, [q.room, q.in, q.out, coupon]);
+  const price = quote.data;
   const [error, setError] = useState('');
   const [token, setToken] = useState(''); const [tries, setTries] = useState(0);
   // UC06 steps 3-5: contact data (pre-filled from the profile), privacy consent (CR-21) and CAPTCHA (BR-29).
@@ -426,7 +449,7 @@ function Checkout({ q, user }) {
     try {
       const created = await api('/bookings', { method: 'POST', body: {
         roomTypeId: r._id, checkInDate: q.in, checkOutDate: q.out,
-        guestCount: Number(q.guests), couponCode: q.coupon || undefined,
+        guestCount: Number(q.guests), couponCode: coupon && !price?.couponError ? coupon : undefined,
         fullName: f.fullName, email: f.email, phone: f.phone, consent: f.consent === 'on', captchaToken: token || undefined,
       } });
       // A pending booking goes straight to the deposit payment (UC10); one with nothing to pay is already confirmed.
@@ -463,19 +486,26 @@ function Checkout({ q, user }) {
           <label className="check full"><input type="checkbox" name="consent" required /><span className="consent-text">I agree to the processing of my personal data (<a href="#/offers" target="_blank" rel="noreferrer">privacy notice</a>) *</span></label>
           <div className="full"><Captcha onToken={setToken} resetKey={tries} /></div>
           {error && <p className="note bad-note full" role="alert">{error}</p>}
-          <button className="btn primary" type="submit" disabled={saving}>{saving ? 'Creating booking…' : 'Continue to deposit payment'}</button>
+          <button className="btn primary" type="submit" disabled={saving || !price?.available}>{saving ? 'Creating booking…' : 'Continue to deposit payment'}</button>
         </form>
         <aside className="panel book">
           <Pic className="thumb" src={r.img} alt="" />
           <h2>{r.name}</h2>
-          <p className="muted">{q.in} → {q.out} · {nights} night(s) · {q.guests} guest(s)</p>
-          <dl className="sum">
-            <div><dt>Room</dt><dd>{money(nights * r.price)}</dd></div>
-            {q.coupon && <div><dt>Promo code</dt><dd>{q.coupon}</dd></div>}
-            <div className="tot"><dt>{q.coupon ? 'Total before discount' : 'Total'}</dt><dd>{money(total)}</dd></div>
-            {policies?.depositPercent != null && <div><dt>Deposit to pay now ({policies.depositPercent}%)</dt><dd>{money(Math.round((total * policies.depositPercent) / 100))}</dd></div>}
-          </dl>
-          <p className="muted">Seasonal rates and the promo code are applied to every night when the booking is created.</p>
+          <p className="muted">{dateLabel(q.in)} → {dateLabel(q.out)} · {nights} night(s) · {q.guests} guest(s)</p>
+          <div className="promo-actions">
+            <input aria-label="Promo code" placeholder="Promo code" value={typed} onChange={(e) => setTyped(e.target.value)} autoCapitalize="characters" />
+            <button type="button" className="btn" onClick={() => setCoupon(typed.trim().toUpperCase())} disabled={quote.loading}>Apply</button>
+          </div>
+          {price?.couponError && <p className="note bad-note" role="alert">{price.couponError} The booking continues without the discount.</p>}
+          {quote.error && <p className="note bad-note" role="alert">{quote.error}</p>}
+          {price && !price.available && <p className="note bad-note" role="alert">This room type is no longer available for these dates. <a href={`#/rooms?${new URLSearchParams({ in: q.in, out: q.out, guests: q.guests })}`}>See what is available</a></p>}
+          {quote.loading ? <p className="muted">Calculating the price…</p> : price && <dl className="sum">
+            {price.nights.map((n) => <div key={n.date}><dt>Night of {dateLabel(n.date)}</dt><dd>{money(n.price)}</dd></div>)}
+            {price.discountAmount > 0 && <div><dt>Promo code {coupon}</dt><dd>−{money(price.discountAmount)}</dd></div>}
+            <div className="tot"><dt>Total</dt><dd>{money(price.totalAmount)}</dd></div>
+            <div><dt>Deposit to pay now ({price.depositPercent}%)</dt><dd>{money(price.depositRequired)}</dd></div>
+            <div><dt>Pay at check-out</dt><dd>{money(price.totalAmount - price.depositRequired)}</dd></div>
+          </dl>}
         </aside>
       </div>
     </div>

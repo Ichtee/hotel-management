@@ -181,7 +181,7 @@ class RoomService {
 
       // Find conflicting bookings
       const conflictingBookings = await Booking.find({
-        status: { $in: ['pending', 'confirmed', 'cancellation_requested', 'checked_in'] },
+        ...require('./roomInventory').sellingFilter(), // BR-29: an expired hold no longer blocks the room
         checkInDate: { $lt: outDate },
         checkOutDate: { $gt: inDate }
       }).select('rooms.roomId');

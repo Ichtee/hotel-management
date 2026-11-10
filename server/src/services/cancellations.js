@@ -41,6 +41,8 @@ async function estimate(booking, { now = new Date(), hotelCaused = false } = {})
 async function restoreCoupon(booking) {
   const usage = await CouponUsage.findOneAndDelete({ bookingId: booking._id });
   if (usage) await Coupon.updateOne({ _id: usage.couponId, usageCount: { $gt: 0 } }, { $inc: { usageCount: -1 } });
+  // A walk-in booking has no customer account, so its coupon use is counted without a usage row (UC14).
+  else if (booking.bookingSource === "front_desk" && booking.couponCode) await Coupon.updateOne({ code: booking.couponCode, usageCount: { $gt: 0 } }, { $inc: { usageCount: -1 } });
 }
 
 // BR-16: a Confirmed booking without a paid deposit (walk-in, total 0) is cancelled at once.

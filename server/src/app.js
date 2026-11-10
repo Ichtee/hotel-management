@@ -10,7 +10,6 @@ const assignments = require("./controllers/housekeepingAssignments");
 const auth = require("./controllers/auth");
 const accounts = require("./controllers/accounts");
 const customers = require("./controllers/customers");
-const roles = require("./controllers/roles");
 const promotions = require("./controllers/promotions");
 const bookings = require("./controllers/bookings");
 const bookingCreation = require("./controllers/bookingCreation");
@@ -36,10 +35,7 @@ const catalog = require("./controllers/catalog");
 const notifications = require("./controllers/notifications");
 const auditLogs = require("./controllers/auditLogs");
 const roomController = require("./controllers/roomController");
-const bookingController = require("./controllers/bookingController");
 
-// Front-desk routes (theanh)
-const frontDeskRoutes = require("./routes/frontDeskBooking.routes");
 const customerRoutes = require("./routes/customer.routes");
 
 // The gateway calls this server-to-server, so it has no browser Origin or session; its HMAC signature authenticates it.
@@ -70,7 +66,7 @@ function createApp({
     if (req.method === "OPTIONS") {
       if (!allowed) return res.sendStatus(403);
       res.set("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE");
-      res.set("Access-Control-Allow-Headers", "Content-Type,x-admin-secret,x-user-id");
+      res.set("Access-Control-Allow-Headers", "Content-Type");
       return res.sendStatus(204);
     }
     if (!["GET", "HEAD"].includes(req.method) && !allowed && !PUBLIC_HOOKS.includes(req.path))
@@ -91,9 +87,8 @@ function createApp({
 
   app.get("/api/health", (req, res) => res.json({ data: { status: "ok" } }));
 
-  // --- Public Member 2 Routes (Room Search and Types) --- read-only; their writes are registered for the manager below.
-  app.get("/api/rooms/search", roomController.search);
-  app.get("/api/room-types/:id/price-on-date", roomTypeController.getPriceForDate);
+  // UC04 for Guests and Customers: room types with rooms left and the price of the stay; no physical room is exposed.
+  app.get("/api/public/availability", bookingCreation.availability);
 
 
   // Creation (UC06), cancel (UC08) and cancel-payment are session-authenticated and registered below (bookingCreation, cancellations).
@@ -153,7 +148,10 @@ function createApp({
   app.post("/api/bookings/:id/withdraw-cancellation", cancellations.withdraw); // UC08 2b (same as DELETE /cancel)
   app.post("/api/bookings/:id/modify", bookingCreation.modifyOwn); // UC07
   app.patch("/api/bookings/:id/modify", bookingCreation.modifyOwn);
-  app.get("/api/bookings/search", staffSearch, (req, res, next) => bookingController.search(req, res, next));
+  app.get("/api/bookings/search", staffSearch, bookings.search);
+  app.post("/api/bookings/quote", bookingCreation.quote); // UC06 price summary (also the walk-in form, UC14)
+  // Front-desk Room Availability screen: physical rooms, so staff only (registered before the manager-only /api/rooms).
+  app.get("/api/rooms/search", permit("rooms.search"), roomController.search);
   app.patch("/api/profile", auth.updateProfile);
   // UC12 Submit Review (Customer session)
   app.post("/api/reviews", roomTypes.submitReview);
@@ -173,10 +171,6 @@ function createApp({
   app.post("/api/users", permit("users.manage"), accounts.create(false));
   app.patch("/api/users/:id", permit("users.manage"), accounts.update(false));
 
-  app.get("/api/roles", permit("roles.manage"), roles.list);
-  app.post("/api/roles", permit("roles.manage"), roles.create);
-  app.patch("/api/roles/:id", permit("roles.manage"), roles.update);
-  app.delete("/api/roles/:id", permit("roles.manage"), roles.remove);
   app.use("/api/staff", requireManager);
   app.get("/api/staff/roles", staffRoles.listing);
   app.patch("/api/staff/roles/:id/permissions", staffRoles.updatePermissions);
@@ -292,7 +286,6 @@ function createApp({
 
   // Guest contact data is front-desk only (SRS 4.2.4); a Customer session must not read or change other customers.
   app.use("/api/front-desk/customers", (req, res, next) => permit(req.method === "GET" ? "bookings.managed.read" : "bookings.managed.update")(req, res, next), customerRoutes);
-  app.use("/api/front-desk", frontDeskRoutes);
 
   app.get("/api/reports/revenue", permit("revenue.read"), revenue);
   app.get("/api/reports/occupancy", permit("revenue.read"), occupancy);

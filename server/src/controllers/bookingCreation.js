@@ -24,7 +24,9 @@ const { DAY, iso, priceAt, nightsOf, priceNights, sumNights, stayAmount, storedN
 const { closeForBooking } = require("./stayRequests");
 const v = require("../utils/validation");
 
-const ACTIVE = ["pending", "confirmed", "checked_in"];
+const { hotelTransaction } = require("../services/hotelOperations");
+const { sellingFilter } = require("../services/roomInventory");
+
 const OPEN_ISSUE = ["open", "in_progress"];
 const NOT_AVAILABLE = "The selected room is not available for the selected dates. Please choose another room or date."; // MSG-30
 const NO_CHECK_IN = "This booking cannot be checked in. Check its status and check-in date."; // MSG-69
@@ -47,10 +49,18 @@ async function assignRoom(roomTypeId, checkInDate, checkOutDate, ignoredBookingI
   return { roomId: candidates.find((r) => !busy.has(String(r._id)))?._id || null };
 }
 async function busyRooms(ids, from, to, ignoredBookingId) {
-  const filter = { status: { $in: ACTIVE }, checkInDate: { $lt: new Date(`${iso(to)}T00:00:00Z`) }, checkOutDate: { $gt: new Date(`${iso(from)}T00:00:00Z`) }, "rooms.roomId": { $in: ids } };
+  const filter = { ...sellingFilter(), checkInDate: { $lt: new Date(`${iso(to)}T00:00:00Z`) }, checkOutDate: { $gt: new Date(`${iso(from)}T00:00:00Z`) }, "rooms.roomId": { $in: ids } };
   if (ignoredBookingId) filter._id = { $ne: ignoredBookingId };
   return new Set((await Booking.distinct("rooms.roomId", filter)).map(String));
 }
+// CR-16: "find a free room, then save the booking" runs one request at a time (the hotel lock makes a second request wait
+// for the first to commit), so two requests can never take the last room of a type. `save(roomId)` writes the booking.
+const locked = (work) => hotelTransaction(() => work());
+const reserve = (roomTypeId, from, to, save) => locked(async () => {
+  const { roomId } = await assignRoom(roomTypeId, from, to);
+  if (!roomId) throw new v.HttpError(409, NOT_AVAILABLE);
+  return save(roomId);
+});
 const depositsPaid = async (bookingId) =>
   (await Payment.find({ bookingId, kind: "deposit", status: "success" }).select("amount").lean()).reduce((s, p) => s + p.amount, 0);
 const totalOf = (b) => b.roomAmount - (b.discountAmount || 0) + (b.serviceAmount || 0) + (b.feeAmount || 0) + (b.penaltyAmount || 0);
@@ -74,8 +84,6 @@ async function create(req, res) {
   const type = await RoomType.findOne({ _id: roomTypeId, isActive: true });
   if (!type) throw new v.HttpError(404, "This room type is no longer available."); // MSG-82
   if (guestCount > type.maxOccupancy) v.fail(`This room accommodates up to ${type.maxOccupancy} guests.`, "guestCount");
-  const assignment = await assignRoom(type._id, checkInDate, checkOutDate);
-  if (!assignment.roomId) throw new v.HttpError(409, NOT_AVAILABLE);
   const nightlyRates = priceNights(type, checkInDate, checkOutDate); // BR-07: every night at its own rate
   const roomAmount = sumNights(nightlyRates);
   const coupon = req.body.couponCode?.trim() ? await validateCoupon({ code: req.body.couponCode, customerId: req.user._id, subtotal: roomAmount }) : null;
@@ -86,10 +94,10 @@ async function create(req, res) {
   const depositRequired = percentOf(totalAmount, policy.deposit.value);
   // BR-29: the room is held for 15 minutes while the deposit is paid; BR-31: a booking with nothing to pay is confirmed at once.
   const held = depositRequired >= 1;
-  const booking = await Booking.create({
+  const booking = await reserve(type._id, checkInDate, checkOutDate, (roomId) => Booking.create({
     bookingReference: reference(), customerId: req.user._id, createdBy: req.user._id, checkInDate, checkOutDate,
     status: held ? "pending" : "confirmed", holdExpiresAt: held ? new Date(Date.now() + 15 * 60000) : undefined,
-    rooms: [{ roomId: assignment.roomId, roomTypeId: type._id, priceAtBooking: Math.round(roomAmount / nightsOf(checkInDate, checkOutDate)), guestCount }],
+    rooms: [{ roomId, roomTypeId: type._id, priceAtBooking: Math.round(roomAmount / nightsOf(checkInDate, checkOutDate)), guestCount }],
     guestName, guestPhone, guestEmail, consentAt: new Date(), nightlyRates,
     couponCode: coupon?.code, discountAmount, roomAmount, totalAmount, depositRequired,
     // BR-35: deposit percentage and cancellation tiers are copied into the booking.
@@ -99,17 +107,55 @@ async function create(req, res) {
       cancellationTiers: (cancellation?.cancellationTiers || []).map(({ minHoursBeforeCheckIn, refundPercent }) => ({ minHoursBeforeCheckIn, refundPercent })),
     },
     bookingSource: "online", events: [{ actorId: req.user._id, type: "created", note: "Booking created online" }],
-  });
+  }));
   if (coupon) { await CouponUsage.create({ couponId: coupon.couponId, bookingId: booking._id, customerId: req.user._id }); await Coupon.updateOne({ _id: coupon.couponId }, { $inc: { usageCount: 1 } }); }
   if (!held) await tell("booking_confirmed", booking.customerId, { reference: booking.bookingReference }, { bookingId: booking._id });
   // The deposit order is opened by the payment page (UC10), so no placeholder payment is created here.
   res.status(201).json({ data: booking });
 }
+// UC04: the active room types that fit the guests and still have a room for the whole stay, with the rooms left and the
+// price of these nights (BR-07, BR-10). Physical rooms are not exposed.
+async function availability(req, res) {
+  v.keys(req.query, ["checkIn", "checkOut", "guests"]);
+  const { checkIn, checkOut } = req.query;
+  stayDates(checkIn, checkOut);
+  const guests = req.query.guests === undefined ? 1 : v.number(Number(req.query.guests), "guests", 1, 20);
+  const types = await RoomType.find({ isActive: true, maxOccupancy: { $gte: guests } }).select("name description basePrice maxOccupancy amenities images bedType roomSizeSqm seasonalPricing").sort({ basePrice: 1 }).lean();
+  const rooms = await Room.find({ roomTypeId: { $in: types.map((t) => t._id) }, isActive: true, status: { $ne: "maintenance" } }).select("roomTypeId").lean();
+  const busy = await busyRooms(rooms.map((r) => r._id), checkIn, checkOut);
+  const data = types.map(({ seasonalPricing, ...t }) => ({
+    ...t, nights: nightsOf(checkIn, checkOut), stayAmount: stayAmount({ ...t, seasonalPricing }, checkIn, checkOut),
+    roomsLeft: rooms.filter((r) => String(r.roomTypeId) === String(t._id) && !busy.has(String(r._id))).length,
+  })).filter((t) => t.roomsLeft > 0);
+  res.json({ data });
+}
+// UC06 steps 2-4: the server prices the stay before the booking is created (CR-06). An invalid coupon is reported and the
+// quote continues without the discount (4a). Staff get no deposit: a walk-in booking pays none (BR-13).
+async function quote(req, res) {
+  v.keys(req.body, ["roomTypeId", "checkInDate", "checkOutDate", "couponCode"]);
+  const { roomTypeId, checkInDate, checkOutDate } = req.body;
+  v.id(roomTypeId, "roomTypeId"); stayDates(checkInDate, checkOutDate);
+  const type = await RoomType.findOne({ _id: roomTypeId, isActive: true });
+  if (!type) throw new v.HttpError(404, "This room type is no longer available."); // MSG-82
+  const nightlyRates = priceNights(type, checkInDate, checkOutDate), roomAmount = sumNights(nightlyRates);
+  const isCustomer = req.role.key === "customer";
+  let discountAmount = 0, couponError;
+  if (req.body.couponCode?.trim()) {
+    try { ({ discountAmount } = await validateCoupon({ code: req.body.couponCode, customerId: isCustomer ? req.user._id : undefined, subtotal: roomAmount })); }
+    catch (error) { if (error.status !== 400) throw error; couponError = error.message; }
+  }
+  const totalAmount = roomAmount - discountAmount;
+  const depositPercent = isCustomer ? (await currentDepositPolicy())?.deposit?.value ?? 0 : 0;
+  res.json({ data: {
+    nights: nightlyRates.map((n) => ({ date: iso(n.date), price: n.price })), roomAmount, discountAmount, couponError, totalAmount,
+    depositPercent, depositRequired: percentOf(totalAmount, depositPercent), available: Boolean((await assignRoom(type._id, checkInDate, checkOutDate)).roomId),
+  } });
+}
 async function roomTypes(_req, res) { res.json({ data: await RoomType.find({ isActive: true }).select("name description basePrice maxOccupancy amenities images bedType roomSizeSqm seasonalPricing").sort({ basePrice: 1 }).lean() }); }
 
 // UC14: walk-in booking for today, no deposit (BR-12, BR-13).
 async function createWalkIn(req, res) {
-  v.keys(req.body, ["roomTypeId", "checkInDate", "checkOutDate", "guestCount", "fullName", "phone", "email", "idDocumentNo"]);
+  v.keys(req.body, ["roomTypeId", "checkInDate", "checkOutDate", "guestCount", "fullName", "phone", "email", "idDocumentNo", "couponCode"]);
   const b = req.body;
   v.id(b.roomTypeId, "roomTypeId"); stayDates(b.checkInDate, b.checkOutDate);
   if (b.checkInDate !== vnDate()) v.fail("A booking without a deposit can only be created for today's check-in date.", "checkInDate", 409); // MSG-62
@@ -119,10 +165,11 @@ async function createWalkIn(req, res) {
   const type = await RoomType.findOne({ _id: b.roomTypeId, isActive: true });
   if (!type) throw new v.HttpError(404, "This room type is no longer available.");
   if (guestCount > type.maxOccupancy) v.fail(`This room accommodates up to ${type.maxOccupancy} guests.`, "guestCount");
-  const assignment = await assignRoom(type._id, b.checkInDate, b.checkOutDate);
-  if (!assignment.roomId) throw new v.HttpError(409, NOT_AVAILABLE);
   const nightlyRates = priceNights(type, b.checkInDate, b.checkOutDate), roomAmount = sumNights(nightlyRates);
-  const booking = await Booking.create({ bookingReference: reference(), nightlyRates, createdBy: req.user._id, checkInDate: b.checkInDate, checkOutDate: b.checkOutDate, status: "confirmed", rooms: [{ roomId: assignment.roomId, roomTypeId: type._id, priceAtBooking: Math.round(roomAmount / nightsOf(b.checkInDate, b.checkOutDate)), guestCount }], guestName: fullName, guestPhone: phone, guestEmail: email, guestIdDocumentNo: idDocumentNo, roomAmount, totalAmount: roomAmount, depositRequired: 0, bookingSource: "front_desk", events: [{ actorId: req.user._id, type: "created", note: "Walk-in booking created by receptionist" }] });
+  const coupon = b.couponCode?.trim() ? await validateCoupon({ code: b.couponCode, subtotal: roomAmount }) : null; // UC14 step 3 (BR-09)
+  const discountAmount = coupon?.discountAmount || 0;
+  const booking = await reserve(type._id, b.checkInDate, b.checkOutDate, (roomId) => Booking.create({ bookingReference: reference(), nightlyRates, createdBy: req.user._id, checkInDate: b.checkInDate, checkOutDate: b.checkOutDate, status: "confirmed", rooms: [{ roomId, roomTypeId: type._id, priceAtBooking: Math.round(roomAmount / nightsOf(b.checkInDate, b.checkOutDate)), guestCount }], guestName: fullName, guestPhone: phone, guestEmail: email, guestIdDocumentNo: idDocumentNo, roomAmount, couponCode: coupon?.code, discountAmount, totalAmount: roomAmount - discountAmount, depositRequired: 0, bookingSource: "front_desk", events: [{ actorId: req.user._id, type: "created", note: "Walk-in booking created by receptionist" }] }));
+  if (coupon) await Coupon.updateOne({ _id: coupon.couponId }, { $inc: { usageCount: 1 } });
   res.status(201).json({ data: booking, message: "Booking created successfully." }); // MSG-31
 }
 
@@ -180,9 +227,11 @@ async function modifyWalkIn(req, res) {
   if (b.fullName !== undefined) booking.guestName = v.text(b.fullName, "fullName", 2, 80);
   if (b.phone !== undefined) booking.guestPhone = v.phone(b.phone, true);
   if (b.idDocumentNo !== undefined) booking.guestIdDocumentNo = v.text(b.idDocumentNo, "idDocumentNo", 3, 40);
-  if (stayChange) await changeStay(booking, b, { byCustomer: false, dropCoupon: b.dropCoupon === true });
   booking.events.push({ actorId: req.user._id, type: "modified", note: "Booking modified by receptionist" });
-  await booking.save();
+  await locked(async () => { // CR-16: the new nights are taken and saved under the hotel lock
+    if (stayChange) await changeStay(booking, b, { byCustomer: false, dropCoupon: b.dropCoupon === true });
+    await booking.save();
+  });
   if (booking.customerId) await tell("booking_modified", booking.customerId, { reference: booking.bookingReference }, { bookingId: booking._id });
   res.json({ data: booking, message: "Updated successfully." }); // MSG-02
 }
@@ -198,9 +247,8 @@ async function modifyOwn(req, res) {
   if (b.fullName !== undefined) booking.guestName = v.text(b.fullName, "fullName", 2, 80);
   if (b.phone !== undefined) booking.guestPhone = v.phone(b.phone, true);
   if (b.email !== undefined) booking.guestEmail = v.email(b.email);
-  await changeStay(booking, b, { byCustomer: true });
   booking.events.push({ actorId: req.user._id, type: "modified", note: "Booking modified by the customer" });
-  await booking.save();
+  await locked(async () => { await changeStay(booking, b, { byCustomer: true }); await booking.save(); }); // CR-16
   await tell("booking_modified", booking.customerId, { reference: booking.bookingReference }, { bookingId: booking._id });
   res.json({ data: booking, message: "Updated successfully." });
 }
@@ -315,7 +363,12 @@ async function changeRoom(req, res) {
     if (oldRoom) await Room.updateOne({ _id: oldRoom._id }, { $set: { status: broken ? "maintenance" : "cleaning" } });
     await Room.updateOne({ _id: pick.room._id }, { $set: { status: "occupied" } });
     if (oldRoom) turnover = (await createCleaningTask({ roomId: String(oldRoom._id), type: "turnover" })).data;
-  } else line.roomId = (await assignRoom(pick.roomType._id, from, to, booking._id)).roomId;
+    await booking.save();
+  } else await locked(async () => { // CR-16: take a room of the new type and save under the hotel lock
+    line.roomId = (await assignRoom(pick.roomType._id, from, to, booking._id)).roomId;
+    if (!line.roomId) throw new v.HttpError(409, NOT_AVAILABLE);
+    await booking.save();
+  });
   booking.events.push({ actorId: req.user._id, type: "room_changed", note: `${checkedIn ? `Moved to room ${pick.room.roomNumber}` : `Room type changed to ${pick.roomType.name}`}${pick.lower ? " (lower-priced, guest agreed)" : ""}`, oldValue: before, newValue: { roomId: line.roomId, roomTypeId: line.roomTypeId, roomAmount: booking.roomAmount } });
   await booking.save();
   await audit(req.user._id, "booking.room_changed", "booking", booking._id, { before, after: { roomId: line.roomId, roomTypeId: line.roomTypeId, roomAmount: booking.roomAmount }, guestAgreedLower: pick.lower });
@@ -468,4 +521,4 @@ async function generateInvoice(req, res) {
   if (!booking || booking.status !== "checked_out") throw new v.HttpError(409, "An invoice is generated only after check-out.");
   res.status(201).json({ data: await issueInvoice(booking, req.user._id) });
 }
-module.exports = { create, roomTypes, createWalkIn, modifyWalkIn, modifyOwn, availableRooms, checkIn, changeRoomOptions, changeRoom, services, addService, voidService, startCheckOut, checkOut, generateInvoice, lateCharge };
+module.exports = { create, availability, quote, roomTypes, createWalkIn, modifyWalkIn, modifyOwn, availableRooms, checkIn, changeRoomOptions, changeRoom, services, addService, voidService, startCheckOut, checkOut, generateInvoice, lateCharge };

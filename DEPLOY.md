@@ -76,6 +76,16 @@ Tất cả key đều dán vào **Render → grandstay-api → Environment**. Ve
 ## 5. Sau khi deploy
 
 - **Render free tự ngủ sau 15 phút không có ai truy cập.** Lần mở đầu tiên sẽ mất khoảng 50 giây, và khi API ngủ thì các job tự động (hết hạn giữ phòng, tự duyệt huỷ, nhắc lịch) cũng dừng. Để giữ API luôn thức, tạo một cron miễn phí trên https://cron-job.org gọi `GET https://<tên-service>.onrender.com/api/health` mỗi 10 phút.
+  Chắc chắn hơn (SRS 4.2.4: job không được phụ thuộc lượng truy cập): cũng trên cron-job.org, tạo các cron gọi `POST https://<tên-service>.onrender.com/api/jobs/<tên-job>` với header `X-Job-Secret: <giá trị JOB_SECRET trên Render>`. Mọi job đều chạy lại an toàn và tự xử lý phần bị lỡ:
+
+  | Job | Lịch (giờ Việt Nam) |
+  | --- | --- |
+  | `hold-expiry`, `cancellation-auto-approval`, `housekeeping-tick` | mỗi 5 phút |
+  | `payment-reconciliation` | 04:15 hằng ngày |
+  | `penalty-waiver` | 04:30 hằng ngày |
+  | `no-show-processing` | 06:00 hằng ngày |
+  | `routine-tasks` | 07:00 hằng ngày |
+  | `arrival-reminder` | 09:00 hằng ngày |
 - **Đổi mật khẩu 5 tài khoản demo** (`HotelDemo123!`) nếu web công khai lâu dài.
 - Mỗi lần push lên GitHub, Render và Vercel tự deploy lại.
 

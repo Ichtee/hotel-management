@@ -13,14 +13,15 @@ function checkPeriodAndSpend(coupon, subtotal, now) {
   return Math.min(subtotal, Math.floor((subtotal * coupon.discountValue) / 100));
 }
 
+// `customerId` is missing for a walk-in guest without an account (UC14): the once-per-customer check is then skipped.
 async function validateCoupon({ code, customerId, subtotal, now = new Date() }) {
-  v.id(String(customerId), "customerId");
+  if (customerId) v.id(String(customerId), "customerId");
   v.number(subtotal, "subtotal", 1);
   const coupon = await Coupon.findOne({ code: v.text(code, "code", 2, 30).toUpperCase() });
   if (!coupon || !coupon.isActive) v.fail("Coupon code is invalid.", "couponCode"); // MSG-29
   if (coupon.usageCount >= coupon.usageLimit) v.fail("Reached limit. This coupon can no longer be used.", "couponCode"); // MSG-27
   const discountAmount = checkPeriodAndSpend(coupon, subtotal, now);
-  if (await CouponUsage.exists({ couponId: coupon._id, customerId })) v.fail("You have already used this coupon.", "couponCode");
+  if (customerId && (await CouponUsage.exists({ couponId: coupon._id, customerId }))) v.fail("You have already used this coupon.", "couponCode");
   return { couponId: coupon.id, code: coupon.code, discountAmount };
 }
 

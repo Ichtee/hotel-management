@@ -27,46 +27,10 @@ export const roomApi = {
     return request(`/public/room-types${q ? '?' + q : ''}`).catch(() => request(`/room-types${q ? '?' + q : ''}`));
   },
 
-  async getRoomTypeById(id) {
-    return request(`/room-types/${id}`);
-  },
-
-  async createRoomType(data) {
-    return request('/room-types', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    });
-  },
-
-  async updateRoomType(id, data) {
-    return request(`/room-types/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(data)
-    });
-  },
-
-  async deleteRoomType(id) {
-    return request(`/room-types/${id}`, {
-      method: 'DELETE'
-    });
-  },
-
-  async updatePricing(id, pricingData) {
-    return request(`/room-types/${id}/pricing`, {
-      method: 'PUT',
-      body: JSON.stringify(pricingData)
-    });
-  },
-
   // --- Rooms & Room Map (UC30, UC05) ---
   async getRooms(params = {}) {
     const q = new URLSearchParams(params).toString();
     return request(`/rooms${q ? '?' + q : ''}`);
-  },
-
-  async searchRooms(params = {}) {
-    const q = new URLSearchParams(params).toString();
-    return request(`/rooms/search${q ? '?' + q : ''}`);
   },
 
   async createRoom(data) {

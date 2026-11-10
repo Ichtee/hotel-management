@@ -10,7 +10,7 @@ const schema = new Schema({
   proposedAmount: { type: Number, required: true, min: 1 },
   amount: { type: Number, min: 0 }, // confirmed amount, at most proposedAmount
   status: { type: String, enum: ['proposed', 'confirmed', 'paid', 'waived'], default: 'proposed' },
-  afterCheckout: { type: Boolean, default: false }, // found after check-out: supplementary charge (no automatic waiver, BR-43)
+  afterCheckout: { type: Boolean, default: false }, // found after check-out: supplementary charge, waived by the 04:30 job when unpaid after 7 days (BR-43)
   reportedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   confirmedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   confirmedAt: Date,

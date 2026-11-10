@@ -104,7 +104,6 @@ function Topbar({ onMenu }) {
 /* ---------- Dashboard: live data only ---------- */
 const vnDay = (offset) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(Date.now() + offset * 864e5));
 const shortDate = (iso) => new Date(`${iso}T00:00:00+07:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Ho_Chi_Minh' });
-const endOfToday = () => encodeURIComponent(`${vnDay(0)}T23:59:59+07:00`);
 const ROOM_STATUSES = [['available', 'Available'], ['occupied', 'Occupied'], ['cleaning', 'Cleaning'], ['maintenance', 'Maintenance']];
 const canSeeBookings = (u) => ['manager', 'admin'].includes(u.role) || u.permissions.includes('bookings.managed.read');
 
@@ -115,7 +114,7 @@ function Stat({ label, value, hint, href }) {
 
 // Today's arrivals (confirmed, check-in today or overdue) and departures (in-house, check-out today or overdue).
 function useFrontDesk(enabled) {
-  const arrivals = useApi(`/bookings/search?status=confirmed&checkInTo=${endOfToday()}&limit=100`, enabled);
+  const arrivals = useApi('/bookings/search?view=arrivals&limit=100', enabled);
   const inHouse = useApi('/bookings/search?status=checked_in&limit=100', enabled);
   const end = new Date(`${vnDay(0)}T23:59:59+07:00`);
   const departures = (inHouse.data || []).filter((b) => new Date(b.checkOutDate) <= end);
@@ -200,12 +199,27 @@ function Dashboard() {
   );
 }
 
+// Views of the day first (the server compares the stay dates with today), then the plain statuses.
+const BOOKING_VIEWS = { arrivals: 'Arrivals', overdue_check_in: 'Overdue check-in', departures: 'Departures', overdue_check_out: 'Overdue check-out' };
+const BOOKING_STATUSES = ['pending', 'confirmed', 'cancellation_requested', 'checked_in', 'checked_out', 'cancelled', 'no_show', 'expired'];
+const VIEW_HINT = {
+  arrivals: 'Confirmed bookings due to check in today or earlier, oldest first.',
+  overdue_check_in: 'Confirmed bookings whose check-in date has passed and the guest has not arrived.',
+  departures: 'In-house guests due to check out today or earlier.',
+  overdue_check_out: 'In-house guests still in the room after their check-out date.',
+};
 function Bookings() {
   const { user } = useAuth();
   // The filter lives in the URL (#/admin/bookings?view=arrivals), so a link and the dashboard cards open the right list.
   const f = new URLSearchParams(location.hash.split('?')[1] || '').get('view') || 'all';
-  const setF = (v) => { location.hash = v === 'all' ? '#/admin/bookings' : `#/admin/bookings?view=${v}`; };
   const [search, setSearch] = useState('');
+  // The page belongs to one filter + keyword, so a new filter starts at page 1 without a state reset. (A setState next to
+  // the hash change would make React drop the reload: `f` is read from location.hash, which React does not track.)
+  const [paging, setPaging] = useState({ of: '', page: 1 });
+  const listKey = `${f}|${search}`;
+  const page = paging.of === listKey ? paging.page : 1;
+  const setPage = (p) => setPaging({ of: listKey, page: p });
+  const setF = (v) => { location.hash = v === 'all' ? '#/admin/bookings' : `#/admin/bookings?view=${v}`; };
   const sc = useScreen();
   const [notice, setNotice] = useState(null);
   // UC20 7a: generate the invoice again after a failure (an existing invoice is returned as it is).
@@ -214,13 +228,11 @@ function Bookings() {
     catch (x) { setNotice({ error: x }); }
   };
 
-  // Arrivals and departures are views of the same list (they replace the separate Check-in / Check-out page).
-  const statusParam = f === 'arrivals' ? `&status=confirmed&checkInTo=${endOfToday()}` : f === 'departures' ? '&status=checked_in' : f !== 'all' ? `&status=${f}` : '';
-  const searchParam = search ? `&reference=${encodeURIComponent(search)}` : '';
-  const live = useApi(`/bookings/search?limit=100${statusParam}${searchParam}`);
-  const dayEnd = new Date(`${vnDay(0)}T23:59:59+07:00`);
-  const bookingsList = (live.data || []).filter((b) => f !== 'departures' || new Date(b.checkOutDate) <= dayEnd);
-  if (sc.name === 'new') return <WalkInBooking onClose={() => { live.reload(); sc.close(); }} />;
+  const query = new URLSearchParams({ page, limit: 10, ...(BOOKING_VIEWS[f] ? { view: f } : f !== 'all' ? { status: f } : {}), ...(search.trim() ? { q: search.trim() } : {}) });
+  const live = useApi(`/bookings/search?${query}`);
+  const bookingsList = live.data || [];
+  const pages = live.meta?.pages || 1;
+  if (sc.name === 'new') return <WalkInBooking onClose={sc.close} onCreated={(b) => location.replace(`#/admin/bookings?screen=check-in&id=${b._id}`)} />;
   if (sc.name) return <BookingScreen sc={sc} onDone={live.reload} />;
 
   return (
@@ -228,29 +240,29 @@ function Bookings() {
       <PageHead
         title="Bookings"
         sub="All reservations, newest first"
-        action={user.role === 'receptionist' || user.role === 'admin' ? 'New booking' : null}
+        action={user.role === 'receptionist' ? 'New booking' : null}
         onAction={() => sc.go('new')}
       />
-      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap' }}>
-        <div className="chips" role="group" aria-label="Filter by status" style={{ margin: 0 }}>
-          {['all', 'arrivals', 'departures', 'pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled'].map((s) => (
-            <button key={s} className={f === s ? 'chip on' : 'chip'} aria-pressed={f === s} onClick={() => setF(s)}>{s.replace('_', ' ')}</button>
-          ))}
-        </div>
-        <input
-          type="search"
-          placeholder="Search by booking code"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ padding: '0.45rem 0.8rem', borderRadius: '8px', border: '1px solid var(--line)', minWidth: '260px' }}
-        />
+      <div className="chips" role="group" aria-label="Filter by view or status">
+        {[['all', 'All'], ...Object.entries(BOOKING_VIEWS), ...BOOKING_STATUSES.map((s) => [s, s.replaceAll('_', ' ')])].map(([key, label]) => (
+          <button key={key} className={f === key ? 'chip on' : 'chip'} aria-pressed={f === key} onClick={() => setF(key)}>{label}</button>
+        ))}
       </div>
+      <input
+        type="search"
+        aria-label="Search bookings"
+        placeholder="Search by booking code, guest name or phone"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        style={{ padding: '0.45rem 0.8rem', borderRadius: '8px', border: '1px solid var(--line)', width: 'min(100%, 360px)', marginBottom: '1rem' }}
+      />
+      {VIEW_HINT[f] && <p className="muted">{VIEW_HINT[f]}</p>}
       <Notice error={live.error || notice?.error} ok={notice?.ok} />
       <DataTable
         cols={['Booking', 'Guest', 'Stay', 'Total', 'Status', '']}
         rows={bookingsList.map((b) => [
           <span key="c" className="nw"><b>{b.bookingReference || b._id.slice(-8).toUpperCase()}</b><small className="muted" style={{ display: 'block' }}>{roomOf(b)}</small></span>,
-          <span key="g" className="nw">{b.guestName || '—'}</span>,
+          <span key="g" className="nw">{b.guestName || '—'}{b.guestPhone && <small className="muted" style={{ display: 'block' }}>{b.guestPhone}</small>}</span>,
           <span key="s" className="nw">{dateLabel(b.checkInDate)} → {dateLabel(b.checkOutDate)}</span>,
           money(b.totalAmount),
           b.status,
@@ -267,6 +279,15 @@ function Bookings() {
         ])}
       />
       {!live.loading && bookingsList.length === 0 && <p className="empty">No bookings match this filter.</p>}
+      {live.meta && (
+        <div className="between" style={{ marginTop: '1rem' }}>
+          <span className="muted">{live.meta.total} booking{live.meta.total === 1 ? '' : 's'} · page {live.meta.page} of {pages}</span>
+          <span className="row-actions">
+            <button className="btn sm" disabled={page <= 1 || live.loading} onClick={() => setPage(page - 1)}>Previous</button>
+            <button className="btn sm" disabled={page >= pages || live.loading} onClick={() => setPage(page + 1)}>Next</button>
+          </span>
+        </div>
+      )}
     </>
   );
 }
@@ -483,28 +504,46 @@ function EditBooking({ booking, onClose }) {
   </form></Screen>;
 }
 
-function WalkInBooking({ onClose }) {
-  const types = useApi('/public/room-types'); // active room types; /room-types is the Hotel Manager's catalogue
+// UC14: a walk-in booking is for tonight only (MSG-62). Only the room types still available for the whole stay can be
+// selected (UC04), the server prices the stay with the optional coupon, and the created booking opens the check-in (step 5).
+function WalkInBooking({ onClose, onCreated }) {
+  const today = vnDay(0);
+  const [stay, setStay] = useState({ checkOutDate: vnDay(1), guestCount: '1', roomTypeId: '' }); const [coupon, setCoupon] = useState('');
+  const set = (k) => (e) => setStay({ ...stay, [k]: e.target.value });
+  const valid = stay.checkOutDate > today && +stay.guestCount >= 1;
+  const types = useApi(`/public/availability?${new URLSearchParams({ checkIn: today, checkOut: stay.checkOutDate, guests: stay.guestCount })}`, valid);
+  const [quote, setQuote] = useState(null);
+  useEffect(() => {
+    setQuote(null);
+    if (!stay.roomTypeId || !valid) return undefined;
+    let live = true;
+    api('/bookings/quote', { method: 'POST', body: { roomTypeId: stay.roomTypeId, checkInDate: today, checkOutDate: stay.checkOutDate, ...(coupon ? { couponCode: coupon } : {}) } })
+      .then((r) => live && setQuote(r.data)).catch(() => {});
+    return () => { live = false; };
+  }, [stay.roomTypeId, stay.checkOutDate, coupon]);
   const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
   const submit = async (e) => {
     e.preventDefault(); setSaving(true); setError(null);
     const f = Object.fromEntries(new FormData(e.target));
-    try { await api('/front-desk/bookings', { method: 'POST', body: { ...f, guestCount: Number(f.guestCount) } }); onClose(); }
-    catch (x) { setError(x); } finally { setSaving(false); }
+    try {
+      const made = await api('/front-desk/bookings', { method: 'POST', body: { roomTypeId: stay.roomTypeId, checkInDate: today, checkOutDate: stay.checkOutDate, guestCount: Number(stay.guestCount), fullName: f.fullName, phone: f.phone, idDocumentNo: f.idDocumentNo, ...(f.email ? { email: f.email } : {}), ...(coupon && !quote?.couponError ? { couponCode: coupon } : {}) } });
+      onCreated(made.data);
+    } catch (x) { setError(x); } finally { setSaving(false); }
   };
   return <Screen title="Create walk-in booking" onClose={onClose}>
     <form className="form" onSubmit={submit}>
-      <p className="full muted">Walk-in booking · no deposit required</p>
-      <Field label="Check-in"><input name="checkInDate" type="date" required /></Field>
-      <Field label="Check-out"><input name="checkOutDate" type="date" required /></Field>
-      <Field label="Room type"><select name="roomTypeId" required disabled={types.loading}><option value="">Select a room type</option>{types.data?.map((t) => <option key={t._id} value={t._id}>{t.name} · {money(t.basePrice)} / night</option>)}</select></Field>
-      <Field label="Guests"><input name="guestCount" type="number" min="1" max="20" defaultValue="1" required /></Field>
+      <p className="full muted">Walk-in booking for tonight ({dateLabel(today)}) · no deposit · the check-in opens after it is created</p>
+      <Field label="Check-out"><input type="date" min={vnDay(1)} value={stay.checkOutDate} onChange={set('checkOutDate')} required /></Field>
+      <Field label="Guests"><input type="number" min="1" max="20" value={stay.guestCount} onChange={set('guestCount')} required /></Field>
+      <Field label="Available room type"><select value={stay.roomTypeId} onChange={set('roomTypeId')} required disabled={types.loading}><option value="">{types.data && !types.data.length ? 'No room type is available' : 'Select a room type'}</option>{types.data?.map((t) => <option key={t._id} value={t._id}>{t.name} · {money(t.stayAmount)} · {t.roomsLeft} left</option>)}</select></Field>
+      <Field label="Coupon code (optional)"><input onBlur={(e) => setCoupon(e.target.value.trim().toUpperCase())} autoCapitalize="characters" /></Field>
+      {quote && <p className="full note">{quote.couponError ? `${quote.couponError} The booking continues without the discount. ` : ''}Total {money(quote.totalAmount)}{quote.discountAmount > 0 ? ` (discount ${money(quote.discountAmount)})` : ''}, paid at check-out.</p>}
       <Field label="Guest full name"><input name="fullName" required /></Field>
-      <Field label="Phone"><input name="phone" inputMode="numeric" required /></Field>
-      <Field label="Email"><input name="email" type="email" required /></Field>
+      <Field label="Phone"><input name="phone" inputMode="tel" required /></Field>
+      <Field label="Email (optional)"><input name="email" type="email" /></Field>
       <Field label="ID / passport number"><input name="idDocumentNo" required /></Field>
       <div className="full"><Notice error={types.error || error} /></div>
-      <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || types.loading}>{saving ? 'Creating…' : 'Create booking'}</button></div>
+      <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || types.loading || !stay.roomTypeId}>{saving ? 'Creating…' : 'Create booking and check in'}</button></div>
     </form>
   </Screen>;
 }

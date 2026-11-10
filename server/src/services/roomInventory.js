@@ -14,6 +14,9 @@ function holdingFilter(now = new Date()) {
     { status: "pending", $or: [{ holdExpiresAt: { $gt: now } }, { holdExpiresAt: null }] },
   ] };
 }
+// BR-29 for selling a room: an unpaid hold stops counting 15 minutes after it ended, without waiting for the expiry job.
+// ponytail: the 15 extra minutes cover a deposit still at the gateway for every hold; check the pending payment per booking if that is too long.
+const sellingFilter = (now = new Date()) => holdingFilter(new Date(now.getTime() - 15 * 60000));
 
 // Quét các mốc đổi số lượng để phát hiện thiếu phòng mà không duyệt từng ngày.
 async function capacityImpact(typeId, excludedRoomId, session, now = new Date()) {
@@ -58,4 +61,4 @@ async function assertCapacity(typeId, excludedRoomId, session, now = new Date())
   }
   return impact;
 }
-module.exports = { hotelDay, holdingFilter, capacityImpact, assertCapacity };
+module.exports = { hotelDay, holdingFilter, sellingFilter, capacityImpact, assertCapacity };

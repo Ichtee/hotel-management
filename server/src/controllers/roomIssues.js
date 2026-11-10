@@ -16,6 +16,12 @@ async function create(req, res) {
   const quantity = req.body.quantity === undefined || req.body.quantity === "" ? 1 : Number(req.body.quantity);
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 20) v.fail("Quantity must be a whole number from 1 to 20.", "quantity");
   const input = { roomId: v.id(req.body.roomId, "roomId"), title: v.text(req.body.title, "title", 2, 120), description: v.text(req.body.description, "description", 0, 2000), severity: v.choice(req.body.severity, "severity", ["low", "medium", "high"]) };
+  // UC31 (a): a damaged / missing item alone is only a Proposed penalty. No room issue is opened for it, so the room is not
+  // sent to Maintenance at check-out (BR-05 is for a room that cannot be used).
+  if (chargeItemId && input.severity !== "high") {
+    if (!(await Room.exists({ _id: input.roomId }))) throw new v.HttpError(404, "Room not found.");
+    return res.status(201).json({ data: { issue: null, maintenanceApplied: false, penalty: await proposePenalty(input, chargeItemId, req.user._id, quantity) } });
+  }
   const result = await hotelTransaction(async (session) => {
     const room = await Room.findById(input.roomId).session(session);
     if (!room) throw new v.HttpError(404, "Room not found.");
@@ -68,7 +74,7 @@ async function proposePenalty(issue, itemId, reportedBy, quantity = 1) {
     bookingId: booking._id, roomId: issue.roomId, itemName: quantity > 1 ? `${item.name} x${quantity}` : item.name, description: issue.description || issue.title,
     proposedAmount: item.price * quantity, status: "proposed", afterCheckout: booking.status === "checked_out", reportedBy,
   });
-  await notifyRole("penalty_proposed", "receptionist", { reference: booking.bookingReference, item: quantity > 1 ? `${item.name} x${quantity}` : item.name, amount: item.price * quantity }, { bookingId: booking._id, roomIssueId: issue._id })
+  await notifyRole("penalty_proposed", "receptionist", { reference: booking.bookingReference, item: quantity > 1 ? `${item.name} x${quantity}` : item.name, amount: item.price * quantity }, { bookingId: booking._id, ...(issue._id ? { roomIssueId: issue._id } : {}) })
     .catch((e) => console.error("Notification failed:", e.message));
   return penalty;
 }

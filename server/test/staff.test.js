@@ -88,7 +88,7 @@ test("UC22/UC33 deny non-manager access including custom roles with staff.manage
   await request(app).get("/api/staff").expect(401);
   await send(admin, "post", "/api/users", { ...payload(), username: "backdoor" }).expect(403);
   await send(admin, "patch", `/api/users/${staff.id}`, { status: "suspended" }).expect(403);
-  await send(admin, "patch", `/api/roles/${roles.receptionist.id}`, { permissions: [] }).expect(403);
+  await send(admin, "patch", `/api/roles/${roles.receptionist.id}`, { permissions: [] }).expect(404); // roles are fixed (SRS 2.4.3): no role editor
   await admin.get("/api/users?role=receptionist").expect(403);
   const list = await admin.get("/api/users").expect(200);
   assert.ok(!list.body.data.some((u) => u._id === staff.id));

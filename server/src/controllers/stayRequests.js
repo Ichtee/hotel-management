@@ -4,6 +4,9 @@ const Request = require("../models/CheckInOutRequest");
 const { currentCancellationPolicy } = require("../services/policies");
 const { notify, notifyRole } = require("../services/notifications");
 const v = require("../utils/validation");
+const idPhoto = require("../services/idPhoto");
+const { dropPhotos } = idPhoto;
+const { audit } = require("../services/audit");
 
 const parseTime = (value) => {
   if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) v.fail("Enter a valid requested time.", "requestedTime");
@@ -15,7 +18,7 @@ const quiet = (p) => p.catch((e) => console.error("Notification failed:", e.mess
 
 // UC39: a check-in request for a Confirmed booking until its check-in time, a check-out request for a Checked-in booking.
 async function create(req, res) {
-  v.keys(req.body, ["type", "requestedTime", "note", "numberOfGuests", "mainGuestName", "mainGuestIdNumber"]);
+  v.keys(req.body, ["type", "requestedTime", "note", "numberOfGuests", "mainGuestName", "mainGuestIdNumber", "idPhoto"]);
   const booking = await Booking.findOne({ _id: v.id(req.params.id), customerId: req.user._id });
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   const type = v.choice(req.body.type, "type", ["check_in", "check_out"]);
@@ -32,7 +35,11 @@ async function create(req, res) {
     const roomType = await RoomType.findById(booking.rooms[0].roomTypeId).select("maxOccupancy");
     data.numberOfGuests = v.number(req.body.numberOfGuests, "numberOfGuests", 1, roomType?.maxOccupancy || 20);
     data.mainGuestName = v.text(req.body.mainGuestName, "mainGuestName", 2, 80);
-    data.mainGuestIdNumber = v.text(req.body.mainGuestIdNumber, "mainGuestIdNumber", 3, 40);
+    if (req.body.mainGuestIdNumber) data.mainGuestIdNumber = v.text(req.body.mainGuestIdNumber, "mainGuestIdNumber", 3, 40); // optional: the front desk checks the original document at check-in (BR-18)
+  }
+  if (req.body.idPhoto) {
+    if (!idPhoto.ownsPhoto(req.user._id, req.body.idPhoto)) v.fail("The ID photo is not valid. Upload it again.", "idPhoto");
+    Object.assign(data, { idPhoto: req.body.idPhoto, hasIdPhoto: true });
   }
   const standard = type === "check_in" ? checkInAt : bookingMoment(booking.checkOutDate, policy?.checkOutTime || "12:00");
   const early = type === "check_in" && requestedTime < standard;
@@ -57,6 +64,7 @@ async function withdraw(req, res) {
     { new: true },
   );
   if (!request) throw new v.HttpError(409, "There is no open request to withdraw.");
+  await dropPhotos({ _id: request._id });
   res.json({ data: request, message: "Your request was withdrawn." });
 }
 
@@ -86,7 +94,20 @@ async function handle(req, res) {
 }
 
 // BR-44: Completed at check-in / check-out, Cancelled when the booking is cancelled, expires or becomes No-show.
+// Customer: signed parameters for one direct upload to Cloudinary (the photo never passes through this server).
+async function photoUploadParams(req, res) {
+  if (!(await Booking.exists({ _id: v.id(req.params.id), customerId: req.user._id, status: "confirmed" }))) throw new v.HttpError(404, "Booking not found.");
+  res.json({ data: idPhoto.uploadParams(req.user._id) });
+}
+// Front desk: a 5-minute link to the photo; every view is written to the audit log.
+async function photoLink(req, res) {
+  const r = await Request.findOne({ _id: v.id(req.params.id), hasIdPhoto: true }).select("+idPhoto bookingId");
+  if (!r?.idPhoto) throw new v.HttpError(404, "There is no ID photo for this request.");
+  await audit(req.user._id, "stay_request.id_photo_viewed", "booking", r.bookingId, { requestId: r._id });
+  res.json({ data: { url: idPhoto.downloadUrl(r.idPhoto) } });
+}
 async function closeForBooking(bookingId, status = "completed") {
+  await dropPhotos({ bookingId, status: { $in: ["pending", "approved"] } });
   await Request.updateMany({ bookingId, status: { $in: ["pending", "approved"] } }, { $set: { status } });
 }
-module.exports = { create, withdraw, listing, handle, closeForBooking };
+module.exports = { create, withdraw, listing, handle, closeForBooking, photoUploadParams, photoLink };

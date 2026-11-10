@@ -451,7 +451,18 @@ function StayRequestModal({ booking, type, onClose, onSaved }) {
   const submit = async (e) => {
     e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); setSaving(true); setErr(null);
     try {
-      const body = { type, requestedTime: `${day}T${f.time}:00+07:00`, note: f.note || '', ...(isIn ? { numberOfGuests: Number(f.numberOfGuests), mainGuestName: f.mainGuestName, mainGuestIdNumber: f.mainGuestIdNumber } : {}) };
+      let idPhoto;
+      const file = isIn && f.idFile;
+      if (file?.size) {
+        if (file.size > 5e6 || !/^image\/(jpeg|png)$/.test(file.type)) throw new Error('The ID photo must be a JPG or PNG file of at most 5 MB.');
+        const p = (await api(`/bookings/${booking._id}/id-photo-upload`)).data; // signed: goes straight to Cloudinary, private
+        const fd = new FormData(); fd.append('file', file);
+        for (const [k, val] of [['api_key', p.apiKey], ['timestamp', p.timestamp], ['folder', p.folder], ['type', p.type], ['format', p.format], ['signature', p.signature]]) fd.append(k, val);
+        const up = await fetch(`https://api.cloudinary.com/v1_1/${p.cloudName}/image/upload`, { method: 'POST', body: fd });
+        if (!up.ok) throw new Error('The ID photo could not be uploaded. Try again or show the document at the front desk.');
+        idPhoto = (await up.json()).public_id;
+      }
+      const body = { type, requestedTime: `${day}T${f.time}:00+07:00`, note: f.note || '', ...(isIn ? { numberOfGuests: Number(f.numberOfGuests), mainGuestName: f.mainGuestName, mainGuestIdNumber: f.mainGuestIdNumber || undefined, idPhoto } : {}) };
       const r = await api(`/bookings/${booking._id}/requests`, { method: 'POST', body });
       onSaved(r.data.status === 'approved' ? `${r.message} No early check-in / late check-out was asked, so it is approved.` : r.message);
     } catch (x) { setErr(x); setSaving(false); }
@@ -464,7 +475,9 @@ function StayRequestModal({ booking, type, onClose, onSaved }) {
         {isIn && <>
           <Field label="Number of guests"><input name="numberOfGuests" type="number" min="1" max="10" defaultValue={booking.rooms?.[0]?.guestCount || 1} required /></Field>
           <Field label="Main guest full name"><input name="mainGuestName" defaultValue={booking.guestName || ''} minLength={2} maxLength={80} required /></Field>
-          <Field label="Main guest ID / passport number"><input name="mainGuestIdNumber" minLength={3} maxLength={40} required /></Field>
+          <Field label="Main guest ID / passport number (optional, can be shown at the front desk)"><input name="mainGuestIdNumber" minLength={3} maxLength={40} /></Field>
+          <Field label="Photo of the ID / passport (optional, JPG or PNG, max 5 MB)"><input name="idFile" type="file" accept="image/jpeg,image/png" /></Field>
+          <p className="muted full">The photo is private: only the front desk can open it, and it is deleted when your stay starts or the booking ends. Bring the original document to the front desk anyway.</p>
         </>}
         <Field label="Note (optional)"><input name="note" maxLength={1000} /></Field>
         <div className="full"><Notice error={err} /></div>

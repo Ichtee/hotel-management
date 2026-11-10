@@ -6,7 +6,7 @@ import HousekeepingTasks from './HousekeepingTasks.jsx';
 import HousekeepingAssignments from './HousekeepingAssignments.jsx';
 import RoomIssues from './RoomIssues.jsx';
 import AdHocCleaningRequest from './AdHocCleaningRequest.jsx';
-import StayRequests from './StayRequests.jsx';
+import StayRequests, { IdPhotoLink } from './StayRequests.jsx';
 import Invoices from './Invoices.jsx';
 import RoomAvailability from './RoomAvailability.jsx';
 import NotificationBell, { NotificationsPage } from './Notifications.jsx';
@@ -482,7 +482,7 @@ function CheckInBooking({ booking, onClose }) {
   const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${booking._id}/check-in`, { method: 'POST', body: { ...f, guestCount: Number(f.guestCount) } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
   if (rooms.loading) return <Screen title={`Check in ${booking.bookingReference}`} onClose={onClose}><p className="muted">Loading rooms…</p></Screen>;
   return <Screen title={`Check in ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
-    {pre && <p className="full note">Pre-filled from the guest's check-in request: verify it against the original ID document.</p>}
+    {pre && <p className="full note">Pre-filled from the guest's check-in request: verify it against the original ID document. {pre.hasIdPhoto && <IdPhotoLink requestId={pre._id} />}</p>}
     <Field label="Available room"><select name="roomId" required><option value="">Select a room</option>{rooms.data?.map((r) => <option key={r._id} value={r._id}>Room {r.roomNumber} · Floor {r.floor}</option>)}</select></Field>
     <Field label="Number of guests"><input name="guestCount" type="number" min="1" defaultValue={pre?.guestCount || booking.rooms?.[0]?.guestCount || 1} required /></Field><Field label="ID / passport number"><input name="idDocumentNo" defaultValue={pre?.idDocumentNo || ''} required /></Field>
     <div className="full"><Notice error={rooms.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || !rooms.data?.length}>{saving ? 'Checking in…' : 'Confirm check-in'}</button></div>

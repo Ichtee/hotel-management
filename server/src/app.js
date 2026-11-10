@@ -241,6 +241,7 @@ function createApp({
   app.get("/api/bookings/:bookingId/invoice", invoices.customerDetail);
   app.post("/api/bookings/:id/requests", customerOnly, stayRequests.create);
   app.delete("/api/bookings/:id/requests/:requestId", customerOnly, stayRequests.withdraw);
+  app.get("/api/bookings/:id/id-photo-upload", customerOnly, stayRequests.photoUploadParams);
   app.post("/api/bookings/:id/reviews", customerOnly, reviews.create);
 
   app.post("/api/bookings/:id/payments/deposit", customerOnly, payments.deposit);
@@ -264,6 +265,7 @@ function createApp({
   app.get("/api/frontdesk/invoices/:id", billing, invoices.detail);
   app.get("/api/frontdesk/requests", permit("stay_requests.manage"), stayRequests.listing);
   app.patch("/api/frontdesk/requests/:id", permit("stay_requests.manage"), stayRequests.handle);
+  app.get("/api/frontdesk/requests/:id/id-photo", permit("stays.check_in"), stayRequests.photoLink);
   app.post("/api/frontdesk/bookings/:id/cancel-otp", cancel, cancellations.sendOtp);
   app.get("/api/frontdesk/cancellations/lookup", cancel, cancellations.lookup);
   app.get("/api/frontdesk/cancellations", review, cancellations.listing);

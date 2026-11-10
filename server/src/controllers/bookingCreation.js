@@ -260,7 +260,7 @@ async function availableRooms(req, res) {
   const candidates = await Room.find({ roomTypeId: booking.rooms[0].roomTypeId, isActive: true, status: "available" }).select("roomNumber floor roomTypeId").lean();
   const busy = await busyRooms(candidates.map((r) => r._id), booking.checkInDate, booking.checkOutDate, booking._id);
   const request = await Request.findOne({ bookingId: booking._id, type: "check_in", status: "approved" }).select("+mainGuestIdNumber");
-  res.json({ data: candidates.filter((r) => !busy.has(String(r._id))), meta: { request: request && { guestCount: request.numberOfGuests, idDocumentNo: request.mainGuestIdNumber, requestedTime: request.requestedTime } } });
+  res.json({ data: candidates.filter((r) => !busy.has(String(r._id))), meta: { request: request && { _id: request._id, hasIdPhoto: request.hasIdPhoto, guestCount: request.numberOfGuests, idDocumentNo: request.mainGuestIdNumber, requestedTime: request.requestedTime } } });
 }
 // UC17: on the check-in date, or after midnight until the 06:00 no-show cut-off (BR-18, BR-33).
 async function checkIn(req, res) {

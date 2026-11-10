@@ -12,6 +12,8 @@ const schema = new Schema({
   numberOfGuests: { type: Number, min: 1 },
   mainGuestName: { type: String, trim: true },
   mainGuestIdNumber: { type: String, trim: true, select: false },
+  idPhoto: { type: String, select: false }, // private Cloudinary id of the ID document photo; deleted when the request closes
+  hasIdPhoto: { type: Boolean, default: false },
   quotedFee: { type: Number, min: 0, default: 0 },
   status: { type: String, enum: ["pending", "approved", "rejected", "completed", "cancelled"], default: "pending", index: true },
   handledBy: { type: Schema.Types.ObjectId, ref: "User" },

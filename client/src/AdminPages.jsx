@@ -284,6 +284,8 @@ function CouponForm({ coupon, onClose, onSaved }) {
 }
 
 /* ---------------- Revenue (UC36) ---------------- */
+// CR-05: 2026-11-07 -> 07/11/2026, 2026-11 -> 11/2026
+const period = (s) => (/^\d{4}-\d{2}(-\d{2})?$/.test(String(s)) ? String(s).split('-').reverse().join('/') : s);
 export function Revenue() {
   const [p, setP] = useState({ from: day(-29), to: day(0), groupBy: 'day' });
   const rep = useApi(`/reports/revenue?${qs(p)}`);
@@ -313,7 +315,7 @@ export function Revenue() {
               : <p className="muted">Choose a longer range to see a trend.</p>}
           </section>
           <h2 className="mt">Details</h2>
-          <DataTable cols={['Period', 'Received', 'Refunded', 'Net', 'Payments', 'Refunds']} rows={d.series.map((r) => [r.date, money(r.received), money(r.refunded), money(r.net), r.paymentCount, r.refundCount])} />
+          <DataTable cols={['Period', 'Received', 'Refunded', 'Net', 'Payments', 'Refunds']} rows={d.series.map((r) => [period(r.date), money(r.received), money(r.refunded), money(r.net), r.paymentCount, r.refundCount])} />
         </>
       )}
     </>
@@ -360,7 +362,7 @@ export function Occupancy() {
           </section>
 
           <h2 className="mt">Daily details</h2>
-          <DataTable cols={['Date', 'Available room-nights', 'Occupied room-nights', 'Occupancy rate']} rows={d.series.map((r) => [r.date, String(r.availableRoomNights), String(r.occupiedRoomNights), pctFmt(r.rate)])} />
+          <DataTable cols={['Date', 'Available room-nights', 'Occupied room-nights', 'Occupancy rate']} rows={d.series.map((r) => [period(r.date), String(r.availableRoomNights), String(r.occupiedRoomNights), pctFmt(r.rate)])} />
         </>
       )}
     </>

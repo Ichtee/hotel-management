@@ -185,3 +185,15 @@
 .cx .filters select, .cx .filters input[type="search"], .cx .filters input[type="number"] { width: 100%; min-width: 0; }
 .cx .filters .price-row { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
 .cx .filters .price-row input { padding: .55rem .7rem; }
+
+/* Login page: the dark side panel kept the dark heading and logo colours of the light theme */
+.cx .split-side h2 { color: #fff; }
+.cx .split-side .brand { color: #fff; }
+.cx .split-side .brand span { color: #f0c677; }
+/* A heading focused by the script when a screen opens is not a control: no ring around it */
+.cx [tabindex="-1"]:focus, .cx [tabindex="-1"]:focus-visible { outline: none; }
+.cx h3 .badge, .cx .badge { font-family: var(--sans); }
+/* Room details on a phone: the booking box comes first, so "Book now" is not below the reviews */
+@media (max-width: 999px) { .cx .c-layout.detail > .book { order: -1; } }
+/* Check-out: room between the payment button and the skip option */
+.cx .pay-row, .acontent .pay-row { margin-bottom: .75rem; }

@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { api, dateLabel, inputDate, money } from './api/client.js';
 import { Badge, DataTable, Field, Notice, Screen, useApi, useScreen } from './ui.jsx';
 
+const PAY_KIND = { deposit: 'Deposit', final: 'Balance paid at the desk', penalty: 'Damage / loss' };
+const PAY_METHOD = { cash: 'Cash', pos: 'Card (POS)', bank_transfer: 'Bank transfer', credit_card: 'Card', e_wallet: 'E-wallet' };
 const UPCOMING = ['pending', 'confirmed', 'checked_in', 'cancellation_requested'];
 const nightsOf = (a, b) => Math.max(1, Math.round((new Date(b) - new Date(a)) / 864e5));
 const part = (d, opt) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', ...opt }).format(new Date(d));
@@ -109,7 +111,7 @@ function Details({ id, startCancel, onChanged }) {
         {b.payments.length > 0 && (
           <ul className="lines" aria-label="Payments">
             {b.payments.map((p, i) => (
-              <li key={i}><span>{p.kind} · {p.method.replace('_', ' ')} · {dateLabel(p.paidAt || p.createdAt)}</span><span>{money(p.amount)} <Badge v={p.status} /></span></li>
+              <li key={i}><span>{PAY_KIND[p.kind] || p.kind} · {PAY_METHOD[p.method] || p.method.replace('_', ' ')} · {dateLabel(p.paidAt || p.createdAt)}</span><span>{money(p.amount)} <Badge v={p.status} /></span></li>
             ))}
           </ul>
         )}

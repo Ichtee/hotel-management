@@ -415,3 +415,5 @@ body.dlg-open { overflow: hidden; }
   .table-wrap table.cards td[data-label=""] { justify-content: flex-end; flex-wrap: wrap; padding-top: .5rem; }
   .table-wrap table.cards td:last-child:has(.btn) { white-space: normal; }
 }
+[tabindex="-1"]:focus, [tabindex="-1"]:focus-visible { outline: none; }
+.pay-row { margin-bottom: .75rem; }

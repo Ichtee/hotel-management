@@ -15,7 +15,7 @@ function paymentStatus(booking, payments) {
   return { paidAmount: paid, paymentStatus: status };
 }
 // BR-26: a customer reaches only their own bookings.
-const mine = (req, id) => req.role.key === "receptionist" ? { ...(id ? { _id: v.id(id) } : {}) } : { ...(id ? { _id: v.id(id) } : {}), customerId: req.user._id };
+const mine = (req, id) => req.role.key !== "customer" ? { ...(id ? { _id: v.id(id) } : {}) } : { ...(id ? { _id: v.id(id) } : {}), customerId: req.user._id };
 // UC10 View Booking History.
 async function listing(req, res) {
   const filter = mine(req);

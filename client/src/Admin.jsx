@@ -243,18 +243,31 @@ function Bookings() {
         action={user.role === 'receptionist' ? 'New booking' : null}
         onAction={() => sc.go('new')}
       />
-      <div className="chips" role="group" aria-label="Filter by view or status">
-        {[['all', 'All'], ...Object.entries(BOOKING_VIEWS), ...BOOKING_STATUSES.map((s) => [s, s.replaceAll('_', ' ')])].map(([key, label]) => (
-          <button key={key} className={f === key ? 'chip on' : 'chip'} aria-pressed={f === key} onClick={() => setF(key)}>{label}</button>
-        ))}
+      <div className="filter-groups">
+        <div role="group" aria-label="Today">
+          <p className="filter-title">Today</p>
+          <div className="chips">
+            {[['all', 'All'], ...Object.entries(BOOKING_VIEWS)].map(([key, label]) => (
+              <button key={key} className={f === key ? 'chip on' : 'chip'} aria-pressed={f === key} onClick={() => setF(key)}>{label}</button>
+            ))}
+          </div>
+        </div>
+        <div role="group" aria-label="Status">
+          <p className="filter-title">Status</p>
+          <div className="chips">
+            {BOOKING_STATUSES.map((s) => (
+              <button key={s} className={f === s ? 'chip on' : 'chip'} aria-pressed={f === s} onClick={() => setF(s)}>{s.replaceAll('_', ' ')}</button>
+            ))}
+          </div>
+        </div>
       </div>
       <input
         type="search"
+        className="list-search"
         aria-label="Search bookings"
-        placeholder="Search by booking code, guest name or phone"
+        placeholder="Search code, guest name or phone"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        style={{ padding: '0.45rem 0.8rem', borderRadius: '8px', border: '1px solid var(--line)', width: 'min(100%, 360px)', marginBottom: '1rem' }}
       />
       {VIEW_HINT[f] && <p className="muted">{VIEW_HINT[f]}</p>}
       <Notice error={live.error || notice?.error} ok={notice?.ok} />

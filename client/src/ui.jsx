@@ -150,11 +150,11 @@ export function DataTable({ cols, rows }) {
   const tight = (c) => figures.test(c) || /^\d{1,2} [A-Za-z]{3,4} \d{4}$/.test(c) || /^[A-Z0-9]+(-[A-Z0-9]+)*$/.test(c);
   return (
     <div className="table-wrap">
-      <table>
+      <table className="cards">
         <thead><tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i}>{r.map((c, j) => <td key={j} className={typeof c === 'string' && tight(c) ? 'nw' : undefined}>{typeof c === 'string' && words.test(c) ? <Badge v={c} /> : c}</td>)}</tr>
+            <tr key={i}>{r.map((c, j) => <td key={j} data-label={cols[j]} className={typeof c === 'string' && tight(c) ? 'nw' : undefined}>{typeof c === 'string' && words.test(c) ? <Badge v={c} /> : c}</td>)}</tr>
           ))}
         </tbody>
       </table>

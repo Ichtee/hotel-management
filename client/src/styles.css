@@ -395,3 +395,23 @@ body.dlg-open { overflow: hidden; }
 .filters-row input, .filters-row select { width: 100%; }
 
 @media (max-width: 640px) { .page-head > div:first-child { flex: 1 1 100%; } .page-head .head-actions { width: 100%; } .page-head .head-actions .btn { width: 100%; } }
+
+/* Bookings filters: two labelled groups and a search box that shows its whole placeholder */
+.filter-groups { display: grid; gap: .25rem; margin-bottom: .5rem; }
+.filter-title { margin: 0 0 .35rem; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.list-search { width: min(100%, 460px); min-height: 44px; padding: .5rem .9rem; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 1rem; font: inherit; }
+.chip { text-transform: capitalize; }
+
+/* Tables become cards on a phone, so no column or action button sits off-screen */
+@media (max-width: 720px) {
+  .table-wrap table.cards { min-width: 0; }
+  .table-wrap table.cards, .table-wrap table.cards tbody, .table-wrap table.cards tr, .table-wrap table.cards td { display: block; }
+  .table-wrap table.cards thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); } /* the labels live on the cells */
+  .table-wrap table.cards tr { padding: .6rem .9rem; border-bottom: 1px solid var(--line); }
+  .table-wrap table.cards tr:last-child { border-bottom: 0; }
+  .table-wrap table.cards td { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .3rem 0; border: 0; white-space: normal; text-align: right; }
+  .table-wrap table.cards td::before { content: attr(data-label); flex: 0 0 34%; text-align: left; font-size: .72rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  .table-wrap table.cards td[data-label=""]::before { display: none; }
+  .table-wrap table.cards td[data-label=""] { justify-content: flex-end; flex-wrap: wrap; padding-top: .5rem; }
+  .table-wrap table.cards td:last-child:has(.btn) { white-space: normal; }
+}

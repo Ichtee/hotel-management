@@ -133,7 +133,7 @@ export default function AdminRoomMap() {
     }
   };
 
-  const floors = [...new Set(rooms.map(r => String(r.no)[0]))].sort();
+  const floors = [...new Set(rooms.map(r => String(r.floor ?? '?')))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const filteredRooms = filterStatus === 'all' ? rooms : rooms.filter(r => r.status === filterStatus);
 
   const counts = {
@@ -240,7 +240,7 @@ export default function AdminRoomMap() {
 
       {/* Floors grid */}
       {floors.map(fl => {
-        const floorRooms = filteredRooms.filter(r => String(r.no)[0] === fl);
+        const floorRooms = filteredRooms.filter(r => String(r.floor ?? '?') === fl);
         if (floorRooms.length === 0) return null;
         return (
           <section key={fl} className="floor" style={{ background: '#fff', padding: '1.25rem', borderRadius: '14px', border: '1px solid var(--line)', marginBottom: '1.25rem' }}>

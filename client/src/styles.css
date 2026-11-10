@@ -56,6 +56,7 @@ nav li > a:hover, .dd > button:hover { background: var(--navy-2); }
 
 /* Tables & badges */
 .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+.table-wrap:has(.rowmenu[open]) { overflow: visible; } /* an open row menu is not cut off or turned into a scroll area */
 /* Wide screens: nothing clips the row menu ("More"), even in a table of one row. This sits right after the base rule because admin.css loads first and lost to it. */
 @media (min-width: 1000px) {
   .table-wrap { overflow: visible; }

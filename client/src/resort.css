@@ -204,3 +204,4 @@
 .cx .filters fieldset legend { max-width: 100%; white-space: nowrap; }
 /* The filter list is long: on a wide screen it stays in view and scrolls on its own */
 @media (min-width: 1000px) { .cx details.filters { position: sticky; top: 88px; max-height: calc(100vh - 108px); overflow-y: auto; } }
+.cx .sort select { min-width: 210px; }

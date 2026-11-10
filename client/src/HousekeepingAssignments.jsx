@@ -45,7 +45,7 @@ function CreateAssignment({ staff, rooms, onClose, onSaved }) {
       <Field label="Effective from" error={error?.fields?.effectiveFrom}><input name="effectiveFrom" type="date" defaultValue={today()} required /></Field>
       <Field label="Effective to" error={error?.fields?.effectiveTo}><input name="effectiveTo" type="date" defaultValue={endOfMonth()} required /></Field>
       <fieldset className="full"><legend>Floors</legend><div className="chips">{uniqueFloors.map((floor) => <label key={floor} className="check"><input type="checkbox" checked={floors.includes(floor)} onChange={() => toggle(floor, floors, setFloors)} /> Floor {floor}</label>)}</div></fieldset>
-      <fieldset className="full"><legend>Specific rooms (optional when a floor is selected)</legend><div className="chips">{rooms.map((room) => <label key={room._id} className="check"><input type="checkbox" checked={roomIds.includes(room._id)} onChange={() => toggle(room._id, roomIds, setRoomIds)} /> {room.roomNumber}</label>)}</div></fieldset>
+      <fieldset className="full"><legend>Specific rooms</legend><p className="muted" style={{ margin: 0 }}>Optional when a floor is selected.</p><div className="chips">{rooms.map((room) => <label key={room._id} className="check"><input type="checkbox" checked={roomIds.includes(room._id)} onChange={() => toggle(room._id, roomIds, setRoomIds)} /> {room.roomNumber}</label>)}</div></fieldset>
       <div className="full"><Notice error={error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving...' : 'Save assignment'}</button></div>
     </form>
   </Screen>;

@@ -357,7 +357,7 @@ function Rooms({ q }) {
         <div>
           <div className="between">
             <p className="muted" role="status">{state.rooms ? `${list.length} of ${rooms.length} room type${rooms.length === 1 ? '' : 's'}` : ''}</p>
-            <label>Sort by<select value={f.sort} onChange={(e) => set({ sort: e.target.value })}>{Object.entries(SORTS).map(([k, [label]]) => <option key={k} value={k}>{label}</option>)}</select></label>
+            <label className="sort">Sort by<select value={f.sort} onChange={(e) => set({ sort: e.target.value })}>{Object.entries(SORTS).map(([k, [label]]) => <option key={k} value={k}>{label}</option>)}</select></label>
           </div>
           <div className="c-grid g2">{list.map((r) => <RoomCard key={r.id} r={r} q={carry} />)}</div>
           {state.rooms && !list.length && <p className="empty" role={state.error ? 'alert' : undefined}>{state.error || 'No rooms match your dates or filters. Try other dates, fewer guests or fewer filters.'}{active > 0 && !state.error && <> <button type="button" className="more-link" onClick={() => setF({ ...NO_FILTER, sort: f.sort })}>Clear all filters</button></>}</p>}

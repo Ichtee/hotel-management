@@ -459,8 +459,9 @@ function StayRequestModal({ booking, type, onClose, onSaved }) {
         const fd = new FormData(); fd.append('file', file);
         for (const [k, val] of [['api_key', p.apiKey], ['timestamp', p.timestamp], ['folder', p.folder], ['type', p.type], ['format', p.format], ['signature', p.signature]]) fd.append(k, val);
         const up = await fetch(`https://api.cloudinary.com/v1_1/${p.cloudName}/image/upload`, { method: 'POST', body: fd });
-        if (!up.ok) throw new Error('The ID photo could not be uploaded. Try again or show the document at the front desk.');
-        idPhoto = (await up.json()).public_id;
+        const out = await up.json().catch(() => ({}));
+        if (!up.ok) throw new Error(`The ID photo could not be uploaded (${out.error?.message || up.status}). Try again or show the document at the front desk.`);
+        idPhoto = out.public_id;
       }
       const body = { type, requestedTime: `${day}T${f.time}:00+07:00`, note: f.note || '', ...(isIn ? { numberOfGuests: Number(f.numberOfGuests), mainGuestName: f.mainGuestName, mainGuestIdNumber: f.mainGuestIdNumber || undefined, idPhoto } : {}) };
       const r = await api(`/bookings/${booking._id}/requests`, { method: 'POST', body });

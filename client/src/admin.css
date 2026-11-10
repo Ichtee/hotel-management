@@ -186,7 +186,6 @@
 .rowmenu > div { position: absolute; right: 0; top: calc(100% + 4px); z-index: 15; min-width: 160px; display: grid; padding: .3rem; background: #fff; border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 30px #0f2a4a1f; }
 .rowmenu > div button { text-align: left; padding: .55rem .7rem; border: 0; border-radius: 7px; background: none; font: inherit; color: var(--text); cursor: pointer; }
 .rowmenu > div button:hover, .rowmenu > div button:focus-visible { background: #eef2f7; }
-@media (min-width: 1000px) { .table-wrap { overflow: visible; } } /* lets the row menu open past the table; small screens keep horizontal scroll */
 .qgrid { display: grid; gap: .85rem; margin-bottom: .85rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
 .qgrid .qfull { grid-column: 1 / -1; }
 

@@ -56,6 +56,12 @@ nav li > a:hover, .dd > button:hover { background: var(--navy-2); }
 
 /* Tables & badges */
 .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
+/* Wide screens: nothing clips the row menu ("More"), even in a table of one row. This sits right after the base rule because admin.css loads first and lost to it. */
+@media (min-width: 1000px) {
+  .table-wrap { overflow: visible; }
+  .table-wrap th:first-child { border-top-left-radius: 13px; } .table-wrap th:last-child { border-top-right-radius: 13px; }
+  .table-wrap tbody tr:last-child td:first-child { border-bottom-left-radius: 13px; } .table-wrap tbody tr:last-child td:last-child { border-bottom-right-radius: 13px; }
+}
 .panel .table-wrap { border: 0; }
 table { width: 100%; border-collapse: collapse; min-width: 520px; }
 th, td { text-align: left; padding: .8rem .8rem; border-bottom: 1px solid var(--line); font-size: .92rem; white-space: nowrap; }

@@ -13,7 +13,7 @@ import NotificationBell, { NotificationsPage } from './Notifications.jsx';
 import { AuditLog, Catalog, Reviews, StaffPermissions } from './ManagerPages.jsx';
 import './admin.css';
 import { useAuth } from './context/Auth.jsx';
-import { Badge, DataTable, Field, LineChart, Notice, PageHead, Screen, useApi, useScreen } from './ui.jsx';
+import { Badge, BrandName, DataTable, Field, LineChart, Notice, PageHead, Screen, useApi, useScreen } from './ui.jsx';
 import { AuthShell, SignIn, ForgotPassword } from './AuthForms.jsx';
 import { Coupons, DepositPolicy, Occupancy, Profile, ChangePassword, Revenue, Users } from './AdminPages.jsx';
 import { Cancellations, Refunds } from './Cancellations.jsx';
@@ -52,7 +52,7 @@ function Sidebar({ route, open, onClose }) {
     <>
       {open && <div className="scrim" onClick={onClose} />}
       <aside className={`side ${open ? 'open' : ''}`} aria-label="Admin navigation">
-        <a className="brand" href="#/admin">Grand<span>Stay</span><small>Management</small></a>
+        <a className="brand" href="#/admin"><BrandName /><small>Management</small></a>
         <div className="snav" role="navigation" aria-label="Sections">
           {link('#/admin', 'Dashboard', 'grid')}
           {MENU.filter((m) => m.items).map((m) => ({ ...m, items: m.items.filter((i) => allowed(i, user.permissions, user.role)) })).filter((m) => m.items.length).map((m) => (

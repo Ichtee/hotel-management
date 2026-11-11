@@ -8,7 +8,7 @@ import { PaymentPage, PaymentResult, SandboxGateway } from './Payments.jsx';
 import { api, dateLabel, money } from './api/client.js';
 import './resort.css';
 import NotificationBell, { NotificationsPage } from './Notifications.jsx';
-import { Notice } from './ui.jsx';
+import { BrandName, Notice } from './ui.jsx';
 
 const NAV = [
   { label: 'Home', href: '#/' },
@@ -44,7 +44,7 @@ function SiteHeader({ route }) {
   return (
     <header className="topbar site" ref={ref}>
       <div className="bar">
-        <a className="brand" href="#/">Grand<span>Stay</span></a>
+        <a className="brand" href="#/"><BrandName /></a>
         <button className="menu-btn" aria-expanded={mobile} aria-controls="nav" onClick={() => setMobile(!mobile)}>{mobile ? 'Close' : 'Menu'}</button>
         <nav id="nav" className={mobile ? 'open' : ''} aria-label="Main">
           <ul>
@@ -634,7 +634,7 @@ function SiteFooter() {
   return (
     <footer className="site-foot">
       <div className="c-wrap c-grid g4">
-        <div><a className="brand" href="#/">Grand<span>Stay</span></a>{hotel?.description && <p>{hotel.description}</p>}</div>
+        <div><a className="brand" href="#/"><BrandName /></a>{hotel?.description && <p>{hotel.description}</p>}</div>
         <div><h4>Explore</h4><a href="#/rooms">Rooms &amp; suites</a><a href="#/offers">Booking policies</a><a href="#/my-bookings">My bookings</a></div>
         <div><h4>Guests</h4><a href="#/login">Sign in or register</a><a href="#/profile">My profile</a></div>
         <div><h4>Contact</h4>{hotel?.address && <p>{hotel.address}</p>}{hotel?.email && <p>{hotel.email}</p>}{hotel?.phone && <p>{hotel.phone}</p>}<a href="#/admin">Staff portal</a></div>

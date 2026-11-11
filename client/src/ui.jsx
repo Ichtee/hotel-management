@@ -2,6 +2,29 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api/client.js';
 
+// The hotel name for the logo and the © line: the saved Hotel information (UC27), "GrandStay" until it is loaded.
+let hotelNameReq;
+export const forgetHotelName = () => { hotelNameReq = null; dispatchEvent(new Event('hotel-info-saved')); }; // the logos on screen reload the name
+export function useHotelName() {
+  const [name, setName] = useState('GrandStay');
+  useEffect(() => {
+    const load = () => {
+      hotelNameReq ??= api('/hotel-info').then((x) => x.data?.name).catch(() => { hotelNameReq = null; return null; });
+      hotelNameReq.then((n) => n && setName(n));
+    };
+    load();
+    addEventListener('hotel-info-saved', load);
+    return () => removeEventListener('hotel-info-saved', load);
+  }, []);
+  return name;
+}
+// "Sunrise Hotel" -> Sunrise <Hotel>, "GrandStay" -> Grand<Stay>; the last part is the gold one. A name that cannot be split stays whole.
+export function BrandName() {
+  const n = useHotelName();
+  const m = /^(.+ )(\S+)$/.exec(n) || /^(.+?)([A-Z][a-z]+)$/.exec(n);
+  return m ? <>{m[1]}<span>{m[2]}</span></> : <>{n}</>;
+}
+
 export const Badge = ({ v, pre }) => <span className={`badge b-${v}`}>{pre}{String(v).replace('_', ' ')}</span>;
 
 export const PageHead = ({ title, sub, action, onAction, extra }) => (

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api/client.js';
 import { useAuth } from './context/Auth.jsx';
-import { Field, Notice } from './ui.jsx';
+import { BrandName, Field, Notice, useHotelName } from './ui.jsx';
 
 const Icon = ({ d }) => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>
@@ -12,22 +12,23 @@ const CHECK = 'M20 6L9 17l-5-5';
 
 // Split layout: brand panel + form card. `staff` swaps the copy for the admin portal.
 export function AuthShell({ staff, children }) {
+  const hotelName = useHotelName();
   const points = staff
     ? ['Manage accounts, roles and promotions', 'Live revenue and occupancy reports', 'Role-based access for every team member']
     : ['Best-price guarantee on every room', 'Cancel or change a booking online', 'Manage all your bookings in one place'];
   return (
     <div className={`split ${staff ? 'staff' : ''}`}>
       <aside className="split-side">
-        <a className="brand" href={staff ? '#/admin' : '#/'}>Grand<span>Stay</span></a>
+        <a className="brand" href={staff ? '#/admin' : '#/'}><BrandName /></a>
         <div>
           <h2>{staff ? 'Run the hotel with confidence' : 'Your next stay, sorted'}</h2>
           <ul>{points.map((p) => <li key={p}><span className="tick"><Icon d={CHECK} /></span>{p}</li>)}</ul>
         </div>
-        <small>© 2026 GrandStay</small>
+        <small>© 2026 {hotelName}</small>
       </aside>
       <section className="split-main">
         <div className="split-card">
-          {staff && <a className="brand dark mobile-brand" href="#/admin">Grand<span>Stay</span></a>}
+          {staff && <a className="brand dark mobile-brand" href="#/admin"><BrandName /></a>}
           {children}
         </div>
       </section>

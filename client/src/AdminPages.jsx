@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, dateLabel, inputDate, money } from './api/client.js';
 import { useAuth } from './context/Auth.jsx';
-import { Badge, DataTable, Field, LineChart, Notice, PageHead, Screen, WaitScreen, useApi, useEditPage } from './ui.jsx';
+import { Badge, DataTable, Field, LineChart, Notice, PageHead, Screen, WaitScreen, forgetHotelName, useApi, useEditPage } from './ui.jsx';
 
 const qs = (o) => new URLSearchParams(Object.fromEntries(Object.entries(o).filter(([, v]) => v !== '' && v != null))).toString();
 const day = (offset) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(Date.now() + offset * 864e5));
@@ -114,7 +114,7 @@ function HotelInfo() {
   const submit = async (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
-    try { await api('/hotel-info', { method: 'PUT', body: f }); setErr(null); setOk('Hotel information saved.'); s.reload(); } catch (x) { setErr(x); setOk(null); }
+    try { await api('/hotel-info', { method: 'PUT', body: f }); setErr(null); setOk('Hotel information saved.'); forgetHotelName(); s.reload(); } catch (x) { setErr(x); setOk(null); }
   };
   if (s.loading || s.error) return <Loading s={s} />;
   const h = s.data || {};

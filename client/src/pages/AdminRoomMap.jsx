@@ -103,9 +103,8 @@ export default function AdminRoomMap() {
     const payload = {
       roomNumber: trimmedNo,
       floor: parseInt(newRoomFloor, 10),
-      roomTypeId: newRoomTypeId || roomTypes[0]?.id || roomTypes[0]?._id,
-      status: 'available'
-    };
+      roomTypeId: newRoomTypeId || roomTypes[0]?.id || roomTypes[0]?._id
+    }; // the server starts every new room as Available and refuses a status field
 
     try {
       await roomApi.createRoom(payload);

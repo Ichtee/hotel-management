@@ -10,7 +10,7 @@ async function request(endpoint, options = {}) {
     });
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.message || `HTTP ${res.status}`);
+      throw new Error(errData.error?.message || errData.message || `HTTP ${res.status}`);
     }
     return await res.json();
   } catch (error) {

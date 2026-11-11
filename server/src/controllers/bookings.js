@@ -8,13 +8,14 @@ require("../models/RoomType");
 require("../models/Room");
 const v = require("../utils/validation");
 const { hotelDay } = require("../services/roomInventory");
-// Suy ra trạng thái thanh toán chỉ từ các khoản thu đã xác minh thành công.
+// SRS 2.6 booking payment status, from the verified (success) payments only (BR-14): Unpaid -> Deposit Paid -> Fully Paid.
 function paymentStatus(booking, payments) {
   const paid = payments.filter((p) => p.status === "success").reduce((s, p) => s + p.amount, 0);
   const status = paid > 0 && paid >= booking.totalAmount ? "fully_paid" : paid > 0 ? "deposit_paid" : "unpaid";
   return { paidAmount: paid, paymentStatus: status };
 }
-// Khách chỉ xem booking của mình; nhân viên cần quyền đọc booking quản lý.
+// BR-26: a customer reaches only their own bookings.
+// Same rule as GET /bookings/search: Manager, Admin, or a role with bookings.managed.read; Housekeeping and others are refused.
 const staffReads = (req) => ["manager", "admin"].includes(req.role.key) || req.role.permissions.includes("bookings.managed.read");
 const mine = (req, id) => {
   const base = id ? { _id: v.id(id) } : {};
@@ -22,7 +23,7 @@ const mine = (req, id) => {
   if (!staffReads(req)) throw new v.HttpError(403, "You do not have permission to use this feature.");
   return base;
 };
-// Lấy lịch sử booking của khách đang đăng nhập.
+// UC10 View Booking History.
 async function listing(req, res) {
   const filter = mine(req);
   if (req.query.status)
@@ -45,7 +46,7 @@ async function listing(req, res) {
   }));
   res.json({ data, meta: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) } });
 }
-// Trả chi tiết booking và ẩn thông tin kiểm toán nội bộ.
+// UC11 View Booking Details: staff-only audit fields stay hidden.
 async function detail(req, res) {
   const booking = await Booking.findOne(mine(req, req.params.id))
     .select(req.role.key === "receptionist" ? "+guestIdDocumentNo -events -createdBy -checkedInBy -checkedOutBy" : "-events -createdBy -checkedInBy -checkedOutBy")
@@ -55,23 +56,22 @@ async function detail(req, res) {
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   const [payments, refunds, penalties, invoices, requests] = await Promise.all([
     Payment.find({ bookingId: booking._id }).select("kind amount currency method status paidAt createdAt").sort({ createdAt: 1 }).lean(),
-    Refund.find({ bookingId: booking._id }).select("amount currency status reason bankTransactionCode processedAt createdAt").sort({ createdAt: 1 }).lean(),
-    // Chỉ hiển thị bồi thường cho khách sau khi lễ tân xác nhận.
+    Refund.find({ bookingId: booking._id }).select("amount currency status reason processedAt createdAt").sort({ createdAt: 1 }).lean(),
+    // UC09: penalties and invoices; a Proposed penalty is not shown until the front desk confirms it with the guest (UC38).
     Penalty.find({ bookingId: booking._id, status: { $ne: "proposed" } }).select("itemName amount status waivedReason afterCheckout").sort({ createdAt: 1 }).lean(),
     Invoice.find({ bookingId: booking._id }).select("invoiceNumber kind lines totalAmount issuedAt createdAt").sort({ createdAt: 1 }).lean(),
     CheckInOutRequest.find({ bookingId: booking._id }).select("type requestedTime earlyOrLate quotedFee status responseNote numberOfGuests createdAt").sort({ createdAt: -1 }).lean(),
   ]);
   res.json({ data: { ...booking, ...paymentStatus(booking, payments), payments, refunds, penalties, invoices, requests } });
 }
-// Lọc booking theo trạng thái, từ khóa và công việc trong ngày.
-// Ngày lưu trú dùng ngày UTC: trước ngày mai là đến hạn, trước hôm nay là quá hạn.
+// Front-desk booking list: status, keyword (booking code, guest name or phone, UC16) and the views of the day.
+// A stay date is stored as a moment of its UTC day (midnight for bookings made through the API), so "due today or earlier"
+// is "before tomorrow 00:00 UTC" and "overdue" is "before today 00:00 UTC".
 const VIEWS = {
   arrivals: (today, tomorrow) => ({ status: "confirmed", checkInDate: { $lt: tomorrow } }),
   departures: (today, tomorrow) => ({ status: "checked_in", checkOutDate: { $lt: tomorrow } }),
-  // Booking đã xác nhận, quá ngày nhận nhưng khách chưa đến.
-  overdue_check_in: (today) => ({ status: "confirmed", checkInDate: { $lt: today } }),
-  // Khách vẫn đang ở sau ngày trả phòng dự kiến.
-  overdue_check_out: (today) => ({ status: "checked_in", checkOutDate: { $lt: today } }),
+  overdue_check_in: (today) => ({ status: "confirmed", checkInDate: { $lt: today } }), // confirmed, check-in date passed, guest not arrived
+  overdue_check_out: (today) => ({ status: "checked_in", checkOutDate: { $lt: today } }), // still in house after the check-out date
 };
 async function search(req, res) {
   v.keys(req.query, ["status", "view", "q", "page", "limit"]);

@@ -8,13 +8,14 @@ const cfg = () => {
   cloudinary.config({ cloud_name: cloud, api_key: key, api_secret: secret, secure: true });
   return { cloud, key, secret };
 };
-const folderOf = (userId) => `grandstay/id/${userId}`;
-function uploadParams(userId) {
+const folderOf = (userId, kind = "id") => `grandstay/${kind}/${userId}`; // kind "refund": the bank receipt of a refund (UC21)
+function uploadParams(userId, kind) {
   const { cloud, key, secret } = cfg();
-  const p = { timestamp: Math.round(Date.now() / 1000), folder: folderOf(userId), type: "authenticated", format: "jpg" };
+  // kind "room": a public room photo (shown on the website), so no "authenticated" type
+  const p = { timestamp: Math.round(Date.now() / 1000), ...(kind === "room" ? { folder: "grandstay/room" } : { folder: folderOf(userId, kind), type: "authenticated", format: "jpg" }) };
   return { cloudName: cloud, apiKey: key, ...p, signature: cloudinary.utils.api_sign_request(p, secret) };
 }
-const ownsPhoto = (userId, publicId) => typeof publicId === "string" && new RegExp(`^${folderOf(userId)}/[A-Za-z0-9_-]{6,60}$`).test(publicId);
+const ownsPhoto = (userId, publicId, kind) => typeof publicId === "string" && new RegExp(`^${folderOf(userId, kind)}/[A-Za-z0-9_-]{6,60}$`).test(publicId);
 function downloadUrl(publicId) {
   cfg();
   return cloudinary.utils.private_download_url(publicId, "jpg", { type: "authenticated", expires_at: Math.round(Date.now() / 1000) + 300 });

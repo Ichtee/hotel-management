@@ -137,18 +137,25 @@ export function Refunds() {
       <Notice ok={msg} />
       <Loading s={list} empty={tab === 'requested' ? 'Nothing is waiting for a refund.' : 'No refunds recorded yet.'} />
       {list.data?.length > 0 && (tab === 'requested' ? (
-        <DataTable cols={['Booking', 'Booker', 'Amount', 'Reason', 'Waiting since', 'Account', 'Contacts', '']} rows={list.data.map((r) => [
+        <DataTable cols={['Booking', 'Booker', 'Amount', 'Reason', 'Waiting since', 'Phone', 'Contacts', '']} rows={list.data.map((r) => [
           r.booking.bookingReference, <Booker key="p" p={r.booker} />, money(r.amount), r.reason || '—', dateLabel(r.createdAt),
-          r.account ? `${r.account.bank} ···${r.account.accountNumber?.slice(-4) || ''}` : 'Not entered yet', r.contacts.length,
+          r.booker.phone || '—', r.contacts.length,
           <button key="o" className="btn sm primary" onClick={() => sc.go('process', r._id)}>Process</button>,
         ])} />
       ) : (
-        <DataTable cols={['Booking', 'Booker', 'Amount', 'Transaction code', 'Refunded']} rows={list.data.map((r) => [
-          r.booking.bookingReference, <Booker key="p" p={r.booker} />, money(r.amount), r.bankTransactionCode, dateLabel(r.processedAt),
+        <DataTable cols={['Booking', 'Booker', 'Amount', 'Bill', 'Refunded']} rows={list.data.map((r) => [
+          r.booking.bookingReference, <Booker key="p" p={r.booker} />, money(r.amount), r.hasBill ? <BillLink key="b" refundId={r._id} /> : r.bankTransactionCode || '—', dateLabel(r.processedAt),
         ])} />
       ))}
     </>
   );
+}
+
+// Opens the private bill photo in a new tab through a 5-minute link (each view is audited).
+function BillLink({ refundId }) {
+  const [error, setError] = useState(null);
+  const open = async () => { setError(null); try { window.open((await api(`/frontdesk/refunds/${refundId}/bill`)).data.url, '_blank', 'noopener'); } catch (x) { setError(x); } };
+  return <span><button type="button" className="btn sm" onClick={open}>View bill</button><Notice error={error} /></span>;
 }
 
 function RefundCase({ r, onClose, onChanged, onDone }) {
@@ -160,27 +167,36 @@ function RefundCase({ r, onClose, onChanged, onDone }) {
   const form = (e) => Object.fromEntries(new FormData(e.target));
   const saveAccount = (e) => { e.preventDefault(); call('/account', 'PUT', form(e), (res) => onChanged(res.data)); };
   const addNote = (e) => { e.preventDefault(); const el = e.target; call('/contacts', 'POST', form(e), (res) => { el.reset(); onChanged(res.data); }); };
-  const record = (e) => {
+  const record = async (e) => {
     e.preventDefault();
     const f = form(e);
-    if (!confirm(`Confirm that ${money(r.amount)} was transferred to ${r.account.bank} ${r.account.accountNumber}?`)) return;
-    call('', 'POST', { bankTransactionCode: f.bankTransactionCode, ...(f.note ? { note: f.note } : {}) }, (res) => onDone(res.message));
+    const file = f.bill;
+    if (!file?.size || file.size > 5e6 || !/^image\/(jpeg|png)$/.test(file.type)) return setErr({ fields: { billPhoto: 'Choose the bill as a JPG or PNG photo of at most 5 MB.' } });
+    if (!confirm(`Confirm that ${money(r.amount)} was transferred to ${r.booker.name}?`)) return;
+    try {
+      const p = (await api(`/frontdesk/refunds/${r._id}/bill-upload`)).data; // signed: goes straight to Cloudinary, private
+      const fd = new FormData(); fd.append('file', file);
+      for (const [k, val] of [['api_key', p.apiKey], ['timestamp', p.timestamp], ['folder', p.folder], ['type', p.type], ['format', p.format], ['signature', p.signature]]) fd.append(k, val);
+      const up = await fetch(`https://api.cloudinary.com/v1_1/${p.cloudName}/image/upload`, { method: 'POST', body: fd });
+      const out = await up.json().catch(() => ({}));
+      if (!up.ok) throw new Error(`The bill could not be uploaded (${out.error?.message || up.status}). Try again.`);
+      call('', 'POST', { billPhoto: out.public_id, ...(f.note ? { note: f.note } : {}) }, (res) => onDone(res.message));
+    } catch (x) { setErr(x); }
   };
   return (
     <Screen title={`Refund · ${r.booking.bookingReference}`} onClose={onClose}>
       <dl className="kv">
-        <dt>Booker</dt><dd>{r.booker.name} · {r.booker.phone || 'no phone'} · {r.booker.email || 'no e-mail'}</dd>
         <dt>Amount</dt><dd><strong>{money(r.amount)}</strong> (cannot be changed)</dd>
         <dt>Payment</dt><dd>{r.payment ? `${r.payment.method.replace('_', ' ')} · ${r.payment.reference || '—'} · ${dateLabel(r.payment.paidAt)}` : 'Not identified'}</dd>
         <dt>Reason</dt><dd>{r.reason || '—'}</dd>
       </dl>
-      <h3>1. Bank account from the customer</h3>
-      <form className="form" onSubmit={saveAccount}>
-        <Field label="Bank" error={fe('bank')}><input name="bank" defaultValue={r.account?.bank} required /></Field>
-        <Field label="Account number" error={fe('accountNumber')}><input name="accountNumber" inputMode="numeric" defaultValue={r.account?.accountNumber || ''} required /></Field>
-        <Field label="Account holder (must match the booker)" error={fe('holderName')}><input name="holderName" defaultValue={r.account?.holderName || r.booker.name} required /></Field>
-        <button className="btn">{r.account ? 'Replace account' : 'Save account'}</button>
-      </form>
+      <h3>1. Customer to contact</h3>
+      <dl className="kv">
+        <dt>Name</dt><dd>{r.booker.name}</dd>
+        <dt>Phone / Zalo</dt><dd>{r.booker.phone || 'no phone'}</dd>
+        <dt>E-mail</dt><dd>{r.booker.email || 'no e-mail'}</dd>
+      </dl>
+      <p className="muted">Call or message the customer to agree on the bank account, then transfer the refund.</p>
       <h3>2. Contact attempts</h3>
       {r.contacts.length > 0 && <ul className="lines">{r.contacts.map((c, i) => <li key={i}><span>{c.note}</span><span className="muted">{dateLabel(c.at)}</span></li>)}</ul>}
       <form className="form inline" onSubmit={addNote}>
@@ -188,9 +204,9 @@ function RefundCase({ r, onClose, onChanged, onDone }) {
         <button className="btn">Add note</button>
       </form>
       <h3>3. Record the transfer</h3>
-      {!r.account ? <p className="muted">Save the bank account first.</p> : (
+      {(
         <form className="form" onSubmit={record}>
-          <Field label="Bank transaction code" error={fe('bankTransactionCode')}><input name="bankTransactionCode" maxLength="60" required /></Field>
+          <Field label="Photo of the transfer bill (JPG or PNG)" error={fe('billPhoto')}><input name="bill" type="file" accept="image/jpeg,image/png" required /></Field>
           <Field label="Note (optional)"><input name="note" maxLength="500" /></Field>
           <button className="btn primary">Record refund</button>
         </form>

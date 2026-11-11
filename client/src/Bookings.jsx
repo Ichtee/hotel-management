@@ -177,7 +177,7 @@ function Details({ id, startCancel, onChanged }) {
             <ul className="lines" aria-label="Refunds">
               {b.refunds.map((r, i) => (
                 <li key={i}>
-                  <span>{r.status === 'completed' ? `Bank transfer ${r.bankTransactionCode} · ${dateLabel(r.processedAt)}` : 'The front desk will contact you for the bank account.'}</span>
+                  <span>{r.status === 'completed' ? `Bank transfer · ${dateLabel(r.processedAt)}` : 'The front desk will contact you by phone to send the refund.'}</span>
                   <span>{money(r.amount)} <span className={`badge b-${r.status}`}>{REFUND[r.status] || r.status}</span></span>
                 </li>
               ))}

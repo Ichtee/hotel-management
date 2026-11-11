@@ -55,7 +55,7 @@ function CatalogEntry({ tab, label, entry, onClose, onSaved }) {
     <Screen title={entry._id ? `Edit ${label}` : `Add ${label}`} onClose={onClose}>
       <form className="form" onSubmit={submit}>
         <Field label="Name" error={error?.fields?.name}><input name="name" defaultValue={entry.name} maxLength="120" required autoFocus /></Field>
-        <Field label="Price (VND)" error={error?.fields?.price}><input name="price" type="number" min={tab === 'services' ? 0 : 1} step="1000" defaultValue={entry.price} required /></Field>
+        <Field label="Price (VND)" error={error?.fields?.price}><input name="price" type="number" min={tab === 'services' ? 0 : 1} step="1" defaultValue={entry.price} required /></Field>
         <div className="full"><Notice error={error} /></div>
         <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button></div>
       </form>

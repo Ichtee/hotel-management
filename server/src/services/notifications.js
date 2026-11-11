@@ -24,7 +24,7 @@ const events = {
       : `Booking ${d.reference} has been cancelled and is not eligible for a refund.`,
   ],
   cancellation_auto_approved: (d) => ["Cancellation approved automatically", `Booking ${d.reference} was cancelled automatically. Refund due: ${money(d.amount)}.`],
-  refund_completed: (d) => ["Refund sent", `We refunded ${money(d.amount)} for booking ${d.reference}. Bank transaction code: ${d.code}.`],
+  refund_completed: (d) => ["Refund sent", `We refunded ${money(d.amount)} for booking ${d.reference} by bank transfer.`],
   hold_expired: (d) => ["Room hold expired", `The 15-minute hold of booking ${d.reference} ended without a deposit, so the room was released.`],
   arrival_reminder: (d) => ["See you tomorrow", `Booking ${d.reference}: check-in is tomorrow, ${d.date}, from ${d.time}.`],
   penalty_proposed: (d) => ["Damage / loss reported", `Booking ${d.reference}: ${d.item} (${money(d.amount)}) was reported by Housekeeping. Confirm or waive it with the guest.`],

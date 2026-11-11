@@ -196,6 +196,7 @@ function createApp({
   app.use("/api/room-types", requireManager);
   app.get("/api/room-types", roomTypes.listing);
   app.post("/api/room-types", roomTypes.create);
+  app.get("/api/room-types/image-upload", roomTypes.imageUploadParams);
   app.get("/api/room-types/:id", roomTypes.detail);
   app.patch("/api/room-types/:id", roomTypes.update);
   app.delete("/api/room-types/:id", roomTypes.remove);
@@ -275,6 +276,8 @@ function createApp({
   app.get("/api/frontdesk/refunds", refund, refunds.listing);
   app.put("/api/frontdesk/refunds/:id/account", refund, refunds.setAccount);
   app.post("/api/frontdesk/refunds/:id/contacts", refund, refunds.addContact);
+  app.get("/api/frontdesk/refunds/:id/bill-upload", refund, refunds.billUploadParams);
+  app.get("/api/frontdesk/refunds/:id/bill", refund, refunds.billLink);
   app.post("/api/frontdesk/refunds/:id", refund, refunds.record);
   // Ghi nhận và xử lý khoản bồi thường hư hỏng hoặc mất mát.
   const penalize = permit("penalties.record");

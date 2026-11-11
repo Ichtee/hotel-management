@@ -6,6 +6,7 @@ const v = require("../utils/validation");
 const { notify } = require("../services/notifications");
 const { audit } = require("../services/audit");
 const { reference } = require("../services/cancellations");
+const idPhoto = require("../services/idPhoto");
 
 // Mã hóa tài khoản hoàn tiền bằng AES-256-GCM; giữ DATA_KEY ổn định để đọc được dữ liệu cũ.
 function key() {
@@ -39,7 +40,7 @@ const view = (r) => {
   const account = r.bankAccount?.accountNumber ? { bank: r.bankAccount.bank, holderName: r.bankAccount.holderName, accountNumber: open(r.bankAccount.accountNumber), enteredAt: r.bankAccount.enteredAt } : null;
   return {
     _id: r._id, amount: r.amount, currency: r.currency, status: r.status, reason: r.reason, createdAt: r.createdAt,
-    processedAt: r.processedAt, bankTransactionCode: r.bankTransactionCode, note: r.note, failureReason: r.failureReason,
+    processedAt: r.processedAt, bankTransactionCode: r.bankTransactionCode, hasBill: !!r.billPhoto, note: r.note, failureReason: r.failureReason,
     contacts: r.contacts, account,
     booking: b && { _id: b._id, bookingReference: reference(b), status: b.status, checkInDate: b.checkInDate, checkOutDate: b.checkOutDate },
     booker: b && { name: bookerName(b), phone: b.guestPhone || b.customerId?.phone, email: b.customerId?.email },
@@ -90,11 +91,10 @@ async function addContact(req, res) {
 }
 // Ghi mã chuyển khoản đã thực hiện ngoài hệ thống; giữ nguyên số tiền hoàn.
 async function record(req, res) {
-  v.keys(req.body, ["bankTransactionCode", "note"]);
-  const code = v.text(req.body.bankTransactionCode, "bankTransactionCode", 1, 60);
+  v.keys(req.body, ["billPhoto", "note"]);
+  if (!idPhoto.ownsPhoto(req.user._id, req.body.billPhoto, "refund")) v.fail("Upload the photo of the transfer bill.", "billPhoto");
   const note = req.body.note === undefined ? undefined : v.text(req.body.note, "note", 0, 500);
   const refund = await waiting(req, req.params.id);
-  if (!refund.bankAccount?.accountNumber) throw new v.HttpError(409, "Enter the bank account obtained from the customer first.");
   const payment = await Payment.findById(refund.paymentId?._id);
   if (!payment || payment.status !== "success") {
     await Refund.updateOne({ _id: refund._id }, { failureReason: "The related payment could not be identified." });
@@ -105,7 +105,7 @@ async function record(req, res) {
   if (!counted.modifiedCount) throw new v.HttpError(409, "No refund is due for this booking.");
   const done = await Refund.findOneAndUpdate(
     { _id: refund._id, status: "requested" },
-    { $set: { status: "completed", bankTransactionCode: code, note, processedBy: req.user._id, processedAt: new Date(), gateway: "bank_transfer" }, $unset: { failureReason: 1 } },
+    { $set: { status: "completed", billPhoto: req.body.billPhoto, note, processedBy: req.user._id, processedAt: new Date(), gateway: "bank_transfer" }, $unset: { failureReason: 1 } },
     { new: true },
   );
   if (!done) {
@@ -113,8 +113,20 @@ async function record(req, res) {
     throw new v.HttpError(409, "This refund was already recorded.");
   }
   const booking = await Booking.findById(refund.bookingId._id).select("bookingReference customerId");
-  await notify("refund_completed", booking.customerId, { reference: reference(booking), amount: done.amount, code }, { bookingId: booking._id });
-  await audit(req.user._id, "refund.completed", "refund", done._id, { amount: done.amount, bankTransactionCode: code });
-  res.json({ data: { ...view(refund), status: done.status, bankTransactionCode: code, processedAt: done.processedAt }, message: "Refund recorded. The customer has been notified of the amount and the bank transaction code." });
+  await notify("refund_completed", booking.customerId, { reference: reference(booking), amount: done.amount }, { bookingId: booking._id });
+  await audit(req.user._id, "refund.completed", "refund", done._id, { amount: done.amount });
+  res.json({ data: { ...view(refund), status: done.status, hasBill: true, processedAt: done.processedAt }, message: "Refund recorded. The customer has been notified of the amount." });
 }
-module.exports = { listing, setAccount, addContact, record };
+// Signed parameters for one direct, private upload of the bill to Cloudinary (the photo never passes through this server).
+async function billUploadParams(req, res) {
+  await waiting(req, req.params.id);
+  res.json({ data: idPhoto.uploadParams(req.user._id, "refund") });
+}
+// A 5-minute link to the bill; every view is written to the audit log.
+async function billLink(req, res) {
+  const r = await Refund.findOne({ _id: v.id(req.params.id), billPhoto: { $exists: true } }).select("billPhoto");
+  if (!r) throw new v.HttpError(404, "There is no bill for this refund.");
+  await audit(req.user._id, "refund.bill_viewed", "refund", r._id, {});
+  res.json({ data: { url: idPhoto.downloadUrl(r.billPhoto) } });
+}
+module.exports = { listing, setAccount, addContact, record, billUploadParams, billLink };

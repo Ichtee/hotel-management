@@ -4,7 +4,7 @@ import { DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useEdit
 
 const BEDS = ['King bed', 'Queen bed', '2 single beds', '2 queen beds'];
 
-// Quản lý loại phòng và giá theo mùa; chỉ xóa khi không có dữ liệu liên quan.
+/* UC24 room types (add, edit, deactivate, delete when nothing is linked) and UC25 seasonal prices. */
 export default function AdminRoomTypes() {
   const list = useApi('/room-types?limit=100');
   const E = useEditPage(list.data);
@@ -59,15 +59,26 @@ function RoomTypeForm({ type, onClose, onSaved }) {
   const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
   const submit = async (e) => {
     e.preventDefault(); const f = Object.fromEntries(new FormData(e.currentTarget));
+    setSaving(true); setError(null);
+    try {
+      let image = f.image.trim();
+      if (f.imageFile?.size) { // a photo chosen from the computer goes straight to Cloudinary and replaces the link
+        if (f.imageFile.size > 5e6 || !/^image\/(jpeg|png|webp)$/.test(f.imageFile.type)) throw new Error('The photo must be a JPG, PNG or WebP file of at most 5 MB.');
+        const { cloudName, ...p } = (await api('/room-types/image-upload')).data;
+        const fd = new FormData(); fd.append('file', f.imageFile);
+        for (const [k, val] of Object.entries(p)) fd.append(k === 'apiKey' ? 'api_key' : k, val);
+        const up = await fetch(`https://api.cloudinary.com/v1_1/${cloudName}/image/upload`, { method: 'POST', body: fd });
+        const out = await up.json().catch(() => ({}));
+        if (!up.ok) throw new Error(`The photo could not be uploaded (${out.error?.message || up.status}).`);
+        image = out.secure_url;
+      }
     const body = {
       name: f.name.trim(), bedType: f.bedType, description: f.description.trim(),
       roomSizeSqm: Number(f.roomSizeSqm), maxOccupancy: Number(f.maxOccupancy), basePrice: Number(f.basePrice),
       amenities: f.amenities.split(',').map((a) => a.trim()).filter(Boolean),
-      // Thay ảnh đầu tiên và giữ nguyên các ảnh còn lại.
-      images: [...(f.image.trim() ? [f.image.trim()] : []), ...(type.images || []).slice(1)],
+      // the first image is the one entered here; other images already on the room type are kept
+      images: [...(image ? [image] : []), ...(type.images || []).slice(1)],
     };
-    setSaving(true); setError(null);
-    try {
       await api(isNew ? '/room-types' : `/room-types/${type._id}`, { method: isNew ? 'POST' : 'PATCH', body });
       onSaved(`${body.name} ${isNew ? 'created' : 'saved'}.`);
     } catch (x) { setError(x); } finally { setSaving(false); }
@@ -80,14 +91,15 @@ function RoomTypeForm({ type, onClose, onSaved }) {
     <Field label="Max guests" error={fe.maxOccupancy}><input name="maxOccupancy" type="number" min="1" max="10" defaultValue={type.maxOccupancy || 2} required /></Field>
     <Field label="Base price (VND / night)" error={fe.basePrice}><input name="basePrice" type="number" min="1000" step="1000" defaultValue={type.basePrice || ''} required /></Field>
     <div className="full"><Field label="Amenities (comma separated)" error={fe.amenities}><input name="amenities" defaultValue={(type.amenities || ['Free WiFi', 'Air conditioning']).join(', ')} /></Field></div>
-    <div className="full"><Field label="Image URL" error={fe.images}><input name="image" type="url" defaultValue={type.images?.[0] || ''} placeholder="https://…" /></Field></div>
+    <div className="full"><Field label="Photo from your computer (JPG, PNG or WebP, max 5 MB)"><input name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" /></Field></div>
+    <div className="full"><Field label="or Image URL" error={fe.images}><input name="image" type="url" defaultValue={type.images?.[0] || ''} placeholder="https://…" /></Field></div>
     <div className="full"><Field label="Description" error={fe.description}><textarea name="description" maxLength={5000} defaultValue={type.description || ''} /></Field></div>
     <div className="full"><Notice error={error} /></div>
     <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Save'}</button></div>
   </form></Screen>;
 }
 
-// Không cho khoảng giá chồng lấn; booking cũ giữ giá đã chốt.
+// UC25: rates for date periods; overlapping rates are refused (MSG-60). Existing bookings keep their price (BR-35).
 function SeasonalRates({ type, onClose }) {
   const [rates, setRates] = useState(type.seasonalPricing || []);
   const [error, setError] = useState(null); const [saving, setSaving] = useState(false); const [ok, setOk] = useState(null);

@@ -59,7 +59,7 @@ async function responsibleStaff(room, date, shift, session) {
   const user = await User.findOne({ _id: plans[0].staffId, roleId: role._id, status: "active" }).select("_id").session(session);
   return user ? { staffId: user._id, assignmentId: plans[0]._id } : null;
 }
-// BR-41: on duty in a shift = an active Housekeeping account that the plan gives at least one room or floor in that shift.
+// Nhân viên trực ca phải đang hoạt động và được giao ít nhất một phòng hoặc tầng trong ca.
 async function onDutyStaff(slot, session) {
   const plans = (await Assignment.find({ isActive: true, shift: slot.shift }).session(session).lean()).filter((p) => covers(p, slot.date, slot.shift));
   const role = await Role.findOne({ key: "housekeeping", isActive: true }).session(session);

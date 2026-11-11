@@ -62,7 +62,7 @@ export function DepositPolicy() {
 }
 
 const DEFAULT_TIERS = [{ minHoursBeforeCheckIn: 48, refundPercent: 100 }, { minHoursBeforeCheckIn: 0, refundPercent: 0 }];
-// UC27: cancellation / refund tiers (100% or 0%, no gap from 0 h) with the stay rules; each save is a new version (BR-35).
+// Lưu phiên bản mới của chính sách hoàn tiền và lưu trú để giữ nguyên chính sách booking cũ.
 function CancellationPolicy() {
   const s = useApi('/policies/cancellation?limit=5');
   const cur = s.meta?.current;
@@ -106,7 +106,7 @@ function CancellationPolicy() {
   );
 }
 
-// UC27: general hotel information shown on Hotel & Room Information.
+// Quản lý thông tin khách sạn hiển thị cho khách.
 function HotelInfo() {
   const s = useApi('/hotel-info');
   const [err, setErr] = useState(null);
@@ -145,13 +145,14 @@ function Filters({ onApply, statuses, extra }) {
   );
 }
 
-/* ---------------- Users / staff (UC09, UC38) ---------------- */
+// Quản lý tài khoản theo vai trò.
 export function Users() {
   const { user } = useAuth();
   const isAdmin = user.permissions.includes('users.manage');
   const base = isAdmin ? '/users' : '/staff';
   const [filters, setFilters] = useState({});
-  const list = useApi(`${base}?${qs({ ...filters, ...(isAdmin ? { role: 'manager' } : {}), limit: 50 })}`); // BR-25: the Admin manages Hotel Manager accounts only
+  // Admin chỉ quản lý tài khoản quản lý khách sạn.
+  const list = useApi(`${base}?${qs({ ...filters, ...(isAdmin ? { role: 'manager' } : {}), limit: 50 })}`);
   const options = useApi('/options');
   const E = useEditPage(list.data);
   const [msg, setMsg] = useState('');
@@ -223,7 +224,7 @@ function UserForm({ user, isStaff, base, options, onClose, onSaved }) {
   );
 }
 
-/* ---------------- Promotions (UC33) ---------------- */
+// Quản lý mã giảm giá.
 export function Coupons() {
   const [filters, setFilters] = useState({});
   const list = useApi(`/promotions?${qs({ ...filters, limit: 50 })}`);
@@ -283,8 +284,8 @@ function CouponForm({ coupon, onClose, onSaved }) {
   );
 }
 
-/* ---------------- Revenue (UC36) ---------------- */
-// CR-05: 2026-11-07 -> 07/11/2026, 2026-11 -> 11/2026
+// Báo cáo doanh thu theo kỳ.
+// Hiển thị ngày theo dd/mm/yyyy và tháng theo mm/yyyy.
 const period = (s) => (/^\d{4}-\d{2}(-\d{2})?$/.test(String(s)) ? String(s).split('-').reverse().join('/') : s);
 export function Revenue() {
   const [p, setP] = useState({ from: day(-29), to: day(0), groupBy: 'day' });
@@ -322,7 +323,7 @@ export function Revenue() {
   );
 }
 
-/* ---------------- Occupancy Report (UC37 - Member 2) ---------------- */
+// Báo cáo tỷ lệ lấp đầy phòng.
 export function Occupancy() {
   const [p, setP] = useState({ from: day(-29), to: day(0) });
   const rep = useApi(`/reports/occupancy?${qs(p)}`);
@@ -345,7 +346,7 @@ export function Occupancy() {
       <Loading s={rep} />
       {d && (
         <>
-          {/* BR-27: occupied room-nights / available room-nights; inactive rooms and rooms in Maintenance are not available */}
+          {/* Tỷ lệ tính theo đêm phòng có khách trên đêm phòng bán được, loại phòng ngừng hoạt động hoặc bảo trì. */}
           <div className="kpis">
             <div className="kpi"><p>Occupancy rate</p><strong>{pctFmt(d.totals.rate)}</strong><small className="muted">{d.from} → {d.to}</small></div>
             <div className="kpi"><p>Occupied room-nights</p><strong>{d.totals.occupiedRoomNights}</strong><small className="muted">Checked-in and checked-out stays</small></div>
@@ -369,7 +370,7 @@ export function Occupancy() {
   );
 }
 
-/* ---------------- Profile (UC03) and Change Password: two pages, shared by both shells ---------------- */
+// Trang hồ sơ và đổi mật khẩu dùng chung cho khách và nhân viên.
 const ProfileTabs = ({ base, on }) => (
   <div className="subnav" role="navigation" aria-label="Account">
     <a href={base} className={on === 'profile' ? 'on' : ''} aria-current={on === 'profile' ? 'page' : undefined}>Personal details</a>
@@ -393,7 +394,7 @@ export function Profile({ base = '#/profile' }) {
       <ProfileTabs base={base} on="profile" />
       <form className="panel form acct" onSubmit={save}>
         <Field label="Full name" error={err?.fields?.fullName}><input name="fullName" defaultValue={cp.fullName} required minLength={2} maxLength={50} /></Field>
-        {/* UC03 4b: only a Customer changes the e-mail, through a link sent to the new address (BR-24) */}
+        {/* Chỉ khách hàng được đổi email và phải xác minh địa chỉ mới. */}
         {user.role === 'customer' && <Field label={user.pendingEmail ? `E-mail (waiting for verification: ${user.pendingEmail})` : 'E-mail'} error={err?.fields?.email}><input name="email" type="email" defaultValue={user.email} required /></Field>}
         <Field label="Phone" error={err?.fields?.phone}><input name="phone" defaultValue={user.phone} pattern="([0-9]{10,11}|\+[0-9]{8,15})" title="10-11 digits, or + and 8-15 digits with the country code." /></Field>
         <Field label="Address" error={err?.fields?.address}><input name="address" defaultValue={cp.address} /></Field>

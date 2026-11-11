@@ -2,16 +2,15 @@ const Booking = require("../models/Booking");
 const Penalty = require("../models/Penalty");
 const { paidAmount } = require("./payments");
 const { audit } = require("./audit");
-// A confirmed penalty is part of the bill, like a service line (UC19), so every balance check already includes it.
+// Cộng bồi thường đã xác nhận vào tổng tiền để mọi lần tính số dư đều bao gồm khoản này.
 const charge = (bookingId, delta) => Booking.updateOne({ _id: bookingId }, { $inc: { penaltyAmount: delta, totalAmount: delta } });
-// Called after a front-desk payment: once nothing is left to pay, the confirmed penalties are settled.
+// Đánh dấu bồi thường đã trả khi khoản còn thiếu của booking bằng không.
 async function settlePaid(bookingId) {
   const booking = await Booking.findById(bookingId).select("totalAmount");
   if (booking && booking.totalAmount - (await paidAmount(booking._id)) < 1)
     await Penalty.updateMany({ bookingId, status: "confirmed" }, { status: "paid" });
 }
-// System Function 21 / BR-43 (04:30 daily): a penalty found after check-out and still unpaid 7 days after it was confirmed
-// is waived. Idempotent: a line already paid or waived is skipped.
+// Lúc 04:30, miễn bồi thường sau trả phòng chưa thanh toán quá bảy ngày; bỏ qua khoản đã trả hoặc miễn.
 async function waiveUnpaid(now = new Date()) {
   const due = await Penalty.find({ status: "confirmed", afterCheckout: true, confirmedAt: { $lte: new Date(now.getTime() - 7 * 864e5) } }).select("_id");
   let waived = 0;

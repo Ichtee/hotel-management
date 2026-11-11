@@ -38,7 +38,7 @@ const Icon = ({ n, size = 18 }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={ICONS[n]} /></svg>
 );
 
-// A menu entry shows when the user has any of its permissions ('manager.only' = the Hotel Manager role).
+// Hiện mục menu khi có ít nhất một quyền; manager.only dành riêng cho quản lý.
 const allowed = (item, perms, role) => !item[3] || item[3].some((p) => (p === 'manager.only' ? role === 'manager' : p === 'admin.only' ? role === 'admin' : p === 'role.receptionist' ? role === 'receptionist' : perms.includes(p)));
 
 function Sidebar({ route, open, onClose }) {
@@ -101,7 +101,7 @@ function Topbar({ onMenu }) {
   );
 }
 
-/* ---------- Dashboard: live data only ---------- */
+// Bảng điều khiển lấy dữ liệu từ API.
 const vnDay = (offset) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(Date.now() + offset * 864e5));
 const shortDate = (iso) => new Date(`${iso}T00:00:00+07:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'Asia/Ho_Chi_Minh' });
 const ROOM_STATUSES = [['available', 'Available'], ['occupied', 'Occupied'], ['cleaning', 'Cleaning'], ['maintenance', 'Maintenance']];
@@ -112,7 +112,7 @@ function Stat({ label, value, hint, href }) {
   return href ? <a className="kpi kpi-link" href={href}>{body}</a> : <div className="kpi">{body}</div>;
 }
 
-// Today's arrivals (confirmed, check-in today or overdue) and departures (in-house, check-out today or overdue).
+// Tổng hợp khách đến và rời đi trong ngày, gồm cả booking quá hạn.
 function useFrontDesk(enabled) {
   const arrivals = useApi('/bookings/search?view=arrivals&limit=100', enabled);
   const inHouse = useApi('/bookings/search?status=checked_in&limit=100', enabled);
@@ -151,7 +151,7 @@ function Dashboard() {
   const rooms = useApi('/rooms?limit=100', user.role === 'manager');
   const cx = useApi('/frontdesk/cancellations', user.permissions.includes('cancellations.review'));
   const sc = useScreen();
-  // Cards without a figure of their own show the number that matters: open tasks for housekeeping, accounts for the admin.
+  // Hiện số nhiệm vụ hoặc tài khoản theo vai trò đang đăng nhập.
   const mine = useApi('/housekeeping/tasks/mine', user.permissions.includes('cleaning_tasks.own.read'));
   const managers = useApi('/users?role=manager&limit=1', user.role === 'admin');
   const cardValue = (href) => (href === '#/admin/cleaning' && mine.data ? `${mine.data.filter((t) => ['assigned', 'in_progress'].includes(t.status)).length} open` : href === '#/admin/users' && managers.meta ? String(managers.meta.total) : 'Open');
@@ -203,7 +203,7 @@ function Dashboard() {
   );
 }
 
-// Views of the day first (the server compares the stay dates with today), then the plain statuses.
+// Ưu tiên bộ lọc công việc trong ngày trước bộ lọc trạng thái.
 const BOOKING_VIEWS = { arrivals: 'Arrivals', overdue_check_in: 'Overdue check-in', departures: 'Departures', overdue_check_out: 'Overdue check-out' };
 const BOOKING_STATUSES = ['pending', 'confirmed', 'cancellation_requested', 'checked_in', 'checked_out', 'cancelled', 'no_show', 'expired'];
 const VIEW_HINT = {
@@ -214,11 +214,10 @@ const VIEW_HINT = {
 };
 function Bookings() {
   const { user } = useAuth();
-  // The filter lives in the URL (#/admin/bookings?view=arrivals), so a link and the dashboard cards open the right list.
+  // Lưu bộ lọc vào URL để mở đúng danh sách từ liên kết và bảng điều khiển.
   const f = new URLSearchParams(location.hash.split('?')[1] || '').get('view') || 'all';
   const [search, setSearch] = useState('');
-  // The page belongs to one filter + keyword, so a new filter starts at page 1 without a state reset. (A setState next to
-  // the hash change would make React drop the reload: `f` is read from location.hash, which React does not track.)
+  // Gắn trang với bộ lọc và từ khóa để đổi điều kiện sẽ về trang đầu, tránh lệch state với hash.
   const [paging, setPaging] = useState({ of: '', page: 1 });
   const listKey = `${f}|${search}`;
   const page = paging.of === listKey ? paging.page : 1;
@@ -226,7 +225,7 @@ function Bookings() {
   const setF = (v) => { location.hash = v === 'all' ? '#/admin/bookings' : `#/admin/bookings?view=${v}`; };
   const sc = useScreen();
   const [notice, setNotice] = useState(null);
-  // UC20 7a: generate the invoice again after a failure (an existing invoice is returned as it is).
+  // Tạo lại hóa đơn khi lỗi; dùng lại hóa đơn nếu đã tồn tại.
   const generateInvoice = async (b) => {
     try { setNotice({ ok: `Invoice ${(await api(`/front-desk/bookings/${b._id}/invoice`, { method: 'POST' })).data.invoiceNumber} is ready.` }); }
     catch (x) { setNotice({ error: x }); }
@@ -309,7 +308,7 @@ function Bookings() {
   );
 }
 
-// Every front-desk task on a booking is its own page: #/admin/bookings?screen=check-in&id=...
+// Mỗi thao tác lễ tân có URL riêng để mở lại đúng booking.
 const BOOKING_TASKS = { 'check-in': CheckInBooking, 'check-out': CheckOutBooking, cancel: CancelBooking, edit: EditBooking, 'change-room': ChangeRoom, service: AddService, penalties: Penalties };
 function BookingScreen({ sc, onDone }) {
   const b = useApi(`/bookings/${sc.id}`);
@@ -319,7 +318,7 @@ function BookingScreen({ sc, onDone }) {
   return <Task booking={b.data} onClose={() => { onDone(); sc.close(); }} />;
 }
 
-// First action as a button, the rest in a "More" menu, so a row never turns into a wall of buttons.
+// Giữ một nút chính, gom thao tác phụ vào menu để hàng gọn hơn.
 function RowActions({ actions }) {
   if (!actions.length) return null;
   const [[label, run], ...rest] = actions;
@@ -354,7 +353,7 @@ function CustomerStatus({ customer, onClose }) {
   return <Screen title={blacklisting ? 'Blacklist customer' : 'Restore customer'} onClose={onClose}><form className="form" onSubmit={submit}><p className="full muted">{customer.customerProfile?.fullName || customer.username}</p><Field label="Reason"><input value={reason} onChange={(e) => setReason(e.target.value)} required /></Field><div className="full"><Notice error={error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : blacklisting ? 'Blacklist customer' : 'Restore customer'}</button></div></form></Screen>;
 }
 
-// UC11: the balance is split over cash, POS and bank transfer until it is 0 (BR-14: never online, BR-21).
+// Chia khoản còn thiếu qua tiền mặt, POS và chuyển khoản tại quầy.
 function SettleBalance({ booking, balance, onPaid }) {
   const [method, setMethod] = useState('cash'); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
   const [amount, setAmount] = useState(balance); const [received, setReceived] = useState('');
@@ -377,14 +376,13 @@ function SettleBalance({ booking, balance, onPaid }) {
 }
 
 const FEE_LABEL = { early_check_in: 'Early check-in fee', late_check_out: 'Late check-out fee', extra_night: 'Extra night (after 18:00)' };
-// UC20: opening it requests the urgent room inspection and posts the late check-out fee (or one extra night after 18:00,
-// BR-47); check-out needs the whole balance paid (UC11) and the inspection done or skipped (BR-20, BR-22).
+// Tính phí trả muộn và yêu cầu kiểm tra phòng; chỉ trả phòng khi đủ tiền và đã xử lý kiểm tra.
 function CheckOutBooking({ booking, onClose }) {
   const [bill, setBill] = useState(null); const [error, setError] = useState(null); const [saving, setSaving] = useState(false); const [skip, setSkip] = useState(false); const [done, setDone] = useState(null);
   const load = () => api(`/front-desk/bookings/${booking._id}/check-out/start`, { method: 'POST' }).then((r) => setBill(r.data)).catch(setError);
   useEffect(() => { load(); }, [booking._id]);
   const submit = async (e) => {
-    e.preventDefault(); if (!window.confirm(`Are you sure you want to complete the check-out of ${booking.bookingReference}?`)) return; // MSG-09
+    e.preventDefault(); if (!window.confirm(`Are you sure you want to complete the check-out of ${booking.bookingReference}?`)) return;
     setSaving(true); setError(null);
     try { const r = await api(`/front-desk/bookings/${booking._id}/check-out`, { method: 'POST', body: skip ? { skipInspection: true } : {} }); setDone(r); }
     catch (x) { setError(x); load(); } finally { setSaving(false); }
@@ -414,7 +412,7 @@ function CheckOutBooking({ booking, onClose }) {
   </Screen>;
 }
 
-// UC38: record a damage / loss item, or confirm (possibly reduced) / waive one proposed by Housekeeping.
+// Ghi nhận, giảm hoặc miễn khoản bồi thường do housekeeping đề xuất.
 function Penalties({ booking, onClose }) {
   const after = booking.status === 'checked_out'; const bill = useApi(`/bookings/${booking._id}`, after);
   const list = useApi(`/frontdesk/bookings/${booking._id}/penalties`); const catalog = useApi('/frontdesk/compensation-items'); const [pick, setPick] = useState(''); const [qty, setQty] = useState(1); const [amt, setAmt] = useState(''); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
@@ -452,8 +450,7 @@ function AddService({ booking, onClose }) {
   </form></Screen>;
 }
 
-// UC18: during the stay a room of the same or a higher-priced type (an upgrade is always charged); before check-in the
-// room type. A lower-priced type is listed only when nothing better is free, and needs the guest's agreement (BR-38).
+// Đổi phòng theo tình trạng trống; nâng hạng có thu phí, hạ hạng cần khách đồng ý khi hết lựa chọn tốt hơn.
 function ChangeRoom({ booking, onClose }) {
   const options = useApi(`/front-desk/bookings/${booking._id}/change-room-options`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
   const [pick, setPick] = useState(''); const [agrees, setAgrees] = useState(false); const [dropCoupon, setDropCoupon] = useState(false);
@@ -475,7 +472,7 @@ function ChangeRoom({ booking, onClose }) {
   </form></Screen>;
 }
 
-// UC17: an approved check-in request pre-fills the guests and the ID number, which are checked against the document.
+// Điền sẵn thông tin đã duyệt để đối chiếu giấy tờ khi nhận phòng.
 function CheckInBooking({ booking, onClose }) {
   const rooms = useApi(`/front-desk/bookings/${booking._id}/available-rooms`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
   const pre = rooms.meta?.request;
@@ -489,11 +486,11 @@ function CheckInBooking({ booking, onClose }) {
   </form></Screen>;
 }
 
-// UC16 at the desk: the ID document is checked here; the bank account for a refund is asked later, in UC21 (BR-17).
+// Xác minh giấy tờ tại quầy; thu thập tài khoản ngân hàng ở bước hoàn tiền.
 function CancelBooking({ booking, onClose }) {
   const [error, setError] = useState(null); const [saving, setSaving] = useState(false); const [hotel, setHotel] = useState(false); const [done, setDone] = useState(null);
   const submit = async (e) => {
-    e.preventDefault(); if (!window.confirm(`Are you sure you want to cancel ${booking.bookingReference}?`)) return; // MSG-09
+    e.preventDefault(); if (!window.confirm(`Are you sure you want to cancel ${booking.bookingReference}?`)) return;
     setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target));
     try { setDone((await api(`/front-desk/bookings/${booking._id}/cancel`, { method: 'POST', body: hotel ? { hotelCaused: true, ...(f.reason ? { reason: f.reason } : {}) } : { reason: f.reason } })).message); }
     catch (x) { setError(x); } finally { setSaving(false); }
@@ -521,8 +518,7 @@ function EditBooking({ booking, onClose }) {
   </form></Screen>;
 }
 
-// UC14: a walk-in booking is for tonight only (MSG-62). Only the room types still available for the whole stay can be
-// selected (UC04), the server prices the stay with the optional coupon, and the created booking opens the check-in (step 5).
+// Đặt phòng tại quầy bắt đầu hôm nay; chỉ chọn loại còn trống suốt kỳ lưu trú rồi chuyển sang nhận phòng.
 function WalkInBooking({ onClose, onCreated }) {
   const today = vnDay(0);
   const [stay, setStay] = useState({ checkOutDate: vnDay(1), guestCount: '1', roomTypeId: '' }); const [coupon, setCoupon] = useState('');
@@ -572,7 +568,8 @@ function Payments() {
   const [status, setStatus] = useState('');
   const list = useApi(`/frontdesk/payments${status ? `?status=${status}` : ''}`);
   const rows = list.data || [];
-  const received = rows.filter((p) => p.status === 'success').reduce((a, p) => a + p.amount, 0); // a refunded deposit is no longer held
+  // Cọc đã hoàn không còn được tính vào số tiền đang giữ.
+  const received = rows.filter((p) => p.status === 'success').reduce((a, p) => a + p.amount, 0);
   return (
     <>
       <PageHead title="Payments" sub="Deposits paid online and balances collected at the front desk" />
@@ -672,7 +669,7 @@ export default function Admin({ route: fullRoute }) {
   if (loading) return <p className="muted center-msg">Loading…</p>;
   if (route === '#/admin/login') return <Login />;
   if (!user || user.scope === 'self') { if (location.hash !== '#/admin/login') location.hash = '#/admin/login'; return null; }
-  // One rule table for the menu and the route guard: a page that is not in MENU (profile, notifications) is open to every staff account.
+  // Dùng chung quy tắc cho menu và chặn truy cập trang; trang cá nhân mở cho mọi nhân viên.
   const rule = MENU.flatMap((g) => g.items || []).find((item) => item[0] === route);
   const denied = rule && !allowed(rule, user.permissions, user.role);
   const Page = denied ? Forbidden : PAGES[route] || Dashboard;

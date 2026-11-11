@@ -10,9 +10,7 @@ const roomService = require('./roomService');
 const roomTypeService = require('./roomTypeService');
 
 class BookingService {
-  /**
-   * Helper to ensure a customer User document exists for online booking
-   */
+  // Đảm bảo có tài khoản khách hàng trước khi đặt phòng trực tuyến.
   async ensureCustomerUser({ customerId, guestEmail, guestName, guestPhone }) {
     if (customerId && mongoose.isValidObjectId(customerId)) {
       const existingUser = await User.findById(customerId);
@@ -23,7 +21,7 @@ class BookingService {
     let user = await User.findOne({ email });
     if (user) return user;
 
-    // Look for customer role or find any role
+    // Tìm vai trò khách hàng hoặc dùng vai trò dự phòng.
     let customerRole = await Role.findOne({ key: 'customer' });
     if (!customerRole) {
       customerRole = await Role.findOne({});
@@ -45,16 +43,14 @@ class BookingService {
     try {
       await user.save();
     } catch (err) {
-      // If concurrent insert happens
+      // Đọc lại tài khoản nếu yêu cầu khác vừa tạo trùng.
       const found = await User.findOne({ email });
       if (found) return found;
     }
     return user;
   }
 
-  /**
-   * Generate a unique human-friendly booking reference: BK-XXXX
-   */
+  // Sinh mã booking ngắn, dễ đọc và không trùng.
   async generateBookingReference() {
     const code = `BK-${Math.floor(1000 + Math.random() * 9000)}`;
     if (mongoose.connection.readyState === 1) {
@@ -67,9 +63,7 @@ class BookingService {
     return code;
   }
 
-  /**
-   * UC07: Make Reservation (Core Customer Online Booking)
-   */
+  // Tạo booking trực tuyến sau khi kiểm tra khách, phòng trống và giá.
   async createOnlineReservation(payload) {
     const {
       hotelId,
@@ -85,7 +79,7 @@ class BookingService {
       specialRequests
     } = payload;
 
-    // 1. Date Validation
+    // Kiểm tra thứ tự ngày và giới hạn đặt phòng.
     if (!checkInDate || !checkOutDate) {
       const error = new Error('Both checkInDate and checkOutDate are required');
       error.status = 400;
@@ -109,14 +103,14 @@ class BookingService {
 
     const nights = Math.max(1, Math.round((outDate - inDate) / 86400000));
 
-    // 2. Validate Rooms array
+    // Kiểm tra danh sách phòng yêu cầu.
     if (!Array.isArray(rooms) || rooms.length === 0) {
       const error = new Error('At least one room is required for reservation');
       error.status = 400;
       throw error;
     }
 
-    // 3. Resolve Customer User
+    // Xác định tài khoản khách đặt phòng.
     const customer = await this.ensureCustomerUser({
       customerId,
       guestEmail,
@@ -124,7 +118,7 @@ class BookingService {
       guestPhone
     });
 
-    // 3b. BR-29 Anti-hoarding limit (MSG-79)
+    // Giới hạn booking chưa thanh toán để tránh giữ phòng quá mức.
     if (customer && customer._id && mongoose.connection.readyState === 1) {
       const pendingCount = await Booking.countDocuments({
         customerId: customer._id,
@@ -138,14 +132,14 @@ class BookingService {
       }
     }
 
-    // 4. Resolve Hotel ID (fallback to first hotel if not specified)
+    // Dùng khách sạn đầu tiên nếu chưa truyền mã khách sạn.
     let resolvedHotelId = hotelId;
     if (!resolvedHotelId || !mongoose.isValidObjectId(resolvedHotelId)) {
       const firstHotel = await Hotel.findOne();
       resolvedHotelId = firstHotel ? firstHotel._id : new mongoose.Types.ObjectId();
     }
 
-    // 5. Room allocation, pricing, and availability checks (T06)
+    // Chọn phòng trống và tính giá kỳ lưu trú.
     const bookedRooms = [];
     const usedRoomIds = new Set();
     let totalRoomAmount = 0;
@@ -199,7 +193,7 @@ class BookingService {
         throw error;
       }
 
-      // Check duplicate room in same booking
+      // Chặn một phòng xuất hiện nhiều lần trong cùng booking.
       if (usedRoomIds.has(String(physicalRoom._id))) {
         const error = new Error(`Duplicate room assignment: Room ${physicalRoom.roomNumber} cannot be booked twice in the same reservation`);
         error.status = 400;
@@ -207,7 +201,7 @@ class BookingService {
       }
       usedRoomIds.add(String(physicalRoom._id));
 
-      // Calculate total room price across stay nights (accounting for seasonal price if any)
+      // Tính tổng giá từng đêm, gồm mức giá theo mùa.
       let roomStayPrice = 0;
       for (let dayIdx = 0; dayIdx < nights; dayIdx++) {
         const currentDay = new Date(inDate.getTime() + dayIdx * 86400000);
@@ -226,11 +220,11 @@ class BookingService {
       });
     }
 
-    // 6. Discount & Coupon Calculation
+    // Áp dụng mã giảm giá vào tiền phòng.
     let discountAmount = 0;
     if (couponCode) {
       const codeClean = couponCode.trim().toUpperCase();
-      // Look up in Coupon collection or fallback to known offers
+      // Tra cứu mã giảm giá và xử lý mã không hợp lệ.
       const couponDoc = await Coupon.findOne({ code: codeClean, isActive: { $ne: false } });
       if (couponDoc && couponDoc.discountPercent) {
         discountAmount = Math.round((totalRoomAmount * couponDoc.discountPercent) / 100);
@@ -245,11 +239,11 @@ class BookingService {
     const depositRequired = paymentType === 'deposit' ? Math.round(totalAmount * 0.2) : 0;
     const bookingReference = await this.generateBookingReference();
 
-    // BR-29 & BR-31: Total amount 0 confirmed at once, otherwise online reservation holds room 15 min with status 'pending'
+    // Xác nhận ngay nếu tổng tiền bằng không; nếu còn phải trả thì giữ phòng 15 phút.
     const initialStatus = totalAmount === 0 ? 'confirmed' : (paymentType === 'none' ? 'confirmed' : 'pending');
     const holdExpiresAt = initialStatus === 'pending' ? new Date(Date.now() + 15 * 60 * 1000) : undefined;
 
-    // 6b. Atomic Concurrency Check: re-verify no overlapping reservation was created
+    // Kiểm tra lại booking chồng lịch trước khi lưu.
     const conflictingBooking = await Booking.findOne({
       status: { $in: ['pending', 'confirmed', 'checked_in', 'cancellation_requested'] },
       'rooms.roomId': { $in: Array.from(usedRoomIds) },
@@ -262,7 +256,6 @@ class BookingService {
       throw error;
     }
 
-    // 7. Save Booking document
     const booking = new Booking({
       bookingReference,
       hotelId: resolvedHotelId,
@@ -307,9 +300,7 @@ class BookingService {
       .populate('rooms.roomId', 'roomNumber floor status');
   }
 
-  /**
-   * T10: Get Customer Bookings (Dashboard / My Bookings)
-   */
+  // Lấy danh sách booking của khách hàng.
   async getCustomerBookings({ customerId, guestEmail, status }) {
     const query = {};
 
@@ -340,9 +331,7 @@ class BookingService {
       .sort({ createdAt: -1 });
   }
 
-  /**
-   * Get Booking by Reference Code (BK-XXXX)
-   */
+  // Tìm booking theo mã tham chiếu.
   async getBookingByReference(reference) {
     const booking = await Booking.findOne({ bookingReference: reference.trim().toUpperCase() })
       .populate('rooms.roomTypeId', 'name basePrice bedType amenities images')
@@ -356,10 +345,7 @@ class BookingService {
     return booking;
   }
 
-  /**
-   * Abandon Payment / Cancel Hold (BR-29: POST /api/bookings/:id/cancel-payment)
-   * Releases room hold immediately and marks pending booking as expired
-   */
+  // Bỏ thanh toán, hết hạn booking chờ và giải phóng phòng ngay.
   async abandonPayment(bookingId, { customerId } = {}) {
     const booking = await Booking.findById(bookingId);
     if (!booking) {
@@ -388,9 +374,7 @@ class BookingService {
     return booking;
   }
 
-  /**
-   * Withdraw Cancellation Request (BR-36: Customer withdraws before receptionist review)
-   */
+  // Rút yêu cầu hủy trước khi được duyệt.
   async withdrawCancellation(bookingId, { customerId } = {}) {
     const booking = await Booking.findById(bookingId);
     if (!booking) {
@@ -419,12 +403,7 @@ class BookingService {
     return booking;
   }
 
-  /**
-   * Cancel Reservation (UC08 / BR-16, BR-17, BR-32, BR-36)
-   * For pending reservations: cancels immediately and releases hold.
-   * For confirmed reservations: calculates refundable amount from policy tiers,
-   * stores declared refund account, and transitions to 'cancellation_requested'.
-   */
+  // Booking chờ cọc được hủy ngay; booking đã xác nhận tính tiền hoàn theo chính sách và chuyển xử lý phù hợp.
   async cancelReservation(bookingId, { customerId, reason = 'Cancelled by customer', refundAccount } = {}) {
     const booking = await Booking.findById(bookingId);
     if (!booking) {
@@ -433,7 +412,7 @@ class BookingService {
       throw error;
     }
 
-    // Pending booking: abandon payment directly
+    // Booking chờ cọc được bỏ thanh toán trực tiếp.
     if (booking.status === 'pending') {
       return this.abandonPayment(bookingId, { customerId });
     }
@@ -449,7 +428,7 @@ class BookingService {
     const checkInTime = new Date(booking.checkInDate);
     const hoursBeforeCheckIn = (checkInTime.getTime() - now.getTime()) / (1000 * 60 * 60);
 
-    // Calculate refundable percent based on snapshot policy tiers (BR-32)
+    // Tính phần trăm hoàn từ chính sách đã lưu trên booking.
     let refundPercent = 0;
     const tiers = booking.policySnapshot?.cancellationTiers;
     if (Array.isArray(tiers) && tiers.length > 0) {
@@ -462,7 +441,7 @@ class BookingService {
     const depositAmount = booking.depositRequired || booking.paidAmount || (booking.totalAmount * 0.2);
     const refundableAmount = refundPercent > 0 ? Math.round((depositAmount * refundPercent) / 100) : 0;
 
-    // BR-16, BR-17: If refundable amount > 0, booking becomes cancellation_requested
+    // Chuyển sang chờ hủy nếu còn số tiền phải hoàn.
     if (refundableAmount > 0) {
       booking.status = 'cancellation_requested';
       booking.cancellation = {
@@ -486,7 +465,7 @@ class BookingService {
         createdAt: now
       });
     } else {
-      // 0% refund tier or zero deposit: cancel immediately
+      // Hủy ngay nếu không được hoàn hoặc chưa có cọc.
       booking.status = 'cancelled';
       booking.cancelledAt = now;
       booking.cancellationReason = reason;
@@ -502,13 +481,8 @@ class BookingService {
     return booking;
   }
 
-  /**
-   * UC07: Modify Customer / Reception Reservation
-   * Allows updating checkInDate, checkOutDate, guestCount, specialRequests.
-   * Revalidates room availability for new dates (excluding this booking).
-   * Enforces BR-46: dates can only be changed if cancellation is eligible for 100% refund.
-   * Recalculates total stay amount, discounts, and logs 'modified' event.
-   */
+  // Sửa lịch và thông tin lưu trú, kiểm tra phòng trống và tính lại giá.
+  // Chỉ đổi ngày booking đã xác nhận khi còn đủ điều kiện hoàn toàn bộ cọc.
   async modifyReservation(bookingId, { customerId, checkInDate, checkOutDate, specialRequests, guestCount }) {
     const booking = await Booking.findById(bookingId);
     if (!booking) {
@@ -523,7 +497,7 @@ class BookingService {
       throw error;
     }
 
-    // Permission check if customerId specified
+    // Kiểm tra chủ booking nếu có mã khách hàng.
     if (customerId && mongoose.isValidObjectId(customerId)) {
       if (String(booking.customerId) !== String(customerId)) {
         const error = new Error('Unauthorized to modify this reservation');
@@ -564,7 +538,7 @@ class BookingService {
       datesChanged = true;
     }
 
-    // BR-46: Changing stay dates of a Confirmed booking requires full refund eligibility
+    // Chỉ đổi ngày booking đã xác nhận khi còn được hoàn toàn bộ cọc.
     if (datesChanged && booking.status === 'confirmed') {
       const now = new Date();
       const checkInTime = new Date(booking.checkInDate);
@@ -588,7 +562,7 @@ class BookingService {
 
     const nights = Math.max(1, Math.round((targetOutDate - targetInDate) / 86400000));
 
-    // If dates changed, verify room availability for the updated range
+    // Kiểm tra lại phòng trống theo khoảng ngày mới.
     if (datesChanged) {
       let updatedTotalRoomAmount = 0;
       const updatedRooms = [];
@@ -602,12 +576,12 @@ class BookingService {
 
         }
 
-        // Check if current room is available on the new dates (excluding this booking)
+        // Bỏ qua chính booking đang sửa khi kiểm tra phòng hiện tại.
         const isFree = await roomService.isRoomAvailable(physicalRoom._id, targetInDate, targetOutDate, booking._id);
         let assignedRoom = physicalRoom;
 
         if (!isFree) {
-          // Try to reassign to another available room of the same roomTypeId
+          // Tìm phòng trống khác cùng loại nếu phòng cũ không phù hợp.
           const replacement = await roomService.findAvailableRoomForType({
             hotelId: booking.hotelId,
             roomTypeId: item.roomTypeId,
@@ -620,13 +594,13 @@ class BookingService {
             const error = new Error(`Room ${physicalRoom.roomNumber} is unavailable for the selected dates and no replacement of this type is available.`);
             error.status = 409;
             throw error;
-  
-  
+
+
           }
           assignedRoom = replacement;
         }
 
-        // Recalculate price across new nights
+        // Tính lại giá cho các đêm lưu trú mới.
         let stayPrice = 0;
         for (let d = 0; d < nights; d++) {
           const currentDay = new Date(targetInDate.getTime() + d * 86400000);
@@ -645,7 +619,7 @@ class BookingService {
         });
       }
 
-      // Re-evaluate discount if coupon was applied
+      // Kiểm tra lại mức giảm giá sau khi đổi booking.
       let discountAmount = 0;
       if (booking.couponCode) {
         const couponDoc = await Coupon.findOne({ code: booking.couponCode });
@@ -693,14 +667,9 @@ class BookingService {
       .populate('rooms.roomId', 'roomNumber floor');
   }
 
-  /**
-   * UC37: Occupancy Report (W1-M2-1, W3-M2-1, W6-M2-2)
-   * Formula: Occupancy Rate = (Occupied Room-Nights / Sellable Room-Nights) * 100%
-   * - Denominator: Total physical rooms * nights - Maintenance/Blocked room-nights
-   * - Numerator: Room-nights from bookings with status 'confirmed', 'checked_in', 'checked_out'
-   */
+  // Tính tỷ lệ lấp đầy từ đêm phòng có booking trên đêm phòng bán được, loại phòng bảo trì.
   async getOccupancyReport({ hotelId, startDate, endDate, groupBy = 'day' }) {
-    // 1. Determine date range
+    // Xác định khoảng ngày báo cáo.
     const startStr = startDate ? String(startDate).slice(0, 10) : new Date(Date.now() - 29 * 86400000).toISOString().slice(0, 10);
     const endStr = endDate ? String(endDate).slice(0, 10) : new Date().toISOString().slice(0, 10);
 
@@ -713,7 +682,7 @@ class BookingService {
     const start = new Date(startStr + 'T00:00:00.000Z');
     const end = new Date(endStr + 'T23:59:59.999Z');
 
-    // 2. Fetch all physical rooms for this hotel
+    // Lấy các phòng thuộc khách sạn.
     const roomFilter = {};
     if (hotelId && mongoose.isValidObjectId(hotelId)) {
       roomFilter.hotelId = hotelId;
@@ -722,7 +691,7 @@ class BookingService {
     const allRooms = await Room.find(roomFilter).populate('roomTypeId', 'name basePrice');
     const totalPhysicalRooms = allRooms.length;
 
-    // 3. Fetch overlapping active bookings in the period
+    // Lấy booking còn hiệu lực giao với kỳ báo cáo.
     const bookingQuery = {
       status: { $in: ['confirmed', 'checked_in', 'checked_out'] },
       checkInDate: { $lte: end },
@@ -733,11 +702,11 @@ class BookingService {
     }
     const bookings = await Booking.find(bookingQuery);
 
-    // 4. Daily series calculation
+    // Tính số liệu cho từng ngày trong kỳ.
     const series = [];
     const roomTypeStats = {};
 
-    // Initialize room type stats
+    // Khởi tạo thống kê theo loại phòng.
     for (const r of allRooms) {
       const typeName = r.roomTypeId?.name || 'Standard';
       if (!roomTypeStats[typeName]) {
@@ -750,18 +719,18 @@ class BookingService {
     while (currentCursor <= end) {
       const dateStr = currentCursor.toISOString().slice(0, 10);
 
-      // Count maintenance / blocked rooms on this day
+      // Đếm phòng bảo trì để loại khỏi số phòng bán được.
       const maintenanceRoomsCount = allRooms.filter(r => r.status === 'maintenance').length;
       const sellableRooms = Math.max(0, totalPhysicalRooms - maintenanceRoomsCount);
 
-      // Count occupied rooms on this night (a booking covers night dateStr if checkIn <= dateStr and checkOut > dateStr)
+      // Tính đêm có khách theo khoảng từ ngày nhận đến trước ngày trả.
       let occupiedCount = 0;
       for (const b of bookings) {
         const bInStr = new Date(b.checkInDate).toISOString().slice(0, 10);
         const bOutStr = new Date(b.checkOutDate).toISOString().slice(0, 10);
         if (bInStr <= dateStr && bOutStr > dateStr) {
           occupiedCount += (b.rooms?.length || 1);
-          // Track room type stats
+          // Cộng số đêm có khách theo loại phòng.
           for (const rm of (b.rooms || [])) {
             const matchedRoom = allRooms.find(r => String(r._id) === String(rm.roomId));
             const tName = matchedRoom?.roomTypeId?.name || 'Standard';
@@ -772,12 +741,12 @@ class BookingService {
         }
       }
 
-      // Add sellable nights to room type stats
+      // Cộng số đêm bán được theo loại phòng.
       for (const tName of Object.keys(roomTypeStats)) {
         roomTypeStats[tName].sellableNights += roomTypeStats[tName].totalRooms;
       }
 
-      // Cap occupied count at sellable count for realistic metric
+      // Giới hạn số phòng có khách không vượt số phòng bán được.
       const effectiveOccupied = Math.min(occupiedCount, sellableRooms);
       const occupancyRate = sellableRooms > 0
         ? Math.round((effectiveOccupied / sellableRooms) * 1000) / 10
@@ -792,11 +761,10 @@ class BookingService {
         occupancyRate
       });
 
-      // Advance by 1 UTC day
       currentCursor.setUTCDate(currentCursor.getUTCDate() + 1);
     }
 
-    // 5. Calculate overall period totals
+    // Cộng số liệu của cả kỳ báo cáo.
     const totalSellableNights = series.reduce((sum, d) => sum + d.sellableRooms, 0);
     const totalOccupiedNights = series.reduce((sum, d) => sum + d.occupiedRooms, 0);
     const totalMaintenanceNights = series.reduce((sum, d) => sum + d.maintenanceRooms, 0);
@@ -804,7 +772,7 @@ class BookingService {
       ? Math.round((totalOccupiedNights / totalSellableNights) * 1000) / 10
       : 0;
 
-    // Room type summary list
+    // Tổng hợp tỷ lệ theo từng loại phòng.
     const roomTypeBreakdown = Object.entries(roomTypeStats).map(([name, stat]) => ({
       roomType: name,
       totalRooms: stat.totalRooms,
@@ -831,9 +799,7 @@ class BookingService {
     };
   }
 
-  /**
-   * Search Bookings (Shared filter register for Customer, Receptionist, Manager)
-   */
+  // Tìm booking theo bộ lọc dùng chung cho khách, lễ tân và quản lý.
   async searchBookings({
     hotelId,
     customerId,

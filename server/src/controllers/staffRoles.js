@@ -9,7 +9,7 @@ async function listing(req, res) {
   res.json({ data, meta: { permissions: staffPermissionCatalog, personalAccountAccess: "always_enabled" } });
 }
 
-// Đổi quyền và phiên bản xác thực cùng audit log trong một giao dịch.
+// Đổi quyền, tăng phiên bản xác thực và ghi nhật ký trong cùng giao dịch.
 async function updatePermissions(req, res) {
   v.keys(req.body, ["permissions"]);
   const input = req.body.permissions;

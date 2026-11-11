@@ -28,21 +28,22 @@ const { hotelTransaction } = require("../services/hotelOperations");
 const { sellingFilter } = require("../services/roomInventory");
 
 const OPEN_ISSUE = ["open", "in_progress"];
-const NOT_AVAILABLE = "The selected room is not available for the selected dates. Please choose another room or date."; // MSG-30
-const NO_CHECK_IN = "This booking cannot be checked in. Check its status and check-in date."; // MSG-69
+const NOT_AVAILABLE = "The selected room is not available for the selected dates. Please choose another room or date.";
+const NO_CHECK_IN = "This booking cannot be checked in. Check its status and check-in date.";
 const reference = () => `BK-${Date.now().toString(36).toUpperCase()}-${randomBytes(3).toString("hex").toUpperCase()}`;
 const vnDate = (date = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh" }).format(date);
-const at = (date, time) => new Date(`${iso(date)}T${time}:00+07:00`); // a time of a date, hotel local time (CR-05)
-// A notification failure never rolls back the business transaction (CR-15).
+// Ghép ngày và giờ theo múi giờ khách sạn.
+const at = (date, time) => new Date(`${iso(date)}T${time}:00+07:00`);
+// Lỗi gửi thông báo không hoàn tác nghiệp vụ đã lưu.
 const tell = (...a) => notify(...a).catch((e) => console.error("Notification failed:", e.message));
 
-// BR-12: check-out after check-in (MSG-32); a new check-in date is not in the past (MSG-56).
+// Ngày trả phải sau ngày nhận; ngày nhận mới không được nằm trong quá khứ.
 function stayDates(checkInDate, checkOutDate, { allowPast = false } = {}) {
   v.date(checkInDate, "checkInDate"); v.date(checkOutDate, "checkOutDate");
   if (nightsOf(checkInDate, checkOutDate) < 1) v.fail("Check-out date must be later than check-in date.", "checkOutDate");
   if (!allowPast && checkInDate < vnDate()) v.fail("Check-in date must not be in the past.", "checkInDate");
 }
-// BR-10: a room of the type that no other active booking holds on these nights; rooms in Maintenance are never offered.
+// Chọn phòng không bảo trì và không bị booking khác giữ trong kỳ lưu trú.
 async function assignRoom(roomTypeId, checkInDate, checkOutDate, ignoredBookingId) {
   const candidates = await Room.find({ roomTypeId, isActive: true, status: { $ne: "maintenance" } }).select("_id").lean();
   const busy = await busyRooms(candidates.map((r) => r._id), checkInDate, checkOutDate, ignoredBookingId);
@@ -53,8 +54,7 @@ async function busyRooms(ids, from, to, ignoredBookingId) {
   if (ignoredBookingId) filter._id = { $ne: ignoredBookingId };
   return new Set((await Booking.distinct("rooms.roomId", filter)).map(String));
 }
-// CR-16: "find a free room, then save the booking" runs one request at a time (the hotel lock makes a second request wait
-// for the first to commit), so two requests can never take the last room of a type. `save(roomId)` writes the booking.
+// Khóa thao tác chọn và lưu phòng để hai yêu cầu không cùng lấy phòng cuối.
 const locked = (work) => hotelTransaction(() => work());
 const reserve = (roomTypeId, from, to, save) => locked(async () => {
   const { roomId } = await assignRoom(roomTypeId, from, to);
@@ -65,26 +65,27 @@ const depositsPaid = async (bookingId) =>
   (await Payment.find({ bookingId, kind: "deposit", status: "success" }).select("amount").lean()).reduce((s, p) => s + p.amount, 0);
 const totalOf = (b) => b.roomAmount - (b.discountAmount || 0) + (b.serviceAmount || 0) + (b.feeAmount || 0) + (b.penaltyAmount || 0);
 
-// UC06: a logged-in Customer books an available room type; the room is held 15 minutes for the deposit (BR-29).
+// Khách đăng nhập đặt loại phòng còn trống; giữ phòng 15 phút để trả cọc.
 async function create(req, res) {
   v.keys(req.body, ["roomTypeId", "checkInDate", "checkOutDate", "guestCount", "couponCode", "paymentOption", "fullName", "phone", "email", "consent", "captchaToken"]);
   const { roomTypeId, checkInDate, checkOutDate } = req.body;
   v.id(roomTypeId, "roomTypeId"); stayDates(checkInDate, checkOutDate);
   const guestCount = v.number(req.body.guestCount, "guestCount", 1, 20);
-  // BR-13/BR-14: an online booking is confirmed by paying the deposit online; there is no pay-at-hotel or pay-in-full option.
+  // Booking trực tuyến phải trả cọc qua mạng, không chọn trả tại quầy hoặc trả toàn bộ.
   v.choice(req.body.paymentOption || "deposit", "paymentOption", ["deposit"]);
-  if (req.body.consent !== true) v.fail("Privacy consent is required.", "consent"); // CR-21, MSG-04
-  // Step 3: the contact data is pre-filled from the profile and can be corrected.
+  // Yêu cầu đồng ý chính sách và điền sẵn liên hệ từ hồ sơ để khách chỉnh sửa.
+  if (req.body.consent !== true) v.fail("Privacy consent is required.", "consent");
   const guestName = v.text(req.body.fullName ?? req.user.customerProfile?.fullName ?? req.user.username, "fullName", 2, 80);
   const guestPhone = req.body.phone === undefined ? req.user.phone : v.phone(req.body.phone, true);
   const guestEmail = req.body.email === undefined ? req.user.email : v.email(req.body.email);
-  await assertCaptcha(req.body.captchaToken, req.ip); // MSG-80
+  await assertCaptcha(req.body.captchaToken, req.ip);
   if ((await Booking.countDocuments({ customerId: req.user._id, status: "pending", holdExpiresAt: { $gt: new Date() } })) >= 3)
-    throw new v.HttpError(409, "You already have 3 unpaid bookings. Please pay, cancel the payment or wait for one of them to expire."); // MSG-79
+    throw new v.HttpError(409, "You already have 3 unpaid bookings. Please pay, cancel the payment or wait for one of them to expire.");
   const type = await RoomType.findOne({ _id: roomTypeId, isActive: true });
-  if (!type) throw new v.HttpError(404, "This room type is no longer available."); // MSG-82
+  if (!type) throw new v.HttpError(404, "This room type is no longer available.");
   if (guestCount > type.maxOccupancy) v.fail(`This room accommodates up to ${type.maxOccupancy} guests.`, "guestCount");
-  const nightlyRates = priceNights(type, checkInDate, checkOutDate); // BR-07: every night at its own rate
+  // Tính từng đêm theo mức giá áp dụng riêng.
+  const nightlyRates = priceNights(type, checkInDate, checkOutDate);
   const roomAmount = sumNights(nightlyRates);
   const coupon = req.body.couponCode?.trim() ? await validateCoupon({ code: req.body.couponCode, customerId: req.user._id, subtotal: roomAmount }) : null;
   const discountAmount = coupon?.discountAmount || 0;
@@ -92,7 +93,7 @@ async function create(req, res) {
   const [policy, cancellation] = await Promise.all([currentDepositPolicy(), currentCancellationPolicy()]);
   if (!policy) throw new v.HttpError(409, "Online booking is not available yet: the hotel has not set a deposit policy.");
   const depositRequired = percentOf(totalAmount, policy.deposit.value);
-  // BR-29: the room is held for 15 minutes while the deposit is paid; BR-31: a booking with nothing to pay is confirmed at once.
+  // Giữ phòng 15 phút để trả cọc; xác nhận ngay nếu không có tiền phải trả.
   const held = depositRequired >= 1;
   const booking = await reserve(type._id, checkInDate, checkOutDate, (roomId) => Booking.create({
     bookingReference: reference(), customerId: req.user._id, createdBy: req.user._id, checkInDate, checkOutDate,
@@ -100,7 +101,7 @@ async function create(req, res) {
     rooms: [{ roomId, roomTypeId: type._id, priceAtBooking: Math.round(roomAmount / nightsOf(checkInDate, checkOutDate)), guestCount }],
     guestName, guestPhone, guestEmail, consentAt: new Date(), nightlyRates,
     couponCode: coupon?.code, discountAmount, roomAmount, totalAmount, depositRequired,
-    // BR-35: deposit percentage and cancellation tiers are copied into the booking.
+    // Chụp lại phần trăm cọc và các mốc hoàn tiền vào booking.
     policySnapshot: {
       depositPolicyId: policy._id, depositType: policy.deposit.type, depositValue: policy.deposit.value, depositDescription: policy.description,
       cancellationPolicyId: cancellation?._id, cancellationDescription: cancellation?.description,
@@ -110,11 +111,10 @@ async function create(req, res) {
   }));
   if (coupon) { await CouponUsage.create({ couponId: coupon.couponId, bookingId: booking._id, customerId: req.user._id }); await Coupon.updateOne({ _id: coupon.couponId }, { $inc: { usageCount: 1 } }); }
   if (!held) await tell("booking_confirmed", booking.customerId, { reference: booking.bookingReference }, { bookingId: booking._id });
-  // The deposit order is opened by the payment page (UC10), so no placeholder payment is created here.
+  // Chỉ tạo đơn trả cọc khi mở trang thanh toán, không tạo bản ghi tạm ở đây.
   res.status(201).json({ data: booking });
 }
-// UC04: the active room types that fit the guests and still have a room for the whole stay, with the rooms left and the
-// price of these nights (BR-07, BR-10). Physical rooms are not exposed.
+// Trả loại phòng đủ sức chứa và còn trống suốt kỳ, kèm giá; không lộ phòng cụ thể.
 async function availability(req, res) {
   v.keys(req.query, ["checkIn", "checkOut", "guests"]);
   const { checkIn, checkOut } = req.query;
@@ -129,14 +129,13 @@ async function availability(req, res) {
   })).filter((t) => t.roomsLeft > 0);
   res.json({ data });
 }
-// UC06 steps 2-4: the server prices the stay before the booking is created (CR-06). An invalid coupon is reported and the
-// quote continues without the discount (4a). Staff get no deposit: a walk-in booking pays none (BR-13).
+// Báo giá trước khi tạo booking; bỏ giảm giá nếu mã sai và không yêu cầu cọc với khách tại quầy.
 async function quote(req, res) {
   v.keys(req.body, ["roomTypeId", "checkInDate", "checkOutDate", "couponCode"]);
   const { roomTypeId, checkInDate, checkOutDate } = req.body;
   v.id(roomTypeId, "roomTypeId"); stayDates(checkInDate, checkOutDate);
   const type = await RoomType.findOne({ _id: roomTypeId, isActive: true });
-  if (!type) throw new v.HttpError(404, "This room type is no longer available."); // MSG-82
+  if (!type) throw new v.HttpError(404, "This room type is no longer available.");
   const nightlyRates = priceNights(type, checkInDate, checkOutDate), roomAmount = sumNights(nightlyRates);
   const isCustomer = req.role.key === "customer";
   let discountAmount = 0, couponError;
@@ -153,12 +152,12 @@ async function quote(req, res) {
 }
 async function roomTypes(_req, res) { res.json({ data: await RoomType.find({ isActive: true }).select("name description basePrice maxOccupancy amenities images bedType roomSizeSqm seasonalPricing").sort({ basePrice: 1 }).lean() }); }
 
-// UC14: walk-in booking for today, no deposit (BR-12, BR-13).
+// Đặt tại quầy bắt đầu hôm nay và không yêu cầu cọc.
 async function createWalkIn(req, res) {
   v.keys(req.body, ["roomTypeId", "checkInDate", "checkOutDate", "guestCount", "fullName", "phone", "email", "idDocumentNo", "couponCode"]);
   const b = req.body;
   v.id(b.roomTypeId, "roomTypeId"); stayDates(b.checkInDate, b.checkOutDate);
-  if (b.checkInDate !== vnDate()) v.fail("A booking without a deposit can only be created for today's check-in date.", "checkInDate", 409); // MSG-62
+  if (b.checkInDate !== vnDate()) v.fail("A booking without a deposit can only be created for today's check-in date.", "checkInDate", 409);
   const guestCount = v.number(b.guestCount, "guestCount", 1, 20);
   const fullName = v.text(b.fullName, "fullName", 2, 80), phone = v.phone(b.phone, true), idDocumentNo = v.text(b.idDocumentNo, "idDocumentNo", 3, 40);
   const email = b.email ? v.email(b.email) : undefined;
@@ -166,16 +165,16 @@ async function createWalkIn(req, res) {
   if (!type) throw new v.HttpError(404, "This room type is no longer available.");
   if (guestCount > type.maxOccupancy) v.fail(`This room accommodates up to ${type.maxOccupancy} guests.`, "guestCount");
   const nightlyRates = priceNights(type, b.checkInDate, b.checkOutDate), roomAmount = sumNights(nightlyRates);
-  const coupon = b.couponCode?.trim() ? await validateCoupon({ code: b.couponCode, subtotal: roomAmount }) : null; // UC14 step 3 (BR-09)
+  // Áp dụng mã giảm giá khi đặt phòng tại quầy.
+  const coupon = b.couponCode?.trim() ? await validateCoupon({ code: b.couponCode, subtotal: roomAmount }) : null;
   const discountAmount = coupon?.discountAmount || 0;
   const booking = await reserve(type._id, b.checkInDate, b.checkOutDate, (roomId) => Booking.create({ bookingReference: reference(), nightlyRates, createdBy: req.user._id, checkInDate: b.checkInDate, checkOutDate: b.checkOutDate, status: "confirmed", rooms: [{ roomId, roomTypeId: type._id, priceAtBooking: Math.round(roomAmount / nightsOf(b.checkInDate, b.checkOutDate)), guestCount }], guestName: fullName, guestPhone: phone, guestEmail: email, guestIdDocumentNo: idDocumentNo, roomAmount, couponCode: coupon?.code, discountAmount, totalAmount: roomAmount - discountAmount, depositRequired: 0, bookingSource: "front_desk", events: [{ actorId: req.user._id, type: "created", note: "Walk-in booking created by receptionist" }] }));
   if (coupon) await Coupon.updateOne({ _id: coupon.couponId }, { $inc: { usageCount: 1 } });
-  res.status(201).json({ data: booking, message: "Booking created successfully." }); // MSG-31
+  res.status(201).json({ data: booking, message: "Booking created successfully." });
 }
 
-// UC07 / UC15: new stay dates or number of guests. Kept nights keep their snapshot price (BR-35), added nights use the rate of
-// that night (BR-07, BR-34) and the coupon is checked again (BR-09, BR-46). A Confirmed booking keeps its deposit and its total
-// may not fall below it (BR-40); a Pending Payment booking gets a new deposit and cannot change while a gateway payment is pending.
+// Giữ giá đêm cũ, tính giá đêm thêm và kiểm tra lại mã giảm giá.
+// Booking đã xác nhận giữ cọc; booking chờ cọc không được sửa khi đang thanh toán.
 async function changeStay(booking, input, { byCustomer, dropCoupon = false }) {
   const line = booking.rooms[0];
   const type = await RoomType.findById(line.roomTypeId);
@@ -193,19 +192,23 @@ async function changeStay(booking, input, { byCustomer, dropCoupon = false }) {
   if (booking.status === "pending" && (await Payment.exists({ bookingId: booking._id, status: "pending" })))
     throw new v.HttpError(409, "A payment of this booking is waiting for the payment gateway. Wait for the result or cancel the payment first.");
   if (byCustomer && booking.status === "confirmed") {
-    const now = await estimate(booking); // BR-46: only while a cancellation now would be refunded in full
-    if (now.depositPaid > 0 && now.refundPercent < 100) throw new v.HttpError(409, "The stay dates can no longer be changed for this booking. Keep the current dates or cancel the booking."); // MSG-78
+    // Chỉ cho sửa khi hủy tại thời điểm này vẫn được hoàn toàn bộ cọc.
+    const now = await estimate(booking);
+    if (now.depositPaid > 0 && now.refundPercent < 100) throw new v.HttpError(409, "The stay dates can no longer be changed for this booking. Keep the current dates or cancel the booking.");
   }
   let roomId;
-  if (booking.status === "checked_in") roomId = (await busyRooms([line.roomId], oldOut, checkOutDate, booking._id)).size ? null : line.roomId; // the guest keeps the room
+  // Giữ nguyên phòng khách đang sử dụng.
+  if (booking.status === "checked_in") roomId = (await busyRooms([line.roomId], oldOut, checkOutDate, booking._id)).size ? null : line.roomId;
   else roomId = (await assignRoom(type._id, checkInDate, checkOutDate, booking._id)).roomId;
   if (!roomId) throw new v.HttpError(409, NOT_AVAILABLE);
-  const nightlyRates = priceNights(type, checkInDate, checkOutDate, storedNights(booking)); // kept nights keep their price (BR-35)
+  // Giữ giá đã chốt của các đêm không đổi.
+  const nightlyRates = priceNights(type, checkInDate, checkOutDate, storedNights(booking));
   const roomAmount = sumNights(nightlyRates);
   let discountAmount = 0, couponCode = booking.couponCode;
   if (couponCode) {
     try { discountAmount = await recheckCoupon({ code: couponCode, subtotal: roomAmount }); }
-    catch (error) { if (byCustomer || !dropCoupon) throw error; couponCode = undefined; } // UC15: only when the guest agrees
+    // Chỉ áp dụng thay đổi khi khách đồng ý.
+    catch (error) { if (byCustomer || !dropCoupon) throw error; couponCode = undefined; }
   }
   Object.assign(booking, { checkInDate, checkOutDate, nightlyRates, roomAmount, discountAmount, couponCode });
   booking.totalAmount = totalOf(booking);
@@ -215,7 +218,7 @@ async function changeStay(booking, input, { byCustomer, dropCoupon = false }) {
   line.roomId = roomId; line.priceAtBooking = Math.round(roomAmount / nightsOf(checkInDate, checkOutDate));
 }
 
-// UC15: the Receptionist edits the stay and the customer information on the booking (not the e-mail or password of an account).
+// Lễ tân sửa lịch lưu trú và liên hệ trên booking, không sửa thông tin đăng nhập.
 async function modifyWalkIn(req, res) {
   v.keys(req.body, ["checkInDate", "checkOutDate", "guestCount", "fullName", "phone", "idDocumentNo", "dropCoupon"]);
   const booking = await Booking.findById(v.id(req.params.id)).select("+guestIdDocumentNo");
@@ -228,16 +231,16 @@ async function modifyWalkIn(req, res) {
   if (b.phone !== undefined) booking.guestPhone = v.phone(b.phone, true);
   if (b.idDocumentNo !== undefined) booking.guestIdDocumentNo = v.text(b.idDocumentNo, "idDocumentNo", 3, 40);
   booking.events.push({ actorId: req.user._id, type: "modified", note: "Booking modified by receptionist" });
-  await locked(async () => { // CR-16: the new nights are taken and saved under the hotel lock
+  // Khóa việc giữ và lưu các đêm mới để tránh tranh chấp phòng.
+  await locked(async () => {
     if (stayChange) await changeStay(booking, b, { byCustomer: false, dropCoupon: b.dropCoupon === true });
     await booking.save();
   });
   if (booking.customerId) await tell("booking_modified", booking.customerId, { reference: booking.bookingReference }, { bookingId: booking._id });
-  res.json({ data: booking, message: "Updated successfully." }); // MSG-02
+  res.json({ data: booking, message: "Updated successfully." });
 }
 
-// UC07: the Customer changes the dates, the number of guests and the contact data of his/her own booking; the room type is
-// not changed and the ID / passport number is given only at check-in (SRS 4.2.4).
+// Khách chỉ sửa lịch và liên hệ booking của mình; giữ loại phòng, thu giấy tờ khi nhận phòng.
 async function modifyOwn(req, res) {
   v.keys(req.body, ["checkInDate", "checkOutDate", "guestCount", "fullName", "phone", "email", "specialRequests"]);
   const booking = await Booking.findOne({ _id: v.id(req.params.id), customerId: req.user._id });
@@ -248,12 +251,12 @@ async function modifyOwn(req, res) {
   if (b.phone !== undefined) booking.guestPhone = v.phone(b.phone, true);
   if (b.email !== undefined) booking.guestEmail = v.email(b.email);
   booking.events.push({ actorId: req.user._id, type: "modified", note: "Booking modified by the customer" });
-  await locked(async () => { await changeStay(booking, b, { byCustomer: true }); await booking.save(); }); // CR-16
+  await locked(async () => { await changeStay(booking, b, { byCustomer: true }); await booking.save(); });
   await tell("booking_modified", booking.customerId, { reference: booking.bookingReference }, { bookingId: booking._id });
   res.json({ data: booking, message: "Updated successfully." });
 }
 
-// UC17 step 2: Available rooms of the booked type, and the data of an approved check-in request to pre-fill the form.
+// Lấy phòng trống đúng loại và thông tin yêu cầu đã duyệt để điền sẵn khi nhận phòng.
 async function availableRooms(req, res) {
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking) throw new v.HttpError(404, "Booking not found.");
@@ -262,7 +265,7 @@ async function availableRooms(req, res) {
   const request = await Request.findOne({ bookingId: booking._id, type: "check_in", status: "approved" }).select("+mainGuestIdNumber");
   res.json({ data: candidates.filter((r) => !busy.has(String(r._id))), meta: { request: request && { _id: request._id, hasIdPhoto: request.hasIdPhoto, guestCount: request.numberOfGuests, idDocumentNo: request.mainGuestIdNumber, requestedTime: request.requestedTime } } });
 }
-// UC17: on the check-in date, or after midnight until the 06:00 no-show cut-off (BR-18, BR-33).
+// Cho nhận phòng đúng ngày hoặc sau nửa đêm trước mốc vắng mặt 06:00.
 async function checkIn(req, res) {
   v.keys(req.body, ["roomId", "guestCount", "idDocumentNo"]);
   const booking = await Booking.findById(v.id(req.params.id)).select("+guestIdDocumentNo");
@@ -276,7 +279,7 @@ async function checkIn(req, res) {
   const type = await RoomType.findById(booking.rooms[0].roomTypeId);
   if (!type || guestCount > type.maxOccupancy) v.fail("Invalid guest count.", "guestCount");
   booking.rooms[0].roomId = room._id; booking.rooms[0].guestCount = guestCount; booking.guestIdDocumentNo = v.text(req.body.idDocumentNo, "idDocumentNo", 3, 40);
-  // BR-44: the early check-in fee is posted once, when the guest really checks in before the standard time (CR-19).
+  // Chỉ ghi phí nhận sớm một lần khi khách thực sự nhận trước giờ chuẩn.
   const policy = await currentCancellationPolicy();
   const earlyFee = now < at(booking.checkInDate, policy?.checkInTime || "14:00") ? policy?.earlyCheckInFee || 0 : 0;
   if (earlyFee && !booking.feeLines.some((l) => l.type === "early_check_in")) {
@@ -287,11 +290,10 @@ async function checkIn(req, res) {
   booking.events.push({ actorId: req.user._id, type: "checked_in", note: `Checked in to room ${room.roomNumber}` });
   room.status = "occupied"; await room.save(); await booking.save();
   await closeForBooking(booking._id);
-  res.json({ data: booking, message: "Check-in completed successfully." }); // MSG-44
+  res.json({ data: booking, message: "Check-in completed successfully." });
 }
 
-// UC18 / BR-38: where the booking may move for the remaining nights - rooms during the stay, room types before check-in.
-// A lower-priced room type is offered only when no room of the booked or a higher-priced type is free.
+// Tìm lựa chọn đổi phòng cho các đêm còn lại; chỉ cho hạ hạng khi hết phòng cùng hoặc cao hơn.
 async function moveOptions(booking) {
   const checkedIn = booking.status === "checked_in";
   const line = booking.rooms[0];
@@ -330,7 +332,7 @@ async function changeRoom(req, res) {
   const wanted = checkedIn ? v.id(req.body.newRoomId, "newRoomId") : v.id(req.body.newRoomTypeId, "newRoomTypeId");
   const pick = options.find((o) => String(checkedIn ? o.room._id : o.roomType._id) === wanted);
   if (!pick) {
-    // MSG-68: a lower-priced type while the booked or a higher-priced one is still free; otherwise MSG-30.
+    // Báo riêng trường hợp hạ hạng không hợp lệ và trường hợp hết phòng.
     const target = checkedIn ? await Room.findById(wanted).select("roomTypeId") : { roomTypeId: wanted };
     const targetType = target && (await RoomType.findById(target.roomTypeId));
     if (targetType && options.length && !options[0].lower && stayAmount(targetType, from, to) < stayAmount(await RoomType.findById(line.roomTypeId), from, to))
@@ -341,30 +343,33 @@ async function changeRoom(req, res) {
   const before = { roomId: line.roomId, roomTypeId: line.roomTypeId, roomAmount: booking.roomAmount };
   const nights = nightsOf(booking.checkInDate, booking.checkOutDate);
   if (checkedIn) {
-    // Nights already spent keep their price and room type; the remaining nights are charged at the new type (upgrade always charged).
+    // Đêm đã ở giữ giá cũ; đêm còn lại dùng giá loại mới, nâng hạng luôn thu chênh lệch.
     booking.nightlyRates = [...storedNights(booking).filter((n) => iso(n.date) < from), ...priceNights(pick.roomType, from, to)];
     booking.roomAmount = sumNights(booking.nightlyRates);
   } else {
-    booking.nightlyRates = priceNights(pick.roomType, from, to); // UC18 1a: the whole stay is repriced; the deposit does not change (BR-40)
+    // Đổi trước nhận phòng thì tính lại toàn kỳ nhưng giữ nguyên cọc.
+    booking.nightlyRates = priceNights(pick.roomType, from, to);
     booking.roomAmount = sumNights(booking.nightlyRates);
     if (booking.couponCode) {
       try { booking.discountAmount = await recheckCoupon({ code: booking.couponCode, subtotal: booking.roomAmount }); }
       catch (error) { if (req.body.dropCoupon !== true) throw error; booking.discountAmount = 0; booking.couponCode = undefined; }
     }
   }
-  booking.totalAmount = Math.max(0, totalOf(booking)); // a downgrade below the deposit leaves a balance of 0 (LIM-08)
+  // Nếu giá sau hạ hạng thấp hơn cọc, khoản còn phải trả bằng không.
+  booking.totalAmount = Math.max(0, totalOf(booking));
   line.roomTypeId = pick.roomType._id; line.priceAtBooking = Math.round(booking.roomAmount / nights);
   let turnover;
   if (checkedIn) {
     const oldRoom = await Room.findById(line.roomId);
     line.roomId = pick.room._id;
-    // BR-05: the vacated room goes to Maintenance when it has a reported issue, otherwise to Cleaning.
+    // Phòng vừa rời chuyển sang bảo trì nếu có sự cố, nếu không thì chờ dọn.
     const broken = oldRoom && (await RoomIssue.exists({ roomId: oldRoom._id, status: { $in: OPEN_ISSUE } }));
     if (oldRoom) await Room.updateOne({ _id: oldRoom._id }, { $set: { status: broken ? "maintenance" : "cleaning" } });
     await Room.updateOne({ _id: pick.room._id }, { $set: { status: "occupied" } });
     if (oldRoom) turnover = (await createCleaningTask({ roomId: String(oldRoom._id), type: "turnover" })).data;
     await booking.save();
-  } else await locked(async () => { // CR-16: take a room of the new type and save under the hotel lock
+  // Khóa việc chọn và lưu phòng mới để tránh hai booking lấy cùng phòng.
+  } else await locked(async () => {
     line.roomId = (await assignRoom(pick.roomType._id, from, to, booking._id)).roomId;
     if (!line.roomId) throw new v.HttpError(409, NOT_AVAILABLE);
     await booking.save();
@@ -372,7 +377,7 @@ async function changeRoom(req, res) {
   booking.events.push({ actorId: req.user._id, type: "room_changed", note: `${checkedIn ? `Moved to room ${pick.room.roomNumber}` : `Room type changed to ${pick.roomType.name}`}${pick.lower ? " (lower-priced, guest agreed)" : ""}`, oldValue: before, newValue: { roomId: line.roomId, roomTypeId: line.roomTypeId, roomAmount: booking.roomAmount } });
   await booking.save();
   await audit(req.user._id, "booking.room_changed", "booking", booking._id, { before, after: { roomId: line.roomId, roomTypeId: line.roomTypeId, roomAmount: booking.roomAmount }, guestAgreedLower: pick.lower });
-  res.json({ data: booking, meta: { difference: booking.roomAmount - before.roomAmount, turnoverTask: turnover }, message: "Room assigned successfully." }); // MSG-45
+  res.json({ data: booking, meta: { difference: booking.roomAmount - before.roomAmount, turnoverTask: turnover }, message: "Room assigned successfully." });
 }
 
 async function services(_req, res) {
@@ -389,7 +394,7 @@ async function addService(req, res) {
   booking.services.push({ serviceId: service._id, name: service.name, quantity, unitPrice: service.unitPrice, amount, recordedBy: req.user._id });
   booking.serviceAmount += amount; booking.totalAmount += amount;
   booking.events.push({ actorId: req.user._id, type: "service_added", note: `Added ${quantity} × ${service.name}`, newValue: { serviceId: service._id, quantity, amount } });
-  await booking.save(); res.status(201).json({ data: booking, message: "Saved successfully." }); // MSG-01
+  await booking.save(); res.status(201).json({ data: booking, message: "Saved successfully." });
 }
 async function voidService(req, res) {
   v.keys(req.body, ["reason"]);
@@ -404,14 +409,12 @@ async function voidService(req, res) {
   booking.totalAmount = Math.max(0, booking.totalAmount - line.amount);
   booking.events.push({ actorId: req.user._id, type: "modified", note: `Voided service: ${line.name}` });
   await booking.save();
-  await audit(req.user._id, "booking_service.voided", "booking", booking._id, { service: line.name, amount: line.amount, reason: line.voidReason }); // BR-19
+  await audit(req.user._id, "booking_service.voided", "booking", booking._id, { service: line.name, amount: line.amount, reason: line.voidReason });
   res.json({ data: booking });
 }
 
-// BR-44 / BR-47: after the standard check-out time of the check-out date the late check-out fee is posted, after 18:00 one
-// extra night at the rate of that night instead; once per stay, without changing the check-out date. Leaving early costs
-// nothing extra (BR-39).
-// The charge due now, if any (pure: nothing is written).
+// Tính phí trả muộn một lần; sau 18:00 thay bằng giá thêm một đêm, không đổi ngày trả.
+// Hàm chỉ tính tiền, không ghi dữ liệu; trả sớm không tính thêm phí.
 async function lateCharge(booking, now = new Date()) {
   if (booking.feeLines.some((l) => l.type === "late_check_out" || l.type === "extra_night")) return null;
   const policy = await currentCancellationPolicy();
@@ -420,7 +423,7 @@ async function lateCharge(booking, now = new Date()) {
   const amount = extraNight ? priceAt(await RoomType.findById(booking.rooms[0].roomTypeId), booking.checkOutDate) : policy?.lateCheckOutFee || 0;
   return amount ? { type: extraNight ? "extra_night" : "late_check_out", amount, postedAt: now } : null;
 }
-// One atomic update, so two parallel calls (a double click, React strict mode) post the charge once; the caller re-reads the booking.
+// Cập nhật nguyên tử để yêu cầu đồng thời chỉ ghi phí một lần, rồi đọc lại booking.
 async function postLateCharge(booking, now = new Date()) {
   const line = await lateCharge(booking, now);
   if (!line) return 0;
@@ -441,41 +444,41 @@ async function checkOutBill(booking) {
     inspection: task && { _id: task._id, status: task.status, notes: task.notes, assignedTo: task.assignedTo?.customerProfile?.fullName || task.assignedTo?.username || null },
   };
 }
-// UC20 steps 1-4: an urgent Inspection task for the responsible staff member (unless a check-out request already created
-// one), the late charge if due, and the final bill.
+// Yêu cầu kiểm tra phòng, ghi phí trả muộn nếu có và lập bảng thanh toán cuối.
 async function startCheckOut(req, res) {
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   if (booking.status !== "checked_in") throw new v.HttpError(409, "Only a checked-in booking can be checked out.");
   if (!(await Task.exists({ bookingId: booking._id, type: "inspection" })) && booking.rooms[0].roomId) {
-    // The same key as the scheduler's, so a parallel call (or the 30-minute job) can never add a second inspection.
+    // Dùng chung khóa với lịch nền để không tạo trùng nhiệm vụ kiểm tra.
     try { await createCleaningTask({ roomId: String(booking.rooms[0].roomId), bookingId: String(booking._id), type: "inspection", inspectionKey: `${booking.id}:${booking.rooms[0].roomId}`, requestContent: "Inspect the room at check-out: minibar, equipment, linen, keys." }); }
     catch (error) { if (error.code !== 11000) throw error; }
   }
   await postLateCharge(booking);
   res.json({ data: await checkOutBill(await Booking.findById(booking._id)) });
 }
-// UC20 steps 5-7: only with the whole balance paid (UC11), the reported damage decided and the inspection done or skipped (BR-20).
+// Chỉ trả phòng khi đủ tiền, đã quyết định bồi thường và đã xử lý kiểm tra phòng.
 async function checkOut(req, res) {
   v.keys(req.body, ["skipInspection"]);
   let booking = await Booking.findById(v.id(req.params.id));
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   if (booking.status !== "checked_in") throw new v.HttpError(409, "Only a checked-in booking can be checked out.");
   await postLateCharge(booking);
-  booking = await Booking.findById(booking._id); // the charge was written atomically
+  // Đọc lại khoản phí vừa ghi nguyên tử.
+  booking = await Booking.findById(booking._id);
   if (await Penalty.exists({ bookingId: booking._id, status: "proposed" })) throw new v.HttpError(409, "Confirm or waive the damage / loss items reported by Housekeeping first.");
   const balance = Math.max(0, booking.totalAmount - (await paidAmount(booking._id)));
   if (balance) throw new v.HttpError(409, `Check-out cannot be completed while ${balance.toLocaleString("en-US")} VND is unpaid. Record the payment first.`);
   const task = await Task.findOne({ bookingId: booking._id, type: "inspection" }).sort({ createdAt: -1 });
   if (task?.status !== "completed") {
     if (req.body.skipInspection !== true) throw new v.HttpError(409, "The room inspection is not finished. Wait for the result or skip it.");
-    // UC20 3a / BR-22: the skipped inspection is closed as Completed with a note, directly from Assigned or In Progress.
+    // Đóng kiểm tra bị bỏ qua thành hoàn tất kèm ghi chú.
     if (task) await Task.updateOne({ _id: task._id }, { $set: { status: "completed", notes: "Skipped at check-out", completedAt: new Date() } });
     await audit(req.user._id, "inspection.skipped", "booking", booking._id, { taskId: task?._id });
   }
   const roomIds = booking.rooms.map((room) => room.roomId).filter(Boolean);
   const broken = new Set((await RoomIssue.distinct("roomId", { roomId: { $in: roomIds }, status: { $in: OPEN_ISSUE } })).map(String));
-  for (const id of roomIds) await Room.updateOne({ _id: id }, { $set: { status: broken.has(String(id)) ? "maintenance" : "cleaning" } }); // BR-05
+  for (const id of roomIds) await Room.updateOne({ _id: id }, { $set: { status: broken.has(String(id)) ? "maintenance" : "cleaning" } });
   booking.status = "checked_out"; booking.actualCheckOutAt = new Date(); booking.checkedOutBy = req.user._id;
   booking.events.push({ actorId: req.user._id, type: "checked_out", note: "Checked out" });
   await booking.save();
@@ -483,11 +486,11 @@ async function checkOut(req, res) {
   const turnovers = await Promise.all(roomIds.map((roomId) => createCleaningTask({ roomId: String(roomId), bookingId: String(booking._id), type: "turnover" })));
   let invoice, warning;
   try { invoice = await issueInvoice(booking, req.user._id); }
-  catch (error) { console.error("Invoice generation failed:", error.message); warning = "The invoice could not be generated. Please try again."; } // UC20 7a, MSG-48
-  res.json({ data: { booking, invoice, turnoverTasks: turnovers.map((item) => item.data) }, message: "Check-out completed successfully.", ...(warning ? { warning } : {}) }); // MSG-47
+  catch (error) { console.error("Invoice generation failed:", error.message); warning = "The invoice could not be generated. Please try again."; }
+  res.json({ data: { booking, invoice, turnoverTasks: turnovers.map((item) => item.data) }, message: "Check-out completed successfully.", ...(warning ? { warning } : {}) });
 }
 const FEE_NAMES = { early_check_in: "Early check-in fee", late_check_out: "Late check-out fee", extra_night: "Extra night (check-out after 18:00)" };
-// BR-21: the bill lines, the hotel name and address are copied into the invoice when it is generated.
+// Chụp các dòng tiền, tên và địa chỉ khách sạn vào hóa đơn khi phát hành.
 async function issueInvoice(booking, issuedBy) {
   const existing = await Invoice.findOne({ bookingId: booking._id, kind: "checkout" });
   if (existing) return existing;
@@ -504,7 +507,7 @@ async function issueInvoice(booking, issuedBy) {
     ...penalties.map((p) => ({ name: `Damage / loss: ${p.itemName}`, amount: p.amount })),
   ];
   const day = vnDate().replace(/-/g, "");
-  // ponytail: the daily sequence is counted, so two check-outs in the same instant can collide; the unique index rejects one and "Generate invoice" retries.
+  // Mã hóa đơn theo số thứ tự có thể trùng khi chạy đồng thời; chỉ mục chặn trùng và cho tạo lại.
   const seq = (await Invoice.countDocuments({ invoiceNumber: new RegExp(`^INV-${day}-`) })) + 1;
   const invoice = await Invoice.create({
     bookingId: booking._id, kind: "checkout", invoiceNumber: `INV-${day}-${String(seq).padStart(4, "0")}`, issuedBy, issuedAt: new Date(),
@@ -515,7 +518,7 @@ async function issueInvoice(booking, issuedBy) {
   await audit(issuedBy, "invoice.generated", "invoice", invoice._id, { bookingId: booking._id, totalAmount: booking.totalAmount });
   return invoice;
 }
-// UC20 7a: "Generate invoice" again after a failure.
+// Cho tạo lại hóa đơn sau khi lần phát hành trước thất bại.
 async function generateInvoice(req, res) {
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking || booking.status !== "checked_out") throw new v.HttpError(409, "An invoice is generated only after check-out.");

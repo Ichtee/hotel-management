@@ -3,11 +3,12 @@ const { Schema } = mongoose;
 
 const schema = new Schema({
   bookingId: { type: Schema.Types.ObjectId, ref: 'Booking', required: true, index: true },
-  kind: { type: String, enum: ['deposit', 'final'], required: true }, // BR-40: no additional deposit
+  // Không thu thêm cọc sau khi booking đã xác nhận.
+  kind: { type: String, enum: ['deposit', 'final'], required: true },
   amount: { type: Number, required: true, min: 1 },
   currency: { type: String, default: 'VND', uppercase: true, trim: true },
   method: { type: String, enum: ['credit_card', 'e_wallet', 'bank_transfer', 'cash', 'pos'], required: true },
-  // SRS 2.6: a paid (success) payment becomes refunded once the whole amount is refunded (BR-17: no partial refund).
+  // Khoản thu chuyển sang đã hoàn khi hoàn toàn bộ, không hoàn từng phần.
   status: { type: String, enum: ['pending', 'success', 'failed', 'cancelled', 'refunded'], default: 'pending' },
   gateway: String,
   gatewayOrderId: String,
@@ -15,7 +16,8 @@ const schema = new Schema({
   idempotencyKey: { type: String, unique: true, sparse: true },
   failureReason: String,
   paidAt: Date,
-  isLateDeposit: { type: Boolean, default: false }, // confirmed after the booking expired or was cancelled
+  // Khoản tiền được xác nhận sau khi booking hết hạn hoặc bị hủy.
+  isLateDeposit: { type: Boolean, default: false },
   recordedBy: { type: Schema.Types.ObjectId, ref: 'User' }
 }, { timestamps: true });
 

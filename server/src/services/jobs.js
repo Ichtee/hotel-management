@@ -4,20 +4,27 @@ const { processNoShows } = require("./noShows");
 const { arrivalReminders } = require("./reminders");
 const { waiveUnpaid } = require("./penalties");
 const { runHousekeepingTick } = require("./housekeepingTasks");
-// SDS 1.3 scheduled jobs owned by M3. Each one is idempotent and catches up on everything overdue.
+// Đăng ký các tác vụ nền dùng chung cho bộ hẹn giờ và cron bên ngoài.
 const jobs = {
-  "cancellation-auto-approval": autoApprove, // job 02, every 5 minutes (BR-36)
-  "payment-reconciliation": reconcileDaily, // job 07, 04:15 daily
-  "no-show-processing": processNoShows, // T11, 06:00 daily
-  "hold-expiry": expireHolds, // T10, every minute (BR-29)
-  "arrival-reminder": arrivalReminders, // notification service, 09:00 daily
-  "penalty-waiver": waiveUnpaid, // System Function 21, 04:30 daily
-  // For an external cron only (the in-process housekeeping scheduler already ticks every 30 seconds):
-  "housekeeping-tick": (now) => runHousekeepingTick(now), // inspections 30 minutes before check-out, Pending tasks; every 5 minutes
-  "routine-tasks": (now) => runHousekeepingTick(now, { routine: true }), // BR-45, 07:00 daily, also after a missed run
+  // Duyệt hủy mỗi năm phút.
+  "cancellation-auto-approval": autoApprove,
+  // Đối soát thanh toán lúc 04:15 hằng ngày.
+  "payment-reconciliation": reconcileDaily,
+  // Xử lý khách không đến lúc 06:00 hằng ngày.
+  "no-show-processing": processNoShows,
+  // Kiểm tra hết hạn giữ phòng mỗi phút.
+  "hold-expiry": expireHolds,
+  // Gửi nhắc lịch lúc 09:00 hằng ngày.
+  "arrival-reminder": arrivalReminders,
+  // Miễn bồi thường quá hạn lúc 04:30 hằng ngày.
+  "penalty-waiver": waiveUnpaid,
+  // Kiểm tra và phân công housekeeping mỗi năm phút từ cron ngoài.
+  "housekeeping-tick": (now) => runHousekeepingTick(now),
+  // Tạo dọn định kỳ lúc 07:00, có thể chạy bù khi lỡ lịch.
+  "routine-tasks": (now) => runHousekeepingTick(now, { routine: true }),
 };
 const run = (name) => jobs[name](new Date()).catch((e) => console.error(`Job ${name} failed:`, e.message));
-// Next hh:mm in Asia/Ho_Chi_Minh (UTC+7, no daylight saving), e.g. 04:15 is 21:15 UTC.
+// Tính lần chạy tiếp theo theo giờ Việt Nam UTC+7.
 const untilNext = (hour, minute) => {
   const t = new Date();
   t.setUTCHours((hour + 17) % 24, minute, 0, 0);
@@ -25,10 +32,11 @@ const untilNext = (hour, minute) => {
   return t - Date.now();
 };
 const daily = (name, hour, minute) => setTimeout(() => run(name).then(() => daily(name, hour, minute)), untilNext(hour, minute)).unref();
-// In-process timers; POST /api/jobs/:name lets an external cron trigger the same jobs when the server sleeps.
+// Chạy lịch trong tiến trình; cron ngoài có thể gọi cùng tác vụ qua API.
 function schedule() {
   setInterval(() => run("cancellation-auto-approval"), 5 * 60000).unref();
-  run("cancellation-auto-approval"); // catch up after downtime
+  // Chạy bù ngay sau khi máy chủ hoạt động trở lại.
+  run("cancellation-auto-approval");
   daily("payment-reconciliation", 4, 15);
   daily("no-show-processing", 6, 0);
   setInterval(() => run("hold-expiry"), 60000).unref();

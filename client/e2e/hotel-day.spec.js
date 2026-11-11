@@ -1,7 +1,4 @@
-// A day in the hotel, driven through the real screens: guest -> customer books and pays -> receptionist checks the guest in,
-// records services, asks for cleaning -> housekeeping works -> check-out and invoice -> review -> cancellation and refund ->
-// manager and admin controls. Every step is its own test, so one failure does not hide the steps after it.
-// Run against the demo (npm run demo): the demo accounts and a temporary database are what the steps rely on.
+// Kiểm tra một ngày vận hành qua giao diện; chạy với tài khoản và database tạm của npm run demo.
 import { test, expect, request as pwRequest } from "@playwright/test";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
@@ -14,25 +11,24 @@ const money = (n) => `₫${n.toLocaleString("en-US")}`;
 mkdirSync("e2e-results", { recursive: true });
 const note = (area, text) => appendFileSync("e2e-results/findings.log", `[${area}] ${text}\n`);
 
-// State passed from one step to the next. A failed test makes Playwright start a new worker, so it lives in a file
-// (delete e2e-results/state.json and findings.log before a fresh run).
+// Lưu trạng thái ra file để dùng lại khi Playwright đổi worker; xóa state.json và findings.log trước lượt mới.
 const STATE = "e2e-results/state.json";
 const loaded = existsSync(STATE) ? JSON.parse(readFileSync(STATE, "utf8")) : {};
 const S = new Proxy(loaded, { set: (t, k, v) => { t[k] = v; writeFileSync(STATE, JSON.stringify(t)); return true; } });
 const actors = {};
 
-// The login form asks for a CAPTCHA; the cookie is taken through the API with Google's public test key, everything after is UI.
+// Đăng nhập qua API với CAPTCHA thử nghiệm, sau đó thao tác bằng giao diện.
 async function actor(browser, name, email) {
   if (actors[name]) return actors[name];
   const context = await browser.newContext({ baseURL: BASE });
   const res = await context.request.post("/api/auth/login", { data: { email, password: PASSWORD, captchaToken: "x" } });
   expect(res.status(), `login ${email}`).toBe(200);
   const page = await context.newPage();
-  // A list fetches its data when the page mounts and never refreshes itself, and goto() to the same #hash does not remount it:
-  // reload after every goto so each step reads fresh data (what a user gets by pressing F5).
+  // Tải lại trang để lấy dữ liệu mới khi điều hướng đến cùng một hash.
   const goto = page.goto.bind(page);
   page.goto = async (url, options) => { const res = await goto(url, options); await page.reload(); return res; };
-  page.on("dialog", (d) => d.accept(d.type() === "prompt" ? d.defaultValue() : undefined)); // confirm(): OK; prompt(): keep its default
+  // Tự xác nhận hộp thoại và giữ giá trị mặc định của ô nhập.
+  page.on("dialog", (d) => d.accept(d.type() === "prompt" ? d.defaultValue() : undefined));
   page.on("pageerror", (e) => note(`js-error ${name}`, e.message));
   page.on("response", (r) => { if (r.status() >= 500) note(`http-${r.status()} ${name}`, `${r.request().method()} ${r.url()}`); });
   page.on("console", (m) => { if (m.type() === "error" && !/401|reCAPTCHA|frame-ancestors|Failed to load resource/.test(m.text())) note(`console ${name}`, m.text().slice(0, 200)); });
@@ -48,12 +44,13 @@ const as = {
 test.afterAll(async () => { for (const a of Object.values(actors)) await a.context.close(); });
 
 async function solveCaptcha(page) {
-  if (process.env.CAPTCHA_BYPASS === "true") return; // the demo was started with the local CAPTCHA bypass
+  // Máy chủ demo đã bật bỏ qua CAPTCHA cục bộ.
+  if (process.env.CAPTCHA_BYPASS === "true") return;
   const frame = page.frameLocator('iframe[title="reCAPTCHA"]');
   await frame.locator(".recaptcha-checkbox-border").click({ timeout: 30000 });
   await expect(frame.locator(".recaptcha-checkbox-checked")).toBeVisible({ timeout: 30000 });
 }
-// Books a room as the customer through the screens and pays the deposit at the sandbox gateway. Returns { id, ref }.
+// Đặt phòng và trả cọc qua cổng giả lập, trả về mã booking.
 async function bookAndPay(c, { typeName, from, to, coupon }) {
   await c.page.goto(`/#/rooms?in=${from}&out=${to}&guests=2`);
   const card = c.page.locator("article.c-card").filter({ hasText: typeName });
@@ -121,12 +118,14 @@ test.describe("1. Guest (no account)", () => {
 
   test("amenity filter and guests filter narrow the list", async ({ page }) => {
     await page.goto(`/#/rooms?in=${vn(20)}&out=${vn(22)}&guests=4`);
-    await expect(page.locator("article.c-card")).toHaveCount(1); // only the Family Suite holds 4
+    // Chỉ Family Suite đủ chỗ cho bốn khách.
+    await expect(page.locator("article.c-card")).toHaveCount(1);
     await page.goto(`/#/rooms?in=${vn(20)}&out=${vn(22)}&guests=2`);
     await expect(page.locator("article.c-card").first()).toBeVisible();
     const all = await page.locator("article.c-card").count();
     await page.getByLabel("Jacuzzi").check();
-    await expect(page.locator("article.c-card")).toHaveCount(1); // only the Presidential Suite has a jacuzzi
+    // Chỉ Presidential Suite có bồn sục.
+    await expect(page.locator("article.c-card")).toHaveCount(1);
     expect(all).toBeGreaterThan(1);
   });
 
@@ -173,9 +172,10 @@ test.describe("2. Customer books and pays", () => {
     await c.page.getByLabel("Promo code").fill("DIRECT15");
     await c.page.getByRole("button", { name: "Apply" }).click();
     await expect(c.page.getByText("Promo code DIRECT15")).toBeVisible();
-    await expect(c.page.getByText("₫1,487,500").first()).toBeVisible(); // 15% off one night of 1,750,000
-    await expect(c.page.getByText("₫446,250").first()).toBeVisible(); // 30% deposit
-    // the form cannot be submitted without the consent box (CR-21)
+    // Giảm 15% cho một đêm giá 1.750.000 đồng.
+    await expect(c.page.getByText("₫1,487,500").first()).toBeVisible();
+    // Cọc 30%; phải đồng ý chính sách trước khi gửi biểu mẫu.
+    await expect(c.page.getByText("₫446,250").first()).toBeVisible();
     await c.page.getByRole("button", { name: "Continue to deposit payment" }).click();
     await expect(c.page).toHaveURL(/#\/checkout/);
     S.today = await bookAndPay(c, { typeName: "Superior Twin", from: TODAY, to: TOMORROW, coupon: "DIRECT15" });
@@ -183,7 +183,8 @@ test.describe("2. Customer books and pays", () => {
 
   test("My bookings shows the booking Confirmed with the deposit paid; details show the payment", async ({ browser }) => {
     const c = await as.customer(browser);
-    await c.page.goto("/#/my-bookings"); await c.page.reload(); // the list does not refresh by itself
+    // Tải lại để cập nhật danh sách.
+    await c.page.goto("/#/my-bookings"); await c.page.reload();
     const trip = c.page.locator("article.trip").filter({ hasText: S.today.ref });
     await expect(trip).toContainText("confirmed");
     await expect(trip).toContainText("deposit paid");
@@ -193,7 +194,7 @@ test.describe("2. Customer books and pays", () => {
 
   test("simultaneous bookings of one room type never exceed the rooms it has (CR-16)", async ({ browser }) => {
     const c = await as.customer(browser);
-    // a customer holds at most 3 unpaid bookings, so the race uses the room type with the fewest free rooms (at most 2) today
+    // Chọn loại phòng còn tối đa hai phòng để kiểm tra tranh chấp trong giới hạn ba booking chưa trả cọc.
     const types = (await (await c.api.get(`/api/public/availability?checkIn=${TODAY}&checkOut=${TOMORROW}&guests=1`)).json()).data;
     const scarce = types.filter((t) => t.roomsLeft <= 2).sort((x, y) => x.roomsLeft - y.roomsLeft)[0];
     test.skip(!scarce, "every room type has more than 2 free rooms today");
@@ -233,9 +234,10 @@ test.describe("3. Reception: the guest arrives", () => {
     await rowAction(r.page, S.today.ref, "Check in");
     const select = r.page.locator("select[name=roomId]");
     await expect(select).toBeVisible();
-    await expect(select.locator("option")).not.toHaveCount(1); // the free rooms have loaded
+    await expect(select.locator("option")).not.toHaveCount(1);
     const options = await select.locator("option").allTextContents();
-    const pick = options.find((o) => /Floor [234]/.test(o)); // floors 2-4 are covered by the housekeeping plan
+    // Kế hoạch housekeeping bao phủ tầng 2 đến tầng 4.
+    const pick = options.find((o) => /Floor [234]/.test(o));
     expect(pick, `rooms offered: ${options.join(" | ")}`).toBeTruthy();
     S.roomNumber = pick.match(/Room (\S+)/)[1];
     await select.selectOption({ label: pick });
@@ -262,7 +264,7 @@ test.describe("3. Reception: the guest arrives", () => {
   test("ad-hoc cleaning request is assigned by the responsibility plan", async ({ browser }) => {
     const r = await as.reception(browser);
     await r.page.goto("/#/admin/cleaning-request");
-    await expect(r.page.locator("select[name=roomId] option")).not.toHaveCount(1); // the rooms have loaded
+    await expect(r.page.locator("select[name=roomId] option")).not.toHaveCount(1);
     const labels = await r.page.locator("select[name=roomId] option").allTextContents();
     await r.page.locator("select[name=roomId]").selectOption({ label: labels.find((l) => l.startsWith(`Room ${S.roomNumber} `)) });
     await r.page.locator("textarea[name=requestContent]").fill("Guest spilled a drink, please wipe the table and change the towels");
@@ -312,13 +314,14 @@ test.describe("5. Reception: penalty, check-out, invoice", () => {
     await rowAction(r.page, S.today.ref, "Penalties");
     const line = r.page.locator("tbody tr").filter({ hasText: "Bath towel" });
     await expect(line).toContainText("proposed");
-    await line.getByRole("button", { name: "Confirm" }).click(); // the prompt keeps the proposed amount
+    // Giữ nguyên khoản bồi thường đề xuất trong hộp thoại.
+    await line.getByRole("button", { name: "Confirm" }).click();
     await expect(line).toContainText("confirmed");
   });
 
   test("customer sends a check-out request for the next day (approved at once)", async ({ browser }) => {
     const c = await as.customer(browser);
-    await c.page.goto("/#/my-bookings"); await c.page.reload(); // the list does not refresh by itself
+    await c.page.goto("/#/my-bookings"); await c.page.reload();
     const trip = c.page.locator("article.trip").filter({ hasText: S.today.ref });
     await expect(trip).toContainText("checked in");
     await trip.getByRole("button", { name: "Check-out request" }).click();
@@ -373,7 +376,8 @@ test.describe("5. Reception: penalty, check-out, invoice", () => {
   test("housekeeping gets a turnover task; completing it makes the room Available again", async ({ browser }) => {
     const h = await as.housekeeping(browser);
     await h.page.goto("/#/admin/cleaning");
-    await h.page.reload(); // the task list does not refresh by itself: a new task shows after a reload
+    // Tải lại để thấy nhiệm vụ vừa tạo.
+    await h.page.reload();
     const task = h.page.locator("tbody tr").filter({ hasText: `Room ${S.roomNumber}` }).filter({ hasText: /turnover/i });
     await expect(task).toHaveCount(1);
     await task.getByRole("button", { name: "Start" }).click();
@@ -387,7 +391,7 @@ test.describe("5. Reception: penalty, check-out, invoice", () => {
 test.describe("6. Customer after the stay", () => {
   test("view the invoice and write a review; it shows on the room page", async ({ browser }) => {
     const c = await as.customer(browser);
-    await c.page.goto("/#/my-bookings"); await c.page.reload(); // the list does not refresh by itself
+    await c.page.goto("/#/my-bookings"); await c.page.reload();
     await c.page.getByRole("button", { name: /^past/ }).click();
     const trip = c.page.locator("article.trip").filter({ hasText: S.today.ref });
     await trip.getByRole("button", { name: "View invoice" }).click();
@@ -404,7 +408,7 @@ test.describe("6. Customer after the stay", () => {
     S.typeId = types.find((t) => t.name === "Superior Twin")._id;
     await c.page.goto(`/#/room/${S.typeId}`);
     await expect(c.page.getByText(S.comment)).toBeVisible();
-    // one review per booking (BR-23)
+    // Mỗi booking chỉ được đánh giá một lần.
     const again = await c.api.post("/api/reviews", { data: { bookingId: S.today.id, rating: 4, comment: "again" } });
     expect(again.status()).toBe(409);
   });
@@ -414,17 +418,17 @@ test.describe("7. Cancellation and refund", () => {
   test("customer books a stay 12 days ahead, sends a check-in request, then cancels", async ({ browser }) => {
     const c = await as.customer(browser);
     S.future = await bookAndPay(c, { typeName: "Deluxe Double", from: vn(12), to: vn(14) });
-    await c.page.goto("/#/my-bookings"); await c.page.reload(); // the list does not refresh by itself
+    await c.page.goto("/#/my-bookings"); await c.page.reload();
     let trip = c.page.locator("article.trip").filter({ hasText: S.future.ref });
     await trip.getByRole("button", { name: "Check-in request" }).click();
     await c.page.getByLabel("Main guest ID / passport number").fill("079555000111");
     await c.page.getByRole("button", { name: "Send request" }).click();
-    await expect(c.page.getByRole("status").filter({ hasText: /request/i })).toBeVisible(); // back on the list with the result
+    await expect(c.page.getByRole("status").filter({ hasText: /request/i })).toBeVisible();
     trip = c.page.locator("article.trip").filter({ hasText: S.future.ref });
     await trip.getByRole("button", { name: "Cancel", exact: true }).click();
     await expect(c.page.getByText(/Estimated refund/)).toBeVisible();
     await c.page.getByRole("button", { name: "Confirm cancellation" }).click();
-    await expect(c.page.getByRole("status").first()).toBeVisible(); // back on the list with the result (MSG-57)
+    await expect(c.page.getByRole("status").first()).toBeVisible();
     await expect(c.page.locator("article.trip").filter({ hasText: S.future.ref })).toContainText("cancellation requested");
   });
 
@@ -450,14 +454,14 @@ test.describe("7. Cancellation and refund", () => {
     await r.page.getByRole("button", { name: "Add note" }).click();
     await r.page.getByLabel("Bank transaction code").fill("FT26311ABC123");
     await r.page.getByRole("button", { name: /Record|Confirm/ }).last().click();
-    await expect(r.page.getByRole("status")).toContainText(/refund/i); // back on the list with the result (MSG-41)
+    await expect(r.page.getByRole("status")).toContainText(/refund/i);
     await r.page.getByRole("button", { name: "Refunded" }).click();
     await expect(r.page.locator("tbody tr").filter({ hasText: S.future.ref })).toContainText("FT26311ABC123");
   });
 
   test("customer sees the refund and its transaction code", async ({ browser }) => {
     const c = await as.customer(browser);
-    await c.page.goto("/#/my-bookings"); await c.page.reload(); // the list does not refresh by itself
+    await c.page.goto("/#/my-bookings"); await c.page.reload();
     await c.page.getByRole("button", { name: /^past/ }).click();
     await c.page.locator("article.trip").filter({ hasText: S.future.ref }).getByRole("button", { name: "View details" }).click();
     await expect(c.page.getByRole("heading", { name: "Refund" })).toBeVisible();
@@ -471,8 +475,10 @@ test.describe("8. Walk-in guest", () => {
     await r.page.goto("/#/admin/bookings?screen=new");
     const type = r.page.locator("select").filter({ has: r.page.locator("option", { hasText: /left/ }) });
     await type.selectOption({ index: 1 });
-    await r.page.getByLabel("Coupon code (optional)").fill("DIRECT15"); // WEEKEND5 needs 2,000,000: a night is 1,750,000
-    await r.page.getByLabel("Guest full name").click(); // the code is read when the field loses focus
+    // Mã WEEKEND5 yêu cầu tối thiểu 2.000.000 đồng, cao hơn giá một đêm.
+    await r.page.getByLabel("Coupon code (optional)").fill("DIRECT15");
+    // Mã giảm giá được kiểm tra khi rời ô nhập.
+    await r.page.getByLabel("Guest full name").click();
     await r.page.getByLabel("Guest full name").fill("Walk In Tester");
     await r.page.getByLabel("Phone").fill("0988777666");
     await r.page.getByLabel("ID / passport number").fill("012345678901");
@@ -599,13 +605,15 @@ test.describe("10. Admin", () => {
   test("role boundaries: customers and staff cannot reach each other's functions", async ({ browser }) => {
     const c = await as.customer(browser), r = await as.reception(browser), h = await as.housekeeping(browser), m = await as.manager(browser);
     const status = async (a, method, url, data) => (await a.api[method](url, data ? { data } : undefined)).status();
-    expect([401, 403]).toContain(await status(c, "get", "/api/bookings/search")); // 401: the blacklist test above ended this session
+    // Kiểm tra danh sách đen trước đó đã thu hồi phiên đăng nhập.
+    expect([401, 403]).toContain(await status(c, "get", "/api/bookings/search"));
     expect([401, 403]).toContain(await status(c, "get", "/api/audit-logs"));
     expect(await status(r, "get", "/api/audit-logs")).toBe(403);
     expect(await status(r, "get", "/api/staff")).toBe(403);
     expect(await status(h, "get", "/api/bookings/search")).toBe(403);
     expect(await status(h, "get", "/api/frontdesk/refunds")).toBe(403);
-    expect(await status(m, "get", "/api/frontdesk/refunds")).toBe(403); // the Hotel Manager takes no part in refunds (SRS)
+    // Quản lý khách sạn không có quyền xử lý hoàn tiền.
+    expect(await status(m, "get", "/api/frontdesk/refunds")).toBe(403);
     expect([401, 403]).toContain(await status(c, "post", "/api/front-desk/bookings", {}));
   });
 });
@@ -631,7 +639,8 @@ test.describe("10b. Customer pages are closed to staff and Admin accounts (BR-26
       await c.page.goto("/" + path);
       await expect(c.page).toHaveURL(/#\/admin\/login/);
     }
-    expect([401, 403]).toContain((await c.api.get("/api/bookings/search")).status()); // 401: the blacklist test above ended this session
+    // Kiểm tra danh sách đen trước đó đã thu hồi phiên đăng nhập.
+    expect([401, 403]).toContain((await c.api.get("/api/bookings/search")).status());
     expect([401, 403]).toContain((await c.api.get("/api/reports/revenue")).status());
   });
 });

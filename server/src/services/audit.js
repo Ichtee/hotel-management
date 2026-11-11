@@ -12,7 +12,7 @@ async function logChange(req, action, targetType, targetId, detail, session) {
   }], { session });
 }
 
-// M3 (cancellations, refunds, jobs): actorId null = a scheduled job.
+// Không có actorId khi thao tác do lịch nền thực hiện.
 const audit = (actorId, action, targetType, targetId, detail) =>
   AuditLog.create({ actorId: actorId || undefined, action, targetType, targetId, detail });
 

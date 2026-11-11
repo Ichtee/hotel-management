@@ -1,7 +1,7 @@
-// Google reCAPTCHA v2 Verification Service
+// Dịch vụ xác minh Google reCAPTCHA v2.
 
 const GOOGLE_VERIFY_URL = 'https://www.google.com/recaptcha/api/siteverify';
-// Google official test keys (work out-of-the-box on localhost/test):
+// Khóa thử nghiệm công khai của Google dùng cho localhost và kiểm thử.
 const DEFAULT_TEST_SITE_KEY = '6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI';
 const DEFAULT_TEST_SECRET_KEY = '6LeIxAcTAAAAAGG-vFI1TnRWxMZNFuojJ4WifJWe';
 
@@ -20,7 +20,7 @@ async function verifyCaptcha(token, remoteip) {
 
   const cleanToken = token.trim();
 
-  // Special test tokens for automated test environments
+  // Chỉ chấp nhận token thử nghiệm trong môi trường kiểm thử tự động.
   const isTestMode =
     process.env.NODE_ENV === "test" ||
     Boolean(process.env.NODE_TEST_CONTEXT) ||
@@ -89,7 +89,7 @@ async function verifyCaptcha(token, remoteip) {
   }
 }
 
-// BR-29: a failed CAPTCHA rejects the online booking (MSG-80). Like login, automated tests that send no token skip it.
+// Từ chối booking nếu CAPTCHA sai; test không gửi token được phép bỏ kiểm tra.
 async function assertCaptcha(token, remoteip) {
   const testMode = process.env.NODE_ENV === "test" || Boolean(process.env.NODE_TEST_CONTEXT) || process.argv.some((a) => a.includes("test"));
   if (testMode && token === undefined) return;

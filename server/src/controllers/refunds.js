@@ -7,7 +7,7 @@ const { notify } = require("../services/notifications");
 const { audit } = require("../services/audit");
 const { reference } = require("../services/cancellations");
 
-// The refund account number is stored encrypted (AES-256-GCM). DATA_KEY must stay stable, or saved numbers cannot be read.
+// Mã hóa tài khoản hoàn tiền bằng AES-256-GCM; giữ DATA_KEY ổn định để đọc được dữ liệu cũ.
 function key() {
   const secret = process.env.DATA_KEY || process.env.JWT_SECRET || process.env.SESSION_SECRET;
   if (!secret && process.env.NODE_ENV === "production") throw new Error("DATA_KEY is required in production.");
@@ -26,10 +26,11 @@ function open(sealed) {
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(data), decipher.final()]).toString("utf8");
   } catch {
-    return null; // key changed: the Receptionist enters the account again
+    // Khóa thay đổi thì lễ tân phải nhập lại tài khoản ngân hàng.
+    return null;
   }
 }
-// MSG-84 compares names the way banks print them: no accents, upper case, single spaces.
+// So tên chủ tài khoản bằng chữ hoa không dấu và khoảng trắng đã chuẩn hóa.
 const plain = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/gi, "D").toUpperCase().replace(/\s+/g, " ").trim();
 const bookerName = (b) => b.customerId?.customerProfile?.fullName || b.guestName || b.customerId?.username;
 
@@ -52,17 +53,17 @@ const load = (filter) =>
 async function waiting(req, id) {
   const [refund] = await load({ _id: v.id(id) });
   if (!refund) throw new v.HttpError(404, "Refund not found.");
-  if (refund.status !== "requested") throw new v.HttpError(409, "The booking has been cancelled and is not eligible for a refund."); // MSG-42
+  if (refund.status !== "requested") throw new v.HttpError(409, "The booking has been cancelled and is not eligible for a refund.");
   return refund;
 }
 
-// UC21 step 1: waiting for refund (oldest first, at the top) or completed.
+// Liệt kê khoản chờ hoàn trước, theo thứ tự cũ nhất.
 async function listing(req, res) {
   const status = v.choice(req.query.status || "requested", "status", ["requested", "completed"]);
   const rows = await load({ status }).sort(status === "requested" ? { createdAt: 1 } : { processedAt: -1 }).limit(200);
   res.json({ data: rows.map(view) });
 }
-// Step 2: bank account obtained from the customer; the holder must be the person who made the booking (MSG-84).
+// Tài khoản nhận hoàn tiền phải đứng tên người đặt phòng.
 async function setAccount(req, res) {
   v.keys(req.body, ["bank", "accountNumber", "holderName"]);
   const bank = v.text(req.body.bank, "bank", 2, 100);
@@ -78,7 +79,7 @@ async function setAccount(req, res) {
   await audit(req.user._id, replaced ? "refund.account_replaced" : "refund.account_entered", "refund", refund._id, { bank, last4: accountNumber.slice(-4) });
   res.json({ data: view(refund) });
 }
-// Step 2b: every attempt to reach the customer is noted; there is no reminder and no expiry.
+// Ghi từng lần liên hệ khách; không tự nhắc lại hoặc hết hạn khoản hoàn.
 async function addContact(req, res) {
   v.keys(req.body, ["note"]);
   const note = v.text(req.body.note, "note", 1, 500);
@@ -87,7 +88,7 @@ async function addContact(req, res) {
   await refund.save();
   res.status(201).json({ data: view(refund) });
 }
-// Steps 3-5: the transfer is made outside the system; record its code. The amount is locked (BR-17).
+// Ghi mã chuyển khoản đã thực hiện ngoài hệ thống; giữ nguyên số tiền hoàn.
 async function record(req, res) {
   v.keys(req.body, ["bankTransactionCode", "note"]);
   const code = v.text(req.body.bankTransactionCode, "bankTransactionCode", 1, 60);
@@ -97,11 +98,11 @@ async function record(req, res) {
   const payment = await Payment.findById(refund.paymentId?._id);
   if (!payment || payment.status !== "success") {
     await Refund.updateOne({ _id: refund._id }, { failureReason: "The related payment could not be identified." });
-    throw new v.HttpError(409, "The related payment could not be identified. The refund cannot be processed."); // MSG-43
+    throw new v.HttpError(409, "The related payment could not be identified. The refund cannot be processed.");
   }
-  // BR-17: the whole deposit is refunded once; Paid -> Refunded is atomic, even for two receptionists at once.
+  // Hoàn toàn bộ cọc một lần bằng cập nhật nguyên tử để tránh hai lễ tân ghi trùng.
   const counted = await Payment.updateOne({ _id: payment._id, status: "success" }, { $set: { status: "refunded" } });
-  if (!counted.modifiedCount) throw new v.HttpError(409, "No refund is due for this booking."); // MSG-42
+  if (!counted.modifiedCount) throw new v.HttpError(409, "No refund is due for this booking.");
   const done = await Refund.findOneAndUpdate(
     { _id: refund._id, status: "requested" },
     { $set: { status: "completed", bankTransactionCode: code, note, processedBy: req.user._id, processedAt: new Date(), gateway: "bank_transfer" }, $unset: { failureReason: 1 } },

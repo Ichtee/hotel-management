@@ -1,8 +1,7 @@
 const cloudinary = require("cloudinary").v2;
 const Request = require("../models/CheckInOutRequest");
 const { HttpError } = require("../utils/validation");
-// The photo of the ID document is private ("authenticated"): the browser uploads it with a signature made here,
-// and only the front desk gets a short-lived download link (SRS 4.2.4: the ID is not shown to the Hotel Manager).
+// Ảnh giấy tờ là riêng tư; ký tải lên trực tiếp và chỉ cấp liên kết xem ngắn hạn cho lễ tân.
 const cfg = () => {
   const { CLOUDINARY_CLOUD_NAME: cloud, CLOUDINARY_API_KEY: key, CLOUDINARY_API_SECRET: secret } = process.env;
   if (!cloud || !key || !secret) throw new HttpError(503, "ID photo upload is not set up yet. Show the document at the front desk instead.");

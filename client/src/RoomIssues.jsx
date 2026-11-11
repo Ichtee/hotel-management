@@ -3,7 +3,7 @@ import { api, dateLabel } from './api/client.js';
 import { DataTable, Dialog, Field, Notice, PageHead, Screen, useApi, useScreen } from './ui.jsx';
 import { useAuth } from './context/Auth.jsx';
 
-// UC31: staff report an issue; UC23 3d: the Hotel Manager reviews the reports and closes them as Resolved.
+// Nhân viên báo sự cố, quản lý xem và đánh dấu đã xử lý.
 export default function RoomIssues() {
   const { user } = useAuth();
   const manager = user.role === 'manager';
@@ -37,7 +37,7 @@ export default function RoomIssues() {
   </>;
 }
 
-// UC31 popup: (a) a damaged / missing item charged to the guest (UC38) and / or (b) "The room cannot be used". At least one is required.
+// Yêu cầu chọn ít nhất một loại: hư hỏng cần bồi thường hoặc phòng không sử dụng được.
 export function ReportIssue({ rooms, roomId, onClose }) {
   const [error, setError] = useState(null); const [saving, setSaving] = useState(false); const [ok, setOk] = useState(null);
   const submit = async (event) => {
@@ -60,7 +60,8 @@ export function ReportIssue({ rooms, roomId, onClose }) {
     } catch (x) { setError(x); } finally { setSaving(false); }
   };
   const items = rooms.meta?.compensationItems || [];
-  const Shell = roomId ? Dialog : Screen; // SRS UC31: a popup on the housekeeping task page, a page for the receptionist
+  // Housekeeping dùng hộp thoại trong trang nhiệm vụ; lễ tân dùng trang riêng.
+  const Shell = roomId ? Dialog : Screen;
   const fixed = roomId && (rooms.data || []).find((r) => r._id === roomId);
   return <Shell title={fixed ? `Report damage / issue · Room ${fixed.roomNumber}` : 'Report damage / issue'} onClose={onClose}><form className="form-grid" onSubmit={submit}>
     {!roomId && <div className="full"><Field label="Room" error={error?.fields?.roomId}><select name="roomId" required disabled={rooms.loading}><option value="">Select room</option>{(rooms.data || []).map((room) => <option key={room._id} value={room._id}>Room {room.roomNumber} - Floor {room.floor} ({room.status})</option>)}</select></Field></div>}

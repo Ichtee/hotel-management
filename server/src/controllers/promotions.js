@@ -88,7 +88,7 @@ async function remove(req, res) {
   await coupon.deleteOne();
   res.json({ data: { message: "Promotion deleted." } });
 }
-// Public: coupons a guest can use today (shown on the home and policy pages).
+// Trả mã giảm giá còn dùng được hôm nay cho trang công khai.
 async function publicListing(req, res) {
   const now = new Date();
   const data = await Coupon.find({ isActive: true, startDate: { $lte: now }, endDate: { $gte: now } })

@@ -49,12 +49,12 @@ function password(value, field = "password") {
     !/[A-Z]/.test(value) ||
     !/\d/.test(value)
   )
-    fail("Use 8–128 characters with an upper-case letter, a lower-case letter and a number.", field); // CR-12
+    fail("Use 8–128 characters with an upper-case letter, a lower-case letter and a number.", field);
   return value;
 }
 function phone(value, required = false) {
   if (!required && (value === "" || value === undefined)) return "";
-  // CR-04 / MSG-52: Vietnamese 10-11 digits, or + and 8 to 15 digits with the country code.
+  // Số Việt Nam có 10–11 chữ số; số quốc tế bắt đầu bằng dấu cộng và có 8–15 chữ số.
   if (typeof value !== "string" || !/^(\d{10,11}|\+\d{8,15})$/.test(value))
     fail("Phone number must have 10 to 11 digits, or + and 8 to 15 digits with the country code.", "phone");
   return value;

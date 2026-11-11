@@ -1,4 +1,4 @@
-// Booking, pricing, room, staff, profile, reset and review values checked against SRS v2.5 (BR-03..BR-24, CR-04, CR-12, CR-21).
+// Kiểm tra đầu vào của booking, giá, phòng, nhân viên, hồ sơ, mật khẩu và đánh giá.
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const mongoose = require("mongoose");
@@ -144,7 +144,8 @@ test("coupons on a booking: fixed amount, percentage, minimum spend, usage limit
   const out = {};
   let from = 40;
   for (const code of ["FIXED300", "FIXEDHUGE", "PCT10", "MINSPEND", "FUTURE", "EXPIRED", "OFF"]) {
-    await require("../src/models/Booking").updateMany({ status: "pending" }, { status: "expired" }); // BR-29 allows 3 unpaid bookings at a time
+    // Mỗi khách được có tối đa ba booking chưa thanh toán.
+    await require("../src/models/Booking").updateMany({ status: "pending" }, { status: "expired" });
     const r = await send(customer, "post", "/api/bookings", { roomTypeId: rt._id, checkInDate: day(from), checkOutDate: day(from + 2), guestCount: 2, couponCode: code, consent: true, captchaToken: "valid_test_token" });
     out[code] = [r.status, r.body.data?.discountAmount ?? r.body.message];
     from += 5;
@@ -246,7 +247,8 @@ test("verification e-mail can be requested at most 3 times per hour (BR-42, MSG-
   const user = await User.create({ username: "pending1", email: "pending1@example.com", passwordHash: await hashPassword(password), roleId: (await Role.findOne({ key: "customer" }))._id, phone: "0912345678", customerProfile: { fullName: "Pending One" }, isVerified: false });
   const statuses = [];
   for (let i = 0; i < 5; i++) {
-    await User.updateOne({ _id: user._id }, { $set: { "emailVerification.lastSentAt": new Date(Date.now() - 120000) } }); // skip the short cooldown
+    // Bỏ thời gian chờ ngắn trong test.
+    await User.updateOne({ _id: user._id }, { $set: { "emailVerification.lastSentAt": new Date(Date.now() - 120000) } });
     statuses.push((await send(request(app), "post", "/api/auth/resend-verification", { email: "pending1@example.com" })).status);
   }
   assert.ok(statuses.slice(0, 3).every((c) => c === 200), `first three allowed: ${statuses}`);

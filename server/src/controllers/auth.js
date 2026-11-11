@@ -9,8 +9,9 @@ const { verifyCaptcha, getSiteKey } = require("../services/captchaService");
 const AuditLog = require("../models/AuditLog");
 const MAX_FAILED_LOGINS = 5;
 const LOCK_MS = 15 * 60 * 1000;
-const VERIFY_MS = 24 * 3600 * 1000; // BR-42: a verification link is valid 24 hours
-// Đăng ký tài khoản khách hàng với dữ liệu đã kiểm tra.
+// Liên kết xác minh có hiệu lực 24 giờ.
+const VERIFY_MS = 24 * 3600 * 1000;
+// Đăng ký tài khoản khách hàng sau khi kiểm tra dữ liệu.
 async function register(req, res) {
   v.keys(req.body, [
     "username",
@@ -22,7 +23,7 @@ async function register(req, res) {
     "consent",
   ]);
   const { body } = req;
-  if (body.consent !== true) v.fail("Privacy consent is required.", "consent"); // CR-21, MSG-04
+  if (body.consent !== true) v.fail("Privacy consent is required.", "consent");
   if (
     body.confirmPassword !== undefined &&
     body.password !== body.confirmPassword
@@ -89,10 +90,7 @@ async function login(req, res) {
     req.body.recaptchaToken ||
     req.body["g-recaptcha-response"];
 
-  // 1. CAPTCHA verification
-  // In unit test environment (NODE_ENV === 'test'), if no captchaToken is passed,
-  // allow existing automated tests (which don't send captcha) to proceed.
-  // But if captchaToken is passed, it is strictly validated.
+  // Chỉ bỏ CAPTCHA trong test khi không gửi token; token đã gửi luôn phải được xác minh.
   const isTestMode =
     process.env.NODE_ENV === "test" ||
     Boolean(process.env.NODE_TEST_CONTEXT) ||
@@ -114,12 +112,11 @@ async function login(req, res) {
     }
   }
 
-  // 2. Query user
   const user = await User.findOne({ email }).select(
     "+passwordHash +authVersion +failedLogins +lockedUntil",
   );
 
-  // 3. Account Lockout check (BR-42)
+  // Chặn đăng nhập khi tài khoản còn trong thời gian khóa.
   const lockTime = user?.lockUntil || user?.lockedUntil;
   if (lockTime) {
     if (new Date(lockTime) > new Date()) {
@@ -134,7 +131,7 @@ async function login(req, res) {
       err.details = { locked: true, remainingTime };
       throw err;
     } else {
-      // Lock duration expired -> reset lock and failed counters
+      // Xóa khóa và số lần sai khi hết thời gian khóa.
       await User.updateOne(
         { _id: user._id },
         {
@@ -149,7 +146,6 @@ async function login(req, res) {
     }
   }
 
-  // 4. Verify password
   const valid = await verifyPassword(
     password,
     user?.passwordHash || `scrypt:${"0".repeat(32)}:${"0".repeat(128)}`,
@@ -165,7 +161,7 @@ async function login(req, res) {
     throw err;
   }
 
-  // 5. Email verification check
+  // Yêu cầu xác minh email trước khi cho đăng nhập.
   if (user.isVerified === false) {
     const err = new v.HttpError(
       403,
@@ -176,7 +172,7 @@ async function login(req, res) {
     throw err;
   }
 
-  // 6. Successful login: reset failed counters and issue the JWT (SDS)
+  // Đăng nhập thành công thì xóa số lần sai và cấp JWT mới.
   user.lastLogin = new Date();
   user.failedLogins = 0;
   user.lockedUntil = undefined;
@@ -185,7 +181,7 @@ async function login(req, res) {
   res.json({ data: publicUser(user, role) });
 }
 
-// Đếm lần sai liên tiếp (tăng nguyên tử để các yêu cầu song song không đếm thiếu); lần thứ 5 khóa 15 phút.
+// Tăng nguyên tử số lần sai; khóa 15 phút khi sai liên tiếp năm lần.
 async function recordFailedLogin(req, user) {
   const updated = await User.findByIdAndUpdate(
     user._id,
@@ -248,7 +244,7 @@ function captchaConfig(req, res) {
     },
   });
 }
-// SDS b.1: logout increases the tokenVersion, so every token of the account stops working, then clears the cookie.
+// Tăng phiên bản token để thu hồi mọi phiên rồi xóa cookie đăng nhập.
 async function logout(req, res) {
   const claims = tokenClaims(req);
   if (claims) await User.updateOne({ _id: claims.sub, authVersion: claims.ver }, { $inc: { authVersion: 1 } });
@@ -265,12 +261,11 @@ async function updateProfile(req, res) {
   const b = req.body;
   const u = req.user;
   let message;
-  // UC03 4b: a Customer changes the e-mail through a link sent to the new address; staff e-mails are changed by
-  // the person who manages the account (BR-24).
+  // Khách đổi email qua liên kết xác minh địa chỉ mới; email nhân viên do người quản lý cập nhật.
   if (b.email !== undefined && v.email(b.email) !== u.email) {
     if (req.role.key !== "customer") v.fail("The e-mail of a staff account is changed by the person who manages it.", "email");
     const email = v.email(b.email);
-    if (await User.exists({ $or: [{ email }, { pendingEmail: email }], _id: { $ne: u._id } })) throw new v.HttpError(409, "This email is already registered."); // MSG-14
+    if (await User.exists({ $or: [{ email }, { pendingEmail: email }], _id: { $ne: u._id } })) throw new v.HttpError(409, "This email is already registered.");
     const rawToken = randomBytes(32).toString("hex");
     u.pendingEmail = email;
     u.emailVerification = { tokenHash: createHash("sha256").update(rawToken).digest("hex"), expiresAt: new Date(Date.now() + VERIFY_MS), lastSentAt: new Date(), sentAt: [new Date()] };
@@ -279,7 +274,7 @@ async function updateProfile(req, res) {
     } catch (error) {
       console.error("[ChangeEmail] Failed to send email:", error.message);
     }
-    message = "A verification e-mail has been sent. The link is valid for 24 hours."; // MSG-73
+    message = "A verification e-mail has been sent. The link is valid for 24 hours.";
   }
   if (b.fullName !== undefined)
     u.customerProfile.fullName = v.text(b.fullName, "fullName", 2, 50);
@@ -322,7 +317,8 @@ async function changePassword(req, res) {
     { new: true, runValidators: true },
   ).select("+authVersion");
   if (!updated) throw new v.HttpError(409, "The account changed. Please sign in again.");
-  issueToken(req, res, updated, req.role); // this device keeps working; the other tokens carry the old version
+  // Cấp lại phiên cho thiết bị hiện tại; các token cũ bị vô hiệu hóa.
+  issueToken(req, res, updated, req.role);
   res.json({
     data: { message: "Password changed. Other sessions have been signed out." },
   });
@@ -343,7 +339,8 @@ async function forgotPassword(req, res) {
   const tokenHash = createHash("sha256").update(token).digest("hex");
   user.passwordReset = {
     tokenHash,
-    expiresAt: new Date(Date.now() + 30 * 60 * 1000), // SRS BR-42: reset valid 30 minutes
+    // Liên kết đặt lại mật khẩu có hiệu lực 30 phút.
+    expiresAt: new Date(Date.now() + 30 * 60 * 1000),
   };
   await user.save();
 
@@ -413,7 +410,7 @@ async function verifyEmail(req, res) {
   const email = req.body.email ? v.email(req.body.email) : undefined;
   const tokenHash = createHash("sha256").update(token).digest("hex");
 
-  // UC03 4b: the link of an e-mail change is sent to the new address, which is still pendingEmail.
+  // Gửi liên kết đổi email đến địa chỉ mới đang chờ xác minh.
   const query = email ? { $or: [{ email }, { pendingEmail: email }] } : { "emailVerification.tokenHash": tokenHash };
   const user = await User.findOne(query).select(
     "+emailVerification.tokenHash +emailVerification.expiresAt"
@@ -451,8 +448,8 @@ async function verifyEmail(req, res) {
 
   user.isVerified = true;
   if (changingEmail) {
-    // The login e-mail is replaced only now; until here the old one stayed valid (UC03 4b).
-    if (await User.exists({ email: user.pendingEmail, _id: { $ne: user._id } })) throw new v.HttpError(409, "This email is already registered."); // MSG-14
+    // Chỉ thay email đăng nhập sau khi xác minh địa chỉ mới thành công.
+    if (await User.exists({ email: user.pendingEmail, _id: { $ne: user._id } })) throw new v.HttpError(409, "This email is already registered.");
     user.email = user.pendingEmail;
     user.pendingEmail = undefined;
   }
@@ -485,7 +482,7 @@ async function resendVerification(req, res) {
     });
   }
 
-  // Anti-spam cooldown (1 minute)
+  // Chờ ít nhất một phút giữa hai lần gửi email xác minh.
   if (user.emailVerification?.lastSentAt) {
     const elapsed = Date.now() - new Date(user.emailVerification.lastSentAt).getTime();
     if (elapsed < 60 * 1000) {
@@ -497,7 +494,7 @@ async function resendVerification(req, res) {
     }
   }
 
-  // BR-42: at most 3 verification e-mails per hour for the same account (MSG-81).
+  // Mỗi tài khoản nhận tối đa ba email xác minh mỗi giờ.
   const lastHour = (user.emailVerification?.sentAt || []).filter((t) => Date.now() - t < 3600 * 1000);
   if (lastHour.length >= 3) throw new v.HttpError(429, "Too many requests. Please try again later.");
 

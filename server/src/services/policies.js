@@ -6,13 +6,12 @@ const current = (kind) => (now = new Date()) =>
     effectiveFrom: { $lte: now },
     $or: [{ effectiveTo: null }, { effectiveTo: { $gt: now } }],
   }).sort({ effectiveFrom: -1 });
-// The policies in force at `now`; booking creation snapshots them (BR-31, BR-35).
+// Lấy chính sách đang hiệu lực để chụp vào booking khi tạo.
 const currentDepositPolicy = current("deposit");
 const currentCancellationPolicy = current("cancellation");
-const DEFAULT_CHECK_IN = "14:00"; // CR-19
+const DEFAULT_CHECK_IN = "14:00";
 
-// MSG-63: tiers must not overlap or leave gaps (one tier starts at 0 h), refund 100% or 0%,
-// and a tier closer to check-in never refunds more than an earlier one.
+// Mốc hoàn tiền phải liên tục từ 0 giờ, chỉ hoàn 0% hoặc 100%, không tăng khi gần giờ nhận phòng.
 function tiersProblem(tiers) {
   const byHours = [...tiers].sort((a, b) => b.minHoursBeforeCheckIn - a.minHoursBeforeCheckIn);
   return (
@@ -22,15 +21,14 @@ function tiersProblem(tiers) {
     byHours.some((t, i) => i > 0 && t.refundPercent > byHours[i - 1].refundPercent)
   );
 }
-// BR-32: share of the deposit refunded when the request is made `hoursBefore` the check-in time;
-// after the check-in time the shortest tier applies.
+// Tính tỷ lệ hoàn theo số giờ trước nhận phòng; sau giờ nhận dùng mốc gần nhất.
 function refundPercent(tiers, hoursBefore) {
-  // ponytail: no policy configured at all refunds in full; the manager sets tiers in UC27.
+  // Nếu chưa cấu hình chính sách, mặc định hoàn toàn bộ cọc.
   if (!tiers?.length) return 100;
   const byHours = [...tiers].sort((a, b) => b.minHoursBeforeCheckIn - a.minHoursBeforeCheckIn);
   return (byHours.find((t) => hoursBefore >= t.minHoursBeforeCheckIn) || byHours.at(-1)).refundPercent;
 }
-// Check-in moment of a stay: the standard check-in time (Asia/Ho_Chi_Minh, UTC+7) of the check-in date.
+// Ghép ngày nhận phòng với giờ nhận chuẩn theo múi giờ Việt Nam.
 const checkInAt = (checkInDate, time = DEFAULT_CHECK_IN) =>
   new Date(`${new Date(checkInDate).toISOString().slice(0, 10)}T${time}:00+07:00`);
 module.exports = { currentDepositPolicy, currentCancellationPolicy, tiersProblem, refundPercent, checkInAt, DEFAULT_CHECK_IN };

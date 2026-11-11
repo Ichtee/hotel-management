@@ -5,13 +5,13 @@ import { Badge, DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, 
 const Booker = ({ p }) => <span>{p.name || '—'}<br /><small className="muted">{p.phone || 'no phone'} · {p.email || 'no e-mail'}</small></span>;
 const Loading = ({ s, empty }) => s.loading ? <p className="muted">Loading…</p> : s.error ? <Notice error={s.error} /> : s.data.length === 0 ? <p className="empty muted">{empty}</p> : null;
 
-// UC35: requests waiting for review (never rejected; approved automatically after 24 h or at check-in).
+// Duyệt yêu cầu hủy; hệ thống tự duyệt sau 24 giờ hoặc khi đến giờ nhận phòng.
 export function Cancellations() {
   const list = useApi('/frontdesk/cancellations');
   const [msg, setMsg] = useState(null);
   const [err, setErr] = useState(null);
   const sc = useScreen();
-  // UC35 1a: withdrawn at the customer's request; the booking is Confirmed again.
+  // Rút yêu cầu hủy theo ý khách và khôi phục trạng thái đã xác nhận.
   const withdraw = async (b) => {
     if (!window.confirm(`Withdraw the cancellation request of ${b.bookingReference} at the customer's request?`)) return;
     try { setMsg((await api(`/frontdesk/cancellations/${b._id}/withdraw`, { method: 'POST' })).message); setErr(null); list.reload(); } catch (x) { setErr(x); }
@@ -40,7 +40,7 @@ export function Cancellations() {
   );
 }
 
-// UC16: find the booking, verify the requester (ID document at the desk or OTP by phone), enter the reason.
+// Xác minh người yêu cầu bằng giấy tờ hoặc OTP trước khi hủy tại quầy.
 function RecordCancellation({ onClose, onDone }) {
   const [q, setQ] = useState('');
   const [found, setFound] = useState(null);
@@ -118,7 +118,7 @@ function RecordCancellation({ onClose, onDone }) {
   );
 }
 
-// UC21: refunds are transferred by bank outside the system; the amount is locked.
+// Ghi nhận hoàn tiền bằng chuyển khoản ngoài hệ thống; không sửa số tiền đã chốt.
 export function Refunds() {
   const [tab, setTab] = useState('requested');
   const list = useApi(`/frontdesk/refunds?status=${tab}`);

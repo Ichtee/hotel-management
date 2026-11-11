@@ -7,7 +7,7 @@ function dayDate(value, field = "date") {
   return new Date(`${v.date(value, field)}T00:00:00Z`);
 }
 
-// Xác định ca hiện tại; trước 06:00 thuộc ca Night của ngày hôm trước.
+// Xác định ca hiện tại; trước 06:00 vẫn thuộc ca đêm của ngày trước.
 function currentShift(now = new Date()) {
   const local = new Date(now.getTime() + 7 * 3600000);
   const hour = local.getUTCHours();
@@ -16,7 +16,7 @@ function currentShift(now = new Date()) {
   return { shift, date: local.toISOString().slice(0, 10) };
 }
 
-// Lấy biên thời gian của ca theo ngày bắt đầu, dùng khoảng đóng-mở.
+// Tính thời gian ca, gồm giờ bắt đầu và không gồm giờ kết thúc.
 function shiftWindow(date, shift) {
   const hours = HOURS[shift];
   if (!hours) v.fail("Invalid shift.", "shift");
@@ -29,7 +29,7 @@ function planEnd(plan) {
   return shiftWindow(new Date(plan.effectiveTo).toISOString().slice(0, 10), plan.shift).end;
 }
 
-// Kiểm tra ngày ca nằm trong cả hai đầu khoảng phân công.
+// Kiểm tra ngày ca thuộc khoảng phân công, tính cả hai ngày đầu cuối.
 function covers(plan, date, shift) {
   const from = new Date(plan.effectiveFrom).toISOString().slice(0, 10);
   const to = new Date(plan.effectiveTo).toISOString().slice(0, 10);

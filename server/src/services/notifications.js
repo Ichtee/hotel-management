@@ -2,7 +2,7 @@ const Notification = require("../models/Notification");
 const User = require("../models/User");
 const Role = require("../models/Role");
 const money = (n) => `${Number(n || 0).toLocaleString("en-US")} VND`;
-// BR-28 events. Each template returns [title, message] from the event data.
+// Tạo tiêu đề và nội dung thông báo từ dữ liệu sự kiện.
 const events = {
   booking_confirmed: (d) => ["Booking confirmed", `Booking ${d.reference} is confirmed.`],
   booking_modified: (d) => ["Booking updated", `Booking ${d.reference} was modified.`],
@@ -17,7 +17,6 @@ const events = {
   room_issue: (d) => ["Room issue reported", `Room ${d.roomNumber}: ${d.description}`],
   cancellation_requested: (d) => ["Cancellation request", `Booking ${d.reference} asks to be cancelled. Refundable amount: ${money(d.amount)}.`],
   cancellation_withdrawn: (d) => ["Cancellation withdrawn", `The cancellation request of booking ${d.reference} was withdrawn.`],
-  // MSG-58 / MSG-42
   cancellation_approved: (d) => [
     "Cancellation approved",
     d.amount > 0
@@ -44,7 +43,7 @@ const events = {
 };
 const emailjs = require("./emailjs");
 let transport;
-// SMTP_URL wins; otherwise the Resend API key already used for e-mail verification also sends notifications.
+// Chọn bộ gửi email theo cấu hình hiện tại.
 const resendTransport = () => {
   const client = require("./resendService").getResendClient();
   return client && { sendMail: async ({ to, subject, text }) => {
@@ -58,7 +57,7 @@ const getTransport = () =>
     : process.env.SMTP_URL
     ? require("nodemailer").createTransport(process.env.SMTP_URL)
     : resendTransport() || null);
-// Tests (or another mail provider) can replace the transport.
+// Cho phép thay bộ gửi email khi kiểm thử hoặc đổi nhà cung cấp.
 const setTransport = (t) => (transport = t);
 async function email(accountId, title, message) {
   const t = getTransport();
@@ -73,11 +72,11 @@ async function email(accountId, title, message) {
         text: message,
       });
   } catch (error) {
-    // A mail outage must never fail the booking or payment that triggered it.
+    // Lỗi gửi email không làm thất bại nghiệp vụ đặt phòng hoặc thanh toán.
     console.error("Notification email failed:", error.message);
   }
 }
-// refs: optional { bookingId, roomId, roomIssueId } links for the in-app notification.
+// Gắn liên kết booking, phòng hoặc sự cố vào thông báo trong ứng dụng nếu có.
 async function notify(event, accountId, data = {}, refs = {}) {
   if (!events[event]) throw new Error(`Unknown notification event: ${event}`);
   const [title, message] = events[event](data);
@@ -85,7 +84,7 @@ async function notify(event, accountId, data = {}, refs = {}) {
   await email(accountId, title, message);
   return doc;
 }
-// Staff alerts, e.g. room_issue -> every active Hotel Manager.
+// Gửi thông báo đến các nhân viên đang hoạt động thuộc vai trò cần nhận.
 async function notifyRole(event, roleKey, data, refs) {
   const role = await Role.findOne({ key: roleKey });
   if (!role) return [];

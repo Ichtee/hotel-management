@@ -15,7 +15,7 @@ const Booking = require("../src/models/Booking");
 const Payment = require("../src/models/Payment");
 const Refund = require("../src/models/Refund");
 const { validateCoupon } = require("../src/services/promotions");
-// scripts/setup loads server/.env; never let a local PAYMENT_PROVIDER=sepay switch the gateway under the tests.
+// Ép dùng cổng giả lập để cấu hình SePay trong file .env không ảnh hưởng test.
 process.env.PAYMENT_PROVIDER = "sandbox";
 const origin = "http://localhost:5173";
 const password = "StrongPass123!";
@@ -144,7 +144,7 @@ test("registration validates fields, hashes credentials, ignores no privileged i
     phone: "0912345678",
     role: "admin",
   }).expect(400);
-  // Missing phone is rejected
+  // Từ chối đăng ký thiếu số điện thoại.
   await send(request(app), "post", "/api/auth/register", {
     consent: true,
     username: "newguest",
@@ -152,7 +152,7 @@ test("registration validates fields, hashes credentials, ignores no privileged i
     fullName: "New Guest",
     password,
   }).expect(400);
-  // Password and confirmPassword mismatch is rejected
+  // Từ chối mật khẩu xác nhận không khớp.
   await send(request(app), "post", "/api/auth/register", {
     consent: true,
     username: "newguest",
@@ -213,10 +213,10 @@ test("authentication rejects bad passwords, missing sessions and foreign origins
   const agent = await login("customer@example.com");
   await send(agent, "post", "/api/auth/logout").expect(200);
   await agent.get("/api/auth/me").expect(401);
-  // SDS b.1: logout increases the tokenVersion, so every other session of the account ends too.
+  // Đăng xuất tăng phiên bản token và kết thúc các phiên khác của tài khoản.
   await customer.get("/api/auth/me").expect(401);
   customer = await login("customer@example.com");
-  // A forged, re-signed or "none" token is refused.
+  // Từ chối token giả, ký lại hoặc dùng thuật toán none.
   const jwt = require("../src/utils/jwt");
   const token = /hotel\.token=([^;]+)/.exec(res.headers["set-cookie"][0])[1];
   const [h, , sig] = token.split(".");
@@ -233,17 +233,18 @@ test("BR-42: 5 consecutive failed logins lock the account for 15 minutes and are
   for (let i = 0; i < 4; i++) await attempt("wrong").expect(401);
   const locked = await attempt("wrong").expect(423);
   assert.match(locked.body.error.message, /locked for 15 minutes/);
-  await attempt(password).expect(423); // the right password is refused while locked
+  // Mật khẩu đúng vẫn bị từ chối khi tài khoản đang khóa.
+  await attempt(password).expect(423);
   assert.equal(await AuditLog.countDocuments({ targetId: user._id, action: "login_failed" }), 4);
   assert.equal(await AuditLog.countDocuments({ targetId: user._id, action: "account_locked" }), 1);
   await User.updateOne({ _id: user._id }, { $set: { lockedUntil: new Date(Date.now() - 1000) } });
   await attempt(password).expect(200);
-  // a successful login resets the counter
+  // Đăng nhập thành công xóa bộ đếm sai.
   for (let i = 0; i < 4; i++) await attempt("wrong").expect(401);
   await attempt(password).expect(200);
 });
 test("SRS 4.2.4: sessions expire after 15 min idle for staff and 30 min for customers, renewed on activity", async () => {
-  // The token cookie carries Expires: round the remaining lifetime to minutes.
+  // Làm tròn thời gian còn lại của cookie theo phút khi kiểm tra hạn.
   const maxAge = (res) => Math.round((Date.parse(/Expires=([^;]+)/.exec(res.headers["set-cookie"][0])[1]) - Date.now()) / 60000) * 60;
   const staffLogin = await send(request(app), "post", "/api/auth/login", { email: "staff@example.com", password }).expect(200);
   assert.equal(maxAge(staffLogin), 15 * 60);
@@ -257,7 +258,7 @@ test("front-desk routes follow role permissions: customers cannot read guest dat
   await send(customer, "patch", `/api/front-desk/customers/${new mongoose.Types.ObjectId()}`, { phone: "0900000000" }).expect(403);
   await send(customer, "post", `/api/front-desk/bookings/${new mongoose.Types.ObjectId()}/check-in`).expect(403);
   await staff.get("/api/front-desk/customers").expect(200);
-  // UC33: removing a permission from the Receptionist role takes it away from the role's users
+  // Xóa quyền khỏi vai trò thì người dùng thuộc vai trò mất quyền tương ứng.
   const role = await Role.findOne({ key: "receptionist" });
   await Role.updateOne({ _id: role._id }, { $pull: { permissions: "stays.check_in" } });
   try {
@@ -267,7 +268,8 @@ test("front-desk routes follow role permissions: customers cannot read guest dat
   }
 });
 test("profile updates only self and password change revokes other sessions", async () => {
-  await User.updateOne({ email: "new@example.com" }, { isVerified: true }); // verify new@example.com
+  // Xác minh địa chỉ email mới.
+  await User.updateOne({ email: "new@example.com" }, { isVerified: true });
   const a = await login("new@example.com");
   const b = await login("new@example.com");
   await send(a, "patch", "/api/profile", {
@@ -577,7 +579,7 @@ test("booking history and details expose only the customer's own bookings with p
   assert.ok(ids.includes(mineBooking.id) && ids.includes(cancelled.id));
   assert.ok(!ids.includes(foreign.id));
   const row = list.body.data.find((b) => b._id === mineBooking.id);
-  assert.equal(row.paymentStatus, "deposit_paid"); // SRS 2.6
+  assert.equal(row.paymentStatus, "deposit_paid");
   assert.equal(row.paidAmount, 600);
   assert.equal(row.rooms[0].roomTypeId.name, "History Suite");
   assert.equal(row.events, undefined);
@@ -591,7 +593,7 @@ test("booking history and details expose only the customer's own bookings with p
   const withRefund = await customer.get(`/api/bookings/${cancelled.id}`).expect(200);
   assert.equal(withRefund.body.data.refunds[0].status, "completed");
   await customer.get(`/api/bookings/${foreign.id}`).expect(404);
-  // Booking details follow the booking search rule: Manager and front desk read any booking, Housekeeping does not.
+  // Quản lý và lễ tân được đọc booking theo quyền; housekeeping không được truy cập.
   await manager.get(`/api/bookings/${mineBooking.id}`).expect(200);
   await (await srsUser("detailrec", "receptionist")).get(`/api/bookings/${foreign.id}`).expect(200);
   await (await srsUser("detailhk", "housekeeping")).get(`/api/bookings/${mineBooking.id}`).expect(403);
@@ -622,26 +624,28 @@ test("online booking: held 15 minutes for the deposit (BR-29), no pay-at-hotel o
   const type = await RoomType.create({ name: "Checkout Suite", basePrice: 1000, maxOccupancy: 2 });
   await Room.create({ roomNumber: "CO-1", roomTypeId: type._id, floor: 1 });
   const body = { roomTypeId: type.id, checkInDate: "2027-08-10", checkOutDate: "2027-08-12", guestCount: 2, consent: true };
-  await send(customer, "post", "/api/bookings", { ...body, consent: undefined }).expect(400); // CR-21
+  await send(customer, "post", "/api/bookings", { ...body, consent: undefined }).expect(400);
   for (const paymentOption of ["hotel", "full"])
     await send(customer, "post", "/api/bookings", { ...body, paymentOption }).expect(400);
   const booking = (await send(customer, "post", "/api/bookings", body).expect(201)).body.data;
   assert.equal(booking.status, "pending");
-  assert.equal(booking.depositRequired, 1000); // 50% policy from the previous test
+  // Dùng chính sách cọc 50% từ test trước.
+  assert.equal(booking.depositRequired, 1000);
   const holdMinutes = (Date.parse(booking.holdExpiresAt) - Date.now()) / 60000;
   assert.ok(holdMinutes > 14 && holdMinutes <= 15);
-  assert.equal(await Payment.countDocuments({ bookingId: booking._id }), 0); // no placeholder payment
+  // Không tạo bản ghi thanh toán tạm khi vừa đặt phòng.
+  assert.equal(await Payment.countDocuments({ bookingId: booking._id }), 0);
   const order = (await send(customer, "post", `/api/bookings/${booking._id}/payments/deposit`, { method: "bank_transfer" }).expect(201)).body.data;
   assert.equal(order.amount, 1000);
 });
 
-// ---- M3 payments: UC12 deposit, UC13 final payment, UC38 gateway callback ----
+// Kiểm tra trả cọc, thanh toán tại quầy và thông báo từ cổng.
 const gw = require("../src/services/gateway");
 const callbackBody = (orderId, status, amount, transactionRef = `T-${orderId}`) => {
   const p = { orderId, transactionRef, status, amount };
   return { ...p, signature: gw.sign(p) };
 };
-// The gateway is not a browser: no Origin header, no session.
+// Thông báo cổng không có phiên trình duyệt hoặc header Origin.
 const hook = (body) => request(app).post("/api/payments/gateway/callback").send(body);
 async function payBooking(extra = {}) {
   const RoomType = require("../src/models/RoomType");
@@ -659,7 +663,8 @@ test("deposit payment: verified callback confirms the booking; forged, mismatche
   const url = `/api/bookings/${booking.id}/payments/deposit`;
   await send(customer, "post", url, { method: "cash" }).expect(400);
   await send(customer, "post", url, { method: "bank_transfer", amount: 1 }).expect(400);
-  await send(manager, "post", url, { method: "bank_transfer" }).expect(403); // BR-26: a staff account cannot pay a deposit
+  // Tài khoản nhân viên không được trả cọc trực tuyến.
+  await send(manager, "post", url, { method: "bank_transfer" }).expect(403);
   const first = (await send(customer, "post", url, { method: "bank_transfer" }).expect(201)).body.data;
   assert.equal(first.amount, 600);
   assert.match(first.payUrl, /^#\/pay\/sandbox\/ORD/);
@@ -691,7 +696,7 @@ test("deposit payment: a declined payment can be retried; a deposit confirmed af
   const b = (await start().expect(201)).body.data;
   assert.notEqual(b.orderId, a.orderId);
 
-  // Beyond the 15-minute grace a pending result gets after the hold ends (BR-29).
+  // Kiểm tra kết quả đến sau cả 15 phút gia hạn giữ phòng.
   await Booking.updateOne({ _id: booking._id }, { holdExpiresAt: new Date(Date.now() - 16 * 60000) });
   await start().expect(409);
   await hook(callbackBody(b.orderId, "success", 600)).expect(200);
@@ -704,7 +709,7 @@ test("deposit payment: a declined payment can be retried; a deposit confirmed af
 test("BR-14: the balance is paid only at the front desk, never online; the receptionist records it", async () => {
   const booking = await payBooking({ status: "confirmed", holdExpiresAt: undefined });
   await Payment.create({ bookingId: booking._id, kind: "deposit", amount: 600, method: "bank_transfer", status: "success", paidAt: new Date() });
-  // there is no online final payment for the customer, and the desk route rejects them and online methods
+  // Khách không được trả phần còn lại trực tuyến hoặc gọi API thu tiền tại quầy.
   await send(customer, "post", `/api/bookings/${booking.id}/payments/final`, { method: "bank_transfer" }).expect(404);
   const desk = `/api/frontdesk/bookings/${booking.id}/payments`;
   await send(customer, "post", desk, { method: "cash" }).expect(403);
@@ -717,12 +722,13 @@ test("BR-14: the balance is paid only at the front desk, never online; the recep
   assert.equal(cash.remaining, 0);
   assert.equal(String((await Payment.findById(cash.paymentId)).recordedBy), String((await User.findOne({ email: "staff@example.com" }))._id));
   const detail = (await customer.get(`/api/bookings/${booking.id}`).expect(200)).body.data;
-  assert.equal(detail.paymentStatus, "fully_paid"); // SRS 2.6
+  assert.equal(detail.paymentStatus, "fully_paid");
   assert.equal(detail.paidAmount, 2000);
-  await send(staff, "post", desk, { method: "cash" }).expect(409); // nothing is left to pay
+  // Không còn số tiền phải trả.
+  await send(staff, "post", desk, { method: "cash" }).expect(409);
 });
 
-// ---- SePay gateway adapter (PAYMENT_PROVIDER=sepay); SePay itself is mocked ----
+// Kiểm thử kết nối SePay bằng dữ liệu giả lập, không gọi thanh toán thật.
 const { createHmac } = require("node:crypto");
 const sepay = require("../src/services/sepay");
 async function withSepay(fn) {
@@ -730,7 +736,8 @@ async function withSepay(fn) {
   const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
   const realFetch = global.fetch;
   const realError = console.error;
-  console.error = () => {}; // the lookup-failure tests log on purpose
+  // Lỗi tra cứu được cố ý tạo trong test.
+  console.error = () => {};
   Object.assign(process.env, { PAYMENT_PROVIDER: "sepay", SEPAY_MERCHANT_ID: "MERCH1", SEPAY_SECRET_KEY: "sekret", PUBLIC_URL: "https://shop.example" });
   delete process.env.SEPAY_METHODS;
   try {
@@ -741,7 +748,7 @@ async function withSepay(fn) {
     console.error = realError;
   }
 }
-// Fakes the SePay order lookup; returns the recorded calls.
+// Giả lập tra cứu đơn SePay và ghi lại các lần gọi.
 function mockOrder(status, amount) {
   const calls = [];
   global.fetch = async (url, opts) => {
@@ -790,7 +797,8 @@ test("sepay: every attempt gets a fresh signed checkout and retires the previous
 });
 test("sepay: the IPN is authenticated, checked against SePay and applied once", async () => {
   const Notification = require("../src/models/Notification");
-  await ipn({}).expect(404); // sandbox provider: the endpoint is off
+  // Tắt endpoint SePay khi đang dùng cổng giả lập.
+  await ipn({}).expect(404);
   await withSepay(async () => {
     const booking = await payBooking();
     const o = await sepayDeposit(booking);
@@ -799,7 +807,8 @@ test("sepay: the IPN is authenticated, checked against SePay and applied once", 
     await ipn(ipnBody("ORDNOPE", 600)).expect(404);
     await ipn(ipnBody(o.orderId, 1)).expect(400);
     assert.deepEqual((await ipn({ notification_type: "TRANSACTION_VOID" }).expect(200)).body, { success: true });
-    mockOrder("AUTHENTICATION_NOT_NEEDED", 600); // SePay says: not paid yet
+    // Giả lập SePay báo đơn chưa thanh toán.
+    mockOrder("AUTHENTICATION_NOT_NEEDED", 600);
     await ipn(ipnBody(o.orderId, 600)).expect(400);
     assert.equal((await Payment.findById(o.paymentId)).status, "pending");
     assert.equal((await Booking.findById(booking.id)).status, "pending");
@@ -812,17 +821,18 @@ test("sepay: the IPN is authenticated, checked against SePay and applied once", 
     assert.equal(paid.status, "success");
     assert.equal(paid.transactionRef, `TX-${o.orderId}`);
     assert.equal((await Booking.findById(booking.id)).status, "confirmed");
-    await ipn(ipnBody(o.orderId, 600)).expect(200); // a retried IPN changes nothing
+    // Thông báo gửi lại không thay đổi khoản đã xử lý.
+    await ipn(ipnBody(o.orderId, 600)).expect(200);
     assert.equal(await Notification.countDocuments({ bookingId: booking._id, type: "booking_confirmed" }), 1);
 
-    // SePay unreachable: the key-authenticated IPN is still accepted.
+    // Khi không truy cập được SePay, vẫn nhận thông báo đã xác thực bằng khóa.
     const other = await payBooking();
     const o2 = await sepayDeposit(other);
     global.fetch = async () => { throw new Error("network down"); };
     await ipn(ipnBody(o2.orderId, 600)).expect(200);
     assert.equal((await Booking.findById(other.id)).status, "confirmed");
 
-    // A customer who kept an old QR open can still pay a retired order: the money is recorded.
+    // Khách trả mã QR cũ thì vẫn ghi nhận tiền của đơn đã bị thay thế.
     const third = await payBooking();
     const old = await sepayDeposit(third);
     await sepayDeposit(third);
@@ -840,7 +850,8 @@ test("sepay: the result screen asks SePay when no IPN arrived and stays pending 
     const o = await sepayDeposit(booking);
     const calls = mockOrder("CAPTURED", 600);
     assert.equal((await customer.get(`/api/payments/${o.paymentId}`).expect(200)).body.data.status, "pending");
-    assert.equal(calls.length, 0); // too fresh: give the IPN a chance first
+    // Chờ thông báo cổng trước khi tra cứu đơn vừa tạo.
+    assert.equal(calls.length, 0);
     await stale(o.paymentId);
     global.fetch = async () => { throw new Error("network down"); };
     assert.equal((await customer.get(`/api/payments/${o.paymentId}`).expect(200)).body.data.status, "pending");
@@ -867,7 +878,7 @@ test("sepay: the return route only opens the result screen", async () => {
   });
 });
 
-// ---- M3 cancellation & refund: UC08, UC16, UC35, UC21, UC27, T19, T20; UC10 / UC11 / T17 additions ----
+// Kiểm tra hủy, hoàn tiền, chính sách và tác vụ đối soát.
 const AuditLog = require("../src/models/AuditLog");
 const Notification = require("../src/models/Notification");
 async function paidBooking(extra = {}) {
@@ -882,10 +893,14 @@ test("UC27: the manager saves cancellation tiers and stay rules; bad tiers are r
   await send(staff, "post", url, { tiers: tiers([0, 0]) }).expect(403);
   for (const bad of [
     [],
-    tiers([48, 100]), // gap below 48 h
-    tiers([48, 100], [48, 0], [0, 0]), // overlap
-    tiers([48, 50], [0, 0]), // partial refund
-    tiers([48, 0], [0, 100]), // more refund closer to check-in
+    // Thiếu mốc dưới 48 giờ.
+    tiers([48, 100]),
+    // Các mốc bị chồng lấn.
+    tiers([48, 100], [48, 0], [0, 0]),
+    // Mức hoàn từng phần không hợp lệ.
+    tiers([48, 50], [0, 0]),
+    // Mức hoàn tăng khi gần giờ nhận phòng.
+    tiers([48, 0], [0, 100]),
   ])
     await send(manager, "post", url, { tiers: bad }).expect(400);
   await send(manager, "post", url, { tiers: tiers([0, 0]), checkInTime: "25:00" }).expect(400);
@@ -916,11 +931,11 @@ test("UC08: the customer requests a cancellation with a locked refund, withdraws
   assert.equal((await Booking.findById(booking.id)).cancellation?.requestedAt, undefined);
   await send(customer, "delete", `/api/bookings/${booking.id}/cancel`).expect(409);
 
-  // A 0% tier is still reviewed, with nothing to refund (UC08 3a).
+  // Yêu cầu thuộc mốc hoàn 0% vẫn phải duyệt, nhưng không tạo khoản hoàn.
   const late = await paidBooking({ policySnapshot: { cancellationTiers: tiers([999999, 100], [0, 0]) } });
   assert.equal((await send(customer, "post", `/api/bookings/${late.id}/cancel`).expect(200)).body.data.refundableAmount, 0);
 
-  // No paid deposit: cancelled at once and the coupon use is given back (BR-16, BR-09).
+  // Booking chưa thu cọc được hủy ngay và hoàn lượt dùng mã giảm giá.
   const free = await payBooking({ status: "confirmed", holdExpiresAt: undefined, depositRequired: 0 });
   const coupon = await Coupon.create({ code: "BACK10", discountValue: 10, usageLimit: 5, usageCount: 1 });
   await CouponUsage.create({ couponId: coupon._id, bookingId: free._id, customerId: free.customerId });
@@ -931,7 +946,7 @@ test("UC08: the customer requests a cancellation with a locked refund, withdraws
   assert.equal(await CouponUsage.exists({ bookingId: free._id }), null);
   await send(customer, "post", `/api/bookings/${free.id}/cancel`).expect(409);
 
-  // Pending Payment: only "Cancel payment"; a result that still arrives becomes a late-deposit refund case.
+  // Booking chờ cọc chỉ được bỏ thanh toán; tiền đến sau chuyển sang hoàn cọc muộn.
   const pending = await payBooking();
   await send(customer, "post", `/api/bookings/${pending.id}/cancel`).expect(409);
   const o = (await send(customer, "post", `/api/bookings/${pending.id}/payments/deposit`, { method: "bank_transfer" }).expect(201)).body.data;
@@ -974,7 +989,8 @@ test("UC35 / T20: the receptionist approves a request and a refund case opens; u
   assert.equal((await autoApprove(new Date())).approved, 2);
   assert.equal((await Booking.findById(old.id)).status, "cancelled");
   assert.equal((await Booking.findById(old.id)).cancellation.autoApproved, true);
-  assert.equal((await Booking.findById(arriving.id)).status, "cancelled"); // check-in time passed
+  // Đã qua giờ nhận phòng.
+  assert.equal((await Booking.findById(arriving.id)).status, "cancelled");
   assert.equal((await Booking.findById(fresh.id)).status, "cancellation_requested");
   assert.ok(await AuditLog.exists({ action: "cancellation.approved_automatically", targetId: old._id }));
   assert.equal((await autoApprove(new Date())).approved, 0);
@@ -986,27 +1002,29 @@ test("UC38: penalties join the bill, are confirmed, reduced or waived once, and 
   const url = `/api/frontdesk/bookings/${stay.id}/penalties`;
   await send(customer, "post", url, { itemName: "Towel", amount: 100 }).expect(403);
   const catalog = (await staff.get("/api/frontdesk/compensation-items").expect(200)).body.data;
-  assert.ok(catalog.length >= 5 && catalog.every((i) => i.price > 0)); // dropdown source
+  // Dữ liệu dùng cho danh sách lựa chọn.
+  assert.ok(catalog.length >= 5 && catalog.every((i) => i.price > 0));
   await customer.get("/api/frontdesk/compensation-items").expect(403);
   await send(staff, "post", url, { itemName: "Towel", amount: 0 }).expect(400);
   await send(staff, "post", url, { itemName: "Towel", amount: 100 }).expect(201);
-  // a Housekeeping proposal: reduced on confirm, decided only once
+  // Giảm khoản đề xuất khi xác nhận và chỉ cho quyết định một lần.
   const vase = await Penalty.create({ bookingId: stay._id, itemName: "Vase", proposedAmount: 500 });
   await send(staff, "patch", `/api/frontdesk/penalties/${vase.id}`, { action: "confirm", amount: 600 }).expect(400);
   await send(staff, "patch", `/api/frontdesk/penalties/${vase.id}`, { action: "confirm", amount: 300 }).expect(200);
   await send(staff, "patch", `/api/frontdesk/penalties/${vase.id}`, { action: "confirm", amount: 100 }).expect(409);
   const lamp = await Penalty.create({ bookingId: stay._id, itemName: "Lamp", proposedAmount: 200 });
-  await send(staff, "patch", `/api/frontdesk/penalties/${lamp.id}`, { action: "waive" }).expect(400); // reason required
+  // Bắt buộc nhập lý do.
+  await send(staff, "patch", `/api/frontdesk/penalties/${lamp.id}`, { action: "waive" }).expect(400);
   await send(staff, "patch", `/api/frontdesk/penalties/${lamp.id}`, { action: "waive", reason: "Already broken" }).expect(200);
   let b = await Booking.findById(stay._id);
   assert.deepEqual([b.penaltyAmount, b.totalAmount], [400, 2400]);
   assert.equal((await staff.get(url).expect(200)).body.data.length, 3);
-  // paying the whole balance settles the confirmed penalties
+  // Trả đủ số dư thì các khoản bồi thường đã xác nhận chuyển sang đã trả.
   const paid = (await send(staff, "post", `/api/frontdesk/bookings/${stay.id}/payments`, { method: "cash" }).expect(201)).body.data;
   assert.equal(paid.amount, 2400);
   assert.equal(await Penalty.countDocuments({ bookingId: stay._id, status: "paid" }), 2);
 
-  // BR-43: found after check-out; one is paid, the other stays unpaid for 7 days
+  // Bồi thường sau trả phòng gồm một khoản đã trả và một khoản quá hạn bảy ngày.
   const left = await payBooking({ status: "checked_out", holdExpiresAt: undefined });
   await Payment.create({ bookingId: left._id, kind: "final", amount: 2000, method: "cash", status: "success", paidAt: new Date() });
   await send(staff, "post", `/api/frontdesk/bookings/${left.id}/penalties`, { itemName: "Minibar key", amount: 150 }).expect(201);
@@ -1015,17 +1033,21 @@ test("UC38: penalties join the bill, are confirmed, reduced or waived once, and 
   const { waiveUnpaid } = require("../src/services/penalties");
   await Penalty.updateOne({ _id: late._id }, { confirmedAt: new Date(Date.now() - 6 * 864e5) });
   await waiveUnpaid();
-  assert.equal((await Penalty.findById(late._id)).status, "confirmed"); // not 7 days yet
+  // Chưa đủ bảy ngày kể từ xác nhận.
+  assert.equal((await Penalty.findById(late._id)).status, "confirmed");
   await Penalty.updateOne({ _id: late._id }, { confirmedAt: new Date(Date.now() - 8 * 864e5) });
-  await Penalty.updateMany({ bookingId: stay._id, status: "paid" }, { afterCheckout: true, confirmedAt: new Date(0) }); // a paid line is never waived
+  // Không miễn khoản bồi thường đã thanh toán.
+  await Penalty.updateMany({ bookingId: stay._id, status: "paid" }, { afterCheckout: true, confirmedAt: new Date(0) });
   assert.deepEqual(await waiveUnpaid(), { waived: 1 });
-  assert.deepEqual(await waiveUnpaid(), { waived: 0 }); // idempotent
+  // Chạy lại không làm thay đổi kết quả.
+  assert.deepEqual(await waiveUnpaid(), { waived: 0 });
   const waivedLine = await Penalty.findById(late._id);
   assert.deepEqual([waivedLine.status, waivedLine.waivedReason], ["waived", "Not paid within 7 days"]);
   assert.ok(await require("../src/models/AuditLog").exists({ action: "penalty.waived_automatically", targetId: late._id }));
   b = await Booking.findById(left._id);
   assert.deepEqual([b.penaltyAmount, b.totalAmount], [0, 2000]);
-  await send(staff, "post", `/api/frontdesk/bookings/${(await payBooking()).id}/penalties`, { itemName: "x", amount: 10 }).expect(409); // not checked in
+  // Khách chưa nhận phòng.
+  await send(staff, "post", `/api/frontdesk/bookings/${(await payBooking()).id}/penalties`, { itemName: "x", amount: 10 }).expect(409);
 });
 
 test("Member 2 booking routes need a session and never act for another customer", async () => {
@@ -1036,13 +1058,14 @@ test("Member 2 booking routes need a session and never act for another customer"
   await anon.get("/api/bookings/search").expect(401);
   assert.ok("depositPercent" in (await anon.get("/api/public/policies").expect(200)).body.data);
   await anon.get(`/api/bookings/ref/${booking.bookingReference}`).expect(401);
-  await customer.get("/api/bookings/search").expect(403); // all guests' bookings are staff-only
+  // Chỉ nhân viên có quyền được tìm booking của mọi khách.
+  await customer.get("/api/bookings/search").expect(403);
   await staff.get("/api/bookings/search").expect(200);
   await customer.get("/api/frontdesk/payments").expect(403);
   const pays = (await staff.get("/api/frontdesk/payments?status=pending").expect(200)).body.data;
   assert.ok(pays.every((p) => p.status === "pending"));
   await manager.get("/api/frontdesk/invoices").expect(200);
-  // a body customerId or x-user-id header cannot impersonate the owner
+  // Không cho giả chủ booking bằng customerId trong body hoặc header x-user-id.
   const owner = String(booking.customerId);
   await send(admin, "post", `/api/bookings/${booking.id}/modify`, { customerId: owner, guestCount: 2 }).set("x-user-id", owner).expect((r) => assert.ok(r.status >= 400));
 });
@@ -1057,12 +1080,14 @@ test("BR-29 hold expiry frees the room, keeps a gateway-pending deposit 15 more 
   const live = await payBooking();
   await expireHolds();
   assert.equal((await Booking.findById(lapsed._id)).status, "expired");
-  assert.equal((await Booking.findById(atGateway._id)).status, "pending"); // grace: the gateway may still confirm it
+  // Trong thời gian gia hạn, cổng vẫn có thể xác nhận cọc.
+  assert.equal((await Booking.findById(atGateway._id)).status, "pending");
   assert.equal((await Booking.findById(live._id)).status, "pending");
-  await expireHolds(new Date(Date.now() + 11 * 60000)); // the grace ended too
+  // Đã hết cả thời gian gia hạn.
+  await expireHolds(new Date(Date.now() + 11 * 60000));
   assert.equal((await Booking.findById(atGateway._id)).status, "expired");
   assert.equal(await Payment.countDocuments({ bookingId: atGateway._id, status: "cancelled" }), 1);
-  // UC13: the customer reads only their own notifications and marks them read
+  // Khách chỉ đọc và đánh dấu thông báo của chính mình.
   const mine = (await customer.get("/api/notifications").expect(200)).body;
   assert.ok(mine.data.some((n) => n.type === "hold_expired" && String(n.bookingId) === lapsed.id));
   assert.ok(mine.meta.unread >= 2);
@@ -1081,7 +1106,7 @@ test("UC34 catalogs, UC31 -> UC38 proposed penalty, supplementary invoice after 
   const Invoice = require("../src/models/Invoice");
   const Room = require("../src/models/Room");
   const RoomType = require("../src/models/RoomType");
-  // UC34: manager only, validated, no duplicate names, deactivate instead of delete
+  // Danh mục chỉ cho quản lý sửa, kiểm tra trùng tên và vô hiệu hóa thay vì xóa.
   await staff.get("/api/catalog/services").expect(403);
   await manager.get("/api/catalog/nothing").expect(404);
   await send(manager, "post", "/api/catalog/compensation-items", { name: "", price: 10 }).expect(400);
@@ -1093,8 +1118,9 @@ test("UC34 catalogs, UC31 -> UC38 proposed penalty, supplementary invoice after 
   await send(manager, "patch", `/api/catalog/services/${spa._id}`, { isActive: false }).expect(200);
   assert.ok(!(await staff.get("/api/front-desk/services").expect(200)).body.data.some((s) => s._id === spa._id));
 
-  // UC31 -> UC38: a damaged item found at turnover becomes a Proposed penalty on the last checked-out stay
-  await payBooking(); // creates the room type
+  // Hư hỏng phát hiện khi dọn sau trả phòng gắn vào booking vừa hoàn tất.
+  // Tạo loại phòng phục vụ test.
+  await payBooking();
   const type = await RoomType.findOne({ name: "Pay Suite" });
   const room = await Room.create({ roomNumber: "PEN-1", roomTypeId: type._id, floor: 1 });
   const left = await payBooking({ status: "checked_out", holdExpiresAt: undefined, actualCheckOutAt: new Date(), rooms: [{ roomTypeId: type._id, roomId: room._id, priceAtBooking: 1000 }] });
@@ -1103,38 +1129,39 @@ test("UC34 catalogs, UC31 -> UC38 proposed penalty, supplementary invoice after 
   const reported = (await send(staff, "post", "/api/room-issues", { roomId: room.id, title: "Lamp shade torn", description: "Found at turnover", severity: "low", chargeItemId: shade._id }).expect(201)).body.data;
   assert.equal(reported.penalty.status, "proposed");
   const RoomIssue = require("../src/models/RoomIssue");
-  assert.deepEqual([reported.issue, await RoomIssue.countDocuments({ roomId: room._id })], [null, 0]); // UC31 (a): the room stays sellable
+  // Hư hỏng vật phẩm không làm phòng ngừng bán.
+  assert.deepEqual([reported.issue, await RoomIssue.countDocuments({ roomId: room._id })], [null, 0]);
   assert.equal(reported.penalty.bookingId, left.id);
   assert.equal(reported.penalty.afterCheckout, true);
   await send(staff, "patch", `/api/frontdesk/penalties/${reported.penalty._id}`, { action: "confirm" }).expect(200);
-  // the guest pays it later: a supplementary invoice is issued, the check-out invoice stays as it was
+  // Thanh toán bồi thường muộn tạo hóa đơn bổ sung, giữ nguyên hóa đơn trả phòng.
   await send(staff, "post", `/api/frontdesk/bookings/${left.id}/payments`, { method: "bank_transfer", transactionRef: "FT-77" }).expect(201);
   const supp = await Invoice.findOne({ bookingId: left._id, kind: "supplementary" });
   assert.equal(supp.totalAmount, 250);
   assert.deepEqual(supp.lines.map((l) => [l.name, l.amount]), [["Lamp shade", 250]]);
   assert.equal((await Penalty.findById(reported.penalty._id)).status, "paid");
   assert.equal(await Invoice.countDocuments({ bookingId: left._id, kind: "checkout" }), 0);
-  // UC09: the customer sees the paid penalty and the supplementary invoice on the booking
+  // Khách xem được bồi thường đã trả và hóa đơn bổ sung trong booking.
   const mine = (await customer.get(`/api/bookings/${left.id}`).expect(200)).body.data;
   assert.deepEqual(mine.penalties.map((p) => [p.itemName, p.status]), [["Lamp shade", "paid"]]);
   assert.deepEqual(mine.invoices.map((i) => [i.kind, i.totalAmount]), [["supplementary", 250]]);
-  // a quantity multiplies the compensation price; a Proposed line stays hidden from the customer
+  // Nhân đơn giá theo số lượng; ẩn khoản mới đề xuất khỏi khách.
   const two = (await send(staff, "post", "/api/room-issues", { roomId: room.id, title: "Shades", description: "Two torn", severity: "low", chargeItemId: shade._id, quantity: 2 }).expect(201)).body.data;
   assert.equal(two.penalty.proposedAmount, 500);
   assert.equal(two.penalty.itemName, "Lamp shade x2");
   assert.equal((await customer.get(`/api/bookings/${left.id}`).expect(200)).body.data.penalties.length, 1);
   await send(staff, "post", "/api/room-issues", { roomId: room.id, title: "Shades", severity: "low", chargeItemId: shade._id, quantity: 0 }).expect(400);
-  // UC31 (b): a room that cannot be used still opens the issue and goes to Maintenance, with the item proposed in the same report
+  // Phòng không dùng được chuyển bảo trì và có thể kèm bồi thường trong cùng báo cáo.
   const unusable = (await send(staff, "post", "/api/room-issues", { roomId: room.id, title: "Room cannot be used (Lamp shade)", description: "Glass everywhere", severity: "high", chargeItemId: shade._id }).expect(201)).body.data;
   assert.deepEqual([Boolean(unusable.issue), unusable.maintenanceApplied, unusable.penalty.status], [true, true, "proposed"]);
   await Room.updateOne({ _id: room._id }, { status: "available" });
 
-  // M2 room writes are no longer public
+  // API ghi phòng phải kiểm tra quyền, không mở công khai.
   const anon = request(app);
   await anon.patch(`/api/rooms/${room.id}/status`).set("Origin", origin).send({ status: "maintenance" }).expect(401);
   await anon.put(`/api/room-types/${type.id}/pricing`).set("Origin", origin).send({ seasonalPricing: [] }).expect(401);
   await send(staff, "put", `/api/room-types/${type.id}/pricing`, { seasonalPricing: [] }).expect(403);
-  // UC25: rates are inclusive date ranges; an overlap is refused (MSG-60), a bad price or reversed dates too
+  // Khoảng giá gồm cả hai đầu; từ chối chồng lấn, giá sai hoặc ngày đảo ngược.
   const rate = (description, startDate, endDate, price = 1500) => ({ description, startDate, endDate, price });
   await send(manager, "put", `/api/room-types/${type.id}/pricing`, { seasonalPricing: [rate("Tet", "2027-02-01", "2027-02-10"), rate("Late Tet", "2027-02-10", "2027-02-15")] }).expect(409);
   await send(manager, "put", `/api/room-types/${type.id}/pricing`, { seasonalPricing: [rate("Bad", "2027-02-10", "2027-02-01")] }).expect(400);
@@ -1142,7 +1169,8 @@ test("UC34 catalogs, UC31 -> UC38 proposed penalty, supplementary invoice after 
   const priced = (await send(manager, "put", `/api/room-types/${type.id}/pricing`, { seasonalPricing: [rate("Tet", "2027-02-01", "2027-02-09"), rate("Late Tet", "2027-02-10", "2027-02-15")] }).expect(200)).body.data;
   assert.deepEqual(priced.seasonalPricing.map((r) => r.description), ["Tet", "Late Tet"]);
   await send(manager, "put", `/api/room-types/${type.id}/pricing`, { seasonalPricing: [] }).expect(200);
-  await anon.get("/api/rooms/search").expect(401); // physical rooms are staff-only; guests use /api/public/availability
+  // Khách dùng API loại phòng trống; phòng cụ thể chỉ dành cho nhân viên.
+  await anon.get("/api/rooms/search").expect(401);
 });
 
 test("UC32: only the Admin reads the audit log, filtered by action and date", async () => {
@@ -1166,10 +1194,12 @@ test("T18: an approved check-out request schedules the inspection 30 minutes bef
   const type = await RoomType.findOne({ name: "Pay Suite" });
   const room = await Room.create({ roomNumber: "INS-1", roomTypeId: type._id, floor: 1, status: "occupied" });
   const stay = await payBooking({ status: "checked_in", holdExpiresAt: undefined, checkInDate: "2027-09-01", checkOutDate: "2027-09-03", rooms: [{ roomTypeId: type._id, roomId: room._id, priceAtBooking: 1000 }] });
-  const at = new Date("2027-09-03T08:00:00Z"); // 15:00 in Vietnam, after the 12:00 check-out time
+  // Mốc 15:00 giờ Việt Nam đã qua giờ trả phòng 12:00.
+  const at = new Date("2027-09-03T08:00:00Z");
   await CheckInOutRequest.create({ bookingId: stay._id, customerId: stay.customerId, type: "check_out", requestedTime: at, status: "approved" });
   await runHousekeepingTick(new Date(at.getTime() - 60 * 60000));
-  assert.equal(await Task.countDocuments({ bookingId: stay._id, type: "inspection" }), 0); // not yet
+  // Chưa đến thời điểm xử lý.
+  assert.equal(await Task.countDocuments({ bookingId: stay._id, type: "inspection" }), 0);
   await runHousekeepingTick(new Date(at.getTime() - 20 * 60000));
   assert.equal(await Task.countDocuments({ bookingId: stay._id, type: "inspection" }), 1);
 });
@@ -1177,11 +1207,13 @@ test("T18: an approved check-out request schedules the inspection 30 minutes bef
 test("arrival reminder: confirmed stays checking in tomorrow (Vietnam time) are reminded once", async () => {
   const Notification = require("../src/models/Notification");
   const { arrivalReminders } = require("../src/services/reminders");
-  const now = new Date("2027-10-09T20:00:00Z"); // 03:00 on 10 Oct in Vietnam, so "tomorrow" is 11 Oct
+  // 03:00 ngày 10/10 giờ Việt Nam nên ngày mai là 11/10.
+  const now = new Date("2027-10-09T20:00:00Z");
   const due = await payBooking({ status: "confirmed", holdExpiresAt: undefined, checkInDate: "2027-10-11", checkOutDate: "2027-10-12" });
   const later = await payBooking({ status: "confirmed", holdExpiresAt: undefined, checkInDate: "2027-10-12", checkOutDate: "2027-10-13" });
   await arrivalReminders(now);
-  await arrivalReminders(now); // a second run sends nothing new
+  // Chạy lần hai không gửi thêm thông báo.
+  await arrivalReminders(now);
   assert.equal(await Notification.countDocuments({ type: "arrival_reminder", bookingId: due._id }), 1);
   assert.equal(await Notification.countDocuments({ type: "arrival_reminder", bookingId: later._id }), 0);
 });
@@ -1216,21 +1248,25 @@ test("UC16 / T19: the front desk records a cancellation after the ID check or a 
     await customer.get("/api/frontdesk/cancellations/lookup?q=fd1001").expect(403);
     const url = "/api/frontdesk/cancellations";
     const body = (extra) => ({ bookingId: booking.id, reason: "Guest called", ...extra });
-    await send(staff, "post", url, body({ reason: " ", verifyMethod: "id_document" })).expect(400); // MSG-04
-    await send(staff, "post", url, body({})).expect(400); // no verification
-    await send(staff, "post", url, body({ verifyMethod: "otp", otp: "123456" })).expect(400); // no code sent yet
+    await send(staff, "post", url, body({ reason: " ", verifyMethod: "id_document" })).expect(400);
+    // Chưa xác minh người yêu cầu.
+    await send(staff, "post", url, body({})).expect(400);
+    // Chưa gửi mã xác minh.
+    await send(staff, "post", url, body({ verifyMethod: "otp", otp: "123456" })).expect(400);
     await send(staff, "post", `/api/frontdesk/bookings/${booking.id}/cancel-otp`).expect(200);
     assert.equal(mails.at(-1).to, "customer@example.com");
     const first = codeOf();
     const wrong = first === "000000" ? "111111" : "000000";
     for (let i = 0; i < 5; i++) await send(staff, "post", url, body({ verifyMethod: "otp", otp: wrong })).expect(400);
-    await send(staff, "post", url, body({ verifyMethod: "otp", otp: first })).expect(400); // locked after 5 wrong entries
+    // Khóa sau năm lần nhập mã sai.
+    await send(staff, "post", url, body({ verifyMethod: "otp", otp: first })).expect(400);
     await send(staff, "post", `/api/frontdesk/bookings/${booking.id}/cancel-otp`).expect(200);
     assert.equal((await send(staff, "post", url, body({ verifyMethod: "otp", otp: codeOf() })).expect(201)).body.data.status, "cancellation_requested");
     const saved = await Booking.findById(booking.id);
     assert.deepEqual([saved.cancellation.verifyMethod, saved.cancellation.channel], ["otp", "front_desk"]);
     assert.ok(await AuditLog.exists({ action: "cancellation.requested", targetId: booking._id }));
-    await send(staff, "post", url, body({ verifyMethod: "id_document" })).expect(409); // already waiting for review
+    // Yêu cầu đã ở trạng thái chờ duyệt.
+    await send(staff, "post", url, body({ verifyMethod: "id_document" })).expect(409);
 
     const walkIn = await payBooking({ status: "confirmed", holdExpiresAt: undefined, depositRequired: 0, bookingSource: "front_desk" });
     await send(staff, "post", `/api/frontdesk/bookings/${walkIn.id}/cancel-otp`).expect(400);
@@ -1256,24 +1292,27 @@ test("UC21: the receptionist enters the customer's bank account, notes contact a
   assert.deepEqual([r.amount, r.booker.phone, r.account], [600, "0912345678", null]);
   await customer.get("/api/frontdesk/refunds").expect(403);
   const url = `/api/frontdesk/refunds/${r._id}`;
-  await send(staff, "post", url, { bankTransactionCode: "FT123" }).expect(409); // account first
+  // Phải nhập tài khoản nhận tiền trước.
+  await send(staff, "post", url, { bankTransactionCode: "FT123" }).expect(409);
   await send(staff, "post", `${url}/contacts`, { note: "No answer" }).expect(201);
-  await send(staff, "put", `${url}/account`, { bank: "VCB", accountNumber: "0123456789", holderName: "Someone Else" }).expect(400); // MSG-84
+  await send(staff, "put", `${url}/account`, { bank: "VCB", accountNumber: "0123456789", holderName: "Someone Else" }).expect(400);
   await send(staff, "put", `${url}/account`, { bank: "VCB", accountNumber: "12ab34", holderName: "customer" }).expect(400);
   const acc = (await send(staff, "put", `${url}/account`, { bank: "Vietcombank", accountNumber: "0123456789", holderName: "Customer" }).expect(200)).body.data;
   assert.deepEqual([acc.account.accountNumber, acc.account.holderName, acc.contacts[0].note], ["0123456789", "CUSTOMER", "No answer"]);
   const stored = await Refund.findById(r._id);
-  assert.equal(stored.bankAccount.accountNumber.includes("0123456789"), false); // encrypted at rest
+  // Số tài khoản được mã hóa khi lưu.
+  assert.equal(stored.bankAccount.accountNumber.includes("0123456789"), false);
   const done = (await send(staff, "post", url, { bankTransactionCode: "FT26110100001", note: "Sent" }).expect(200)).body;
   assert.equal(done.data.status, "completed");
   assert.match(done.message, /Refund recorded/);
-  assert.equal((await Payment.findById(stored.paymentId)).status, "refunded"); // BR-17: whole deposit, once
+  // Hoàn toàn bộ cọc đúng một lần.
+  assert.equal((await Payment.findById(stored.paymentId)).status, "refunded");
   await send(staff, "post", url, { bankTransactionCode: "FT2" }).expect(409);
   assert.match((await Notification.findOne({ type: "refund_completed", bookingId: booking._id })).message, /FT26110100001/);
   assert.ok((await staff.get("/api/frontdesk/refunds?status=completed").expect(200)).body.data.some((x) => x._id === r._id));
   assert.equal((await customer.get(`/api/bookings/${booking.id}`).expect(200)).body.data.refunds[0].bankTransactionCode, "FT26110100001");
 
-  // A deposit is refunded only once (MSG-42).
+  // Không hoàn lại cùng khoản cọc lần thứ hai.
   const dup = await Refund.create({ paymentId: stored.paymentId, bookingId: booking._id, amount: 600, status: "requested", bankAccount: stored.bankAccount });
   await send(staff, "post", `/api/frontdesk/refunds/${dup.id}`, { bankTransactionCode: "FT3" }).expect(409);
   assert.equal((await Refund.findById(dup.id)).status, "requested");
@@ -1285,7 +1324,8 @@ test("UC11: the receptionist splits the balance over cash, POS and transfer unti
   await send(customer, "post", url, { method: "cash" }).expect(403);
   await send(customer, "post", `/api/bookings/${booking.id}/payments/final`, { method: "bank_transfer", amount: 100 }).expect(404);
   await send(staff, "post", url, { method: "cash", amount: 1401 }).expect(400);
-  await send(staff, "post", url, { method: "pos", amount: 400 }).expect(400); // slip reference required
+  // Bắt buộc nhập mã chứng từ chuyển khoản.
+  await send(staff, "post", url, { method: "pos", amount: 400 }).expect(400);
   assert.equal((await send(staff, "post", url, { method: "cash", amount: 400 }).expect(201)).body.data.remaining, 1000);
   assert.equal((await send(staff, "post", url, { method: "pos", amount: 600, transactionRef: "POS-778" }).expect(201)).body.data.remaining, 400);
   const last = (await send(staff, "post", url, { method: "bank_transfer", transactionRef: "FT-99" }).expect(201)).body.data;
@@ -1306,11 +1346,12 @@ test("UC10: a deposit already pending at the gateway when the hold ends still co
 
 test("T17: the daily reconciliation settles SePay orders whose IPN never arrived", async () => {
   const { reconcileDaily } = require("../src/services/payments");
-  assert.deepEqual(await reconcileDaily(new Date()), { checked: 0, settled: 0 }); // sandbox: nothing to ask
+  // Cổng giả lập không cần tra cứu bên ngoài.
+  assert.deepEqual(await reconcileDaily(new Date()), { checked: 0, settled: 0 });
   await withSepay(async () => {
     const booking = await payBooking();
     const o = await sepayDeposit(booking);
-    // Every order is captured, each with its own transaction id.
+    // Mỗi đơn có mã giao dịch riêng và đều được đối soát.
     global.fetch = async (url) => ({ ok: true, status: 200, json: async () => ({ data: { order_status: "CAPTURED", order_amount: "600.00", transactions: [{ transaction_id: `TX-${url.split("/").pop()}` }] } }) });
     const first = await reconcileDaily(new Date());
     assert.ok(first.checked >= 1 && first.settled >= 1, JSON.stringify(first));
@@ -1320,8 +1361,7 @@ test("T17: the daily reconciliation settles SePay orders whose IPN never arrived
   });
 });
 
-// Runs last: it changes the customer password, which ends the shared customer session.
-// ---- SRS v2.5 / SDS v5 (08/11/2026) business rules ----
+// Chạy sau cùng vì đổi mật khẩu sẽ kết thúc phiên khách dùng chung.
 const vnDay = (offset = 0) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh" }).format(new Date(Date.now() + offset * 864e5));
 const vnAt = (day, time) => new Date(`${day}T${time}:00+07:00`);
 async function srsUser(username, role) {
@@ -1352,24 +1392,26 @@ test("SRS v2.5 UC06 / UC07: consent and 3 unpaid bookings (MSG-79); a modificati
   assert.match((await send(guest, "post", "/api/bookings", create).expect(409)).body.error.message, /3 unpaid bookings/);
   await Booking.updateMany({ customerId: me._id, status: "pending" }, { status: "expired" });
 
-  // A Confirmed booking with a paid deposit: longer stay at once, the deposit is unchanged, the customer is notified.
+  // Gia hạn booking đã trả cọc, giữ nguyên cọc và gửi thông báo cho khách.
   const b = await srsBooking(me._id, Std, { checkInDate: "2027-09-10", checkOutDate: "2027-09-12", roomAmount: 2000, totalAmount: 2000, depositRequired: 1500, status: "confirmed",
     nightlyRates: [{ date: "2027-09-10", roomTypeId: Std._id, price: 1500 }, { date: "2027-09-11", roomTypeId: Std._id, price: 500 }] });
   await Payment.create({ bookingId: b._id, kind: "deposit", amount: 1500, method: "bank_transfer", status: "success", paidAt: new Date() });
   const longer = (await send(guest, "post", `/api/bookings/${b.id}/modify`, { checkOutDate: "2027-09-13" }).expect(200)).body.data;
   assert.deepEqual([longer.totalAmount, longer.depositRequired], [3000, 1500]);
-  assert.deepEqual(longer.nightlyRates.map((n) => n.price), [1500, 500, 1000]); // SDS b.10: kept nights keep their own price (BR-35)
+  // Các đêm không đổi giữ nguyên giá đã chốt.
+  assert.deepEqual(longer.nightlyRates.map((n) => n.price), [1500, 500, 1000]);
   assert.ok(await require("../src/models/Notification").exists({ type: "booking_modified", bookingId: b._id }));
-  // The total may not fall below the deposit already paid: cancel instead.
+  // Không giảm tổng tiền xuống thấp hơn cọc đã trả; cần hủy booking thay thế.
   await send(guest, "post", `/api/bookings/${b.id}/modify`, { checkInDate: "2027-09-12", checkOutDate: "2027-09-13" }).expect(409);
-  await send(guest, "post", `/api/bookings/${b.id}/modify`, { idDocumentNo: "123" }).expect(400); // no ID in UC07
+  // Không yêu cầu giấy tờ khi khách sửa booking.
+  await send(guest, "post", `/api/bookings/${b.id}/modify`, { idDocumentNo: "123" }).expect(400);
 
-  // Within 48 h the cancellation would not be refunded in full, so the dates are locked (MSG-78).
+  // Trong vòng 48 giờ không còn được hoàn toàn bộ nên khóa đổi ngày.
   const soon = await srsBooking(me._id, Std, { checkInDate: vnDay(1), checkOutDate: vnDay(2), roomAmount: 1000, totalAmount: 1000, depositRequired: 300, status: "confirmed" });
   await Payment.create({ bookingId: soon._id, kind: "deposit", amount: 300, method: "bank_transfer", status: "success", paidAt: new Date() });
   assert.match((await send(guest, "post", `/api/bookings/${soon.id}/modify`, { checkOutDate: vnDay(3) }).expect(409)).body.error.message, /can no longer be changed/);
 
-  // A Pending Payment booking cannot change while its payment is at the gateway (BR-40).
+  // Không sửa booking chờ cọc khi giao dịch đang ở cổng thanh toán.
   const pending = await srsBooking(me._id, Std, { checkInDate: "2027-09-15", checkOutDate: "2027-09-16", roomAmount: 1000, totalAmount: 1000, depositRequired: 300, status: "pending", holdExpiresAt: new Date(Date.now() + 600000) });
   await Payment.create({ bookingId: pending._id, kind: "deposit", amount: 300, method: "bank_transfer", status: "pending" });
   await send(guest, "post", `/api/bookings/${pending.id}/modify`, { checkOutDate: "2027-09-17" }).expect(409);
@@ -1400,29 +1442,30 @@ test("SRS v2.5 UC20 / BR-47 / BR-22: check-out needs the balance paid and the in
   assert.equal(bill.balance, 2800);
   assert.ok(bill.inspection, "an inspection task is requested");
   const url = `/api/front-desk/bookings/${stay.id}/check-out`;
-  assert.match((await send(staff, "post", url).expect(409)).body.error.message, /unpaid/); // BR-20
+  assert.match((await send(staff, "post", url).expect(409)).body.error.message, /unpaid/);
   await send(staff, "post", `/api/frontdesk/bookings/${stay.id}/payments`, { method: "cash" }).expect(201);
   assert.match((await send(staff, "post", url).expect(409)).body.error.message, /inspection/);
   const done = (await send(staff, "post", url, { skipInspection: true }).expect(200)).body;
   assert.equal(done.data.booking.status, "checked_out");
   assert.match(done.data.invoice.invoiceNumber, /^INV-\d{8}-\d{4}$/);
   const nights = done.data.invoice.lines.filter((l) => l.name.startsWith("Night of"));
-  assert.deepEqual([nights.length, nights.reduce((sum, l) => sum + l.amount, 0)], [4, 4000]); // room charge of every night (UC11)
+  // Hóa đơn gồm tiền phòng của từng đêm.
+  assert.deepEqual([nights.length, nights.reduce((sum, l) => sum + l.amount, 0)], [4, 4000]);
   const inspection = await Task.findOne({ bookingId: stay._id, type: "inspection" });
   assert.deepEqual([inspection.status, inspection.notes], ["completed", "Skipped at check-out"]);
   assert.equal((await Room.findById(Std.rooms[0]._id)).status, "cleaning");
 
-  // The guest is still in the room after 18:00 on the check-out date: one extra night instead of the late fee, once.
+  // Sau 18:00 ngày trả phòng, tính thêm một đêm thay phí trả muộn đúng một lần.
   await Room.updateOne({ _id: Std.rooms[1]._id }, { status: "occupied" });
   const late = await srsBooking(me._id, Std, { checkInDate: vnDay(-3), checkOutDate: vnDay(-1), roomAmount: 2000, totalAmount: 2000, status: "checked_in" });
   await Booking.updateOne({ _id: late._id }, { "rooms.0.roomId": Std.rooms[1]._id });
-  // two parallel calls (a double click, React strict mode) post the charge and the inspection once
+  // Hai yêu cầu đồng thời chỉ ghi một khoản phí và một nhiệm vụ kiểm tra.
   const [lateBill] = (await Promise.all([1, 2].map(() => send(staff, "post", `/api/front-desk/bookings/${late.id}/check-out/start`).expect(200)))).map((r) => r.body.data);
   assert.equal(await require("../src/models/CleaningTask").countDocuments({ bookingId: late._id, type: "inspection" }), 1);
   assert.deepEqual(lateBill.feeLines.map((f) => [f.type, f.amount]), [["extra_night", 1000]]);
   await send(staff, "post", `/api/front-desk/bookings/${late.id}/check-out/start`).expect(200);
   assert.equal((await Booking.findById(late.id)).totalAmount, 3000);
-  // Between the standard check-out time and 18:00 the late check-out fee of the policy applies.
+  // Từ giờ trả chuẩn đến 18:00 áp dụng phí trả muộn của chính sách.
   const { lateCharge } = require("../src/controllers/bookingCreation");
   const { currentCancellationPolicy } = require("../src/services/policies");
   const policy = await currentCancellationPolicy();
@@ -1442,7 +1485,8 @@ test("SRS v2.5 UC18 / BR-38: an upgrade is always charged; a lower-priced room n
   const url = `/api/front-desk/bookings/${stay.id}/change-room`;
   assert.match((await send(staff, "post", url, { newRoomId: t.Low.rooms[0].id }).expect(409)).body.error.message, /lower-priced/);
   const up = (await send(staff, "post", url, { newRoomId: t.High.rooms[0].id }).expect(200)).body;
-  assert.equal(up.data.roomAmount, 3000 + 2 * 2000 - 2 * 1000); // the 2 remaining nights at the new rate
+  // Hai đêm còn lại dùng giá loại phòng mới.
+  assert.equal(up.data.roomAmount, 3000 + 2 * 2000 - 2 * 1000);
   assert.equal((await Room.findById(t.Mid.rooms[0]._id)).status, "cleaning");
   assert.ok(await AuditLog.exists({ action: "booking.room_changed", targetId: stay._id }));
 
@@ -1464,8 +1508,9 @@ test("SRS v2.5 UC30 / UC39 / BR-33: skip rules, auto-approved requests, withdraw
   const turnover = await Task.create({ roomId: Std.rooms[0]._id, type: "turnover", status: "assigned", assignedTo: hkUser._id });
   await send(hk, "patch", `/api/housekeeping/tasks/${turnover.id}/status`, { status: "skipped", reason: "Guest asleep" }).expect(409);
   const routine = await Task.create({ roomId: Std.rooms[0]._id, type: "routine", status: "assigned", assignedTo: hkUser._id });
-  await send(hk, "patch", `/api/housekeeping/tasks/${routine.id}/status`, { status: "skipped" }).expect(400); // reason required
-  await send(hk, "patch", `/api/housekeeping/tasks/${routine.id}/status`, { status: "completed" }).expect(409); // MSG-49
+  // Bắt buộc nhập lý do.
+  await send(hk, "patch", `/api/housekeeping/tasks/${routine.id}/status`, { status: "skipped" }).expect(400);
+  await send(hk, "patch", `/api/housekeeping/tasks/${routine.id}/status`, { status: "completed" }).expect(409);
   assert.equal((await send(hk, "patch", `/api/housekeeping/tasks/${routine.id}/status`, { status: "skipped", reason: "Do not disturb" }).expect(200)).body.data.skipReason, "Do not disturb");
 
   const day = "2027-12-01";
@@ -1473,16 +1518,19 @@ test("SRS v2.5 UC30 / UC39 / BR-33: skip rules, auto-approved requests, withdraw
   const reqUrl = `/api/bookings/${b.id}/requests`;
   const guestData = { type: "check_in", numberOfGuests: 1, mainGuestName: "Srs Guest", mainGuestIdNumber: "079123456789" };
   const normal = (await send(guest, "post", reqUrl, { ...guestData, requestedTime: vnAt(day, "20:00").toISOString() }).expect(201)).body.data;
-  assert.equal(normal.status, "approved"); // BR-44: no early check-in, approved at once
-  await send(guest, "post", reqUrl, { ...guestData, requestedTime: vnAt(day, "08:00").toISOString() }).expect(409); // one open request
+  // Không nhận sớm nên yêu cầu được duyệt ngay.
+  assert.equal(normal.status, "approved");
+  // Chỉ cho một yêu cầu đang mở.
+  await send(guest, "post", reqUrl, { ...guestData, requestedTime: vnAt(day, "08:00").toISOString() }).expect(409);
   await send(guest, "delete", `${reqUrl}/${normal._id}`).expect(200);
   const early = (await send(guest, "post", reqUrl, { ...guestData, requestedTime: vnAt(day, "08:00").toISOString() }).expect(201)).body.data;
   assert.equal(early.status, "pending");
-  await send(staff, "patch", `/api/frontdesk/requests/${early._id}`, { action: "reject" }).expect(400); // a reason is required
+  // Bắt buộc nhập lý do.
+  await send(staff, "patch", `/api/frontdesk/requests/${early._id}`, { action: "reject" }).expect(400);
   await send(staff, "patch", `/api/frontdesk/requests/${early._id}`, { action: "reject", responseNote: "No room ready that early" }).expect(200);
   assert.ok(await Notification.exists({ type: "stay_request_decided", bookingId: b._id }));
 
-  // BR-33: last night's arrival keeps the room until 06:00.
+  // Khách đến từ đêm trước vẫn được giữ phòng đến 06:00.
   const { processNoShows } = require("../src/services/noShows");
   const arrival = await srsBooking(me._id, Std, { checkInDate: vnDay(-1), checkOutDate: vnDay(1), roomAmount: 2000, totalAmount: 2000, status: "confirmed" });
   await processNoShows(vnAt(vnDay(0), "05:00"));
@@ -1503,7 +1551,7 @@ test("forgot password generates token, rejects invalid/expired token, resets pas
     email: "customer@example.com",
   }).expect(200);
   setTransport(null);
-  // The token must travel only inside the e-mailed link, never in the response.
+  // Token chỉ xuất hiện trong liên kết email, không trả trong phản hồi API.
   assert.equal(res.body.data.resetToken, undefined);
   assert.equal(mails.length, 1);
   const token = mails[0].text.match(/#\/reset-password\?token=([0-9a-f]{64})&email=/)?.[1];
@@ -1578,9 +1626,10 @@ test("room holding: a pending cancellation keeps its room (BR-36), an expired ho
   const stay = { roomTypeId: type.id, checkInDate: "2028-01-10", checkOutDate: "2028-01-12", guestCount: 1, consent: true };
   const offered = async () => (await request(app).get("/api/public/availability?checkIn=2028-01-10&checkOut=2028-01-12&guests=1").expect(200)).body.data.find((t) => t._id === type.id);
   const held = await srsBooking(me._id, type, { checkInDate: "2028-01-10", checkOutDate: "2028-01-12", roomAmount: 2000, totalAmount: 2000, status: "cancellation_requested" });
-  await send(b, "post", "/api/bookings", stay).expect(409); // MSG-30: the request may still be withdrawn
+  // Yêu cầu hủy còn có thể được rút nên vẫn giữ phòng.
+  await send(b, "post", "/api/bookings", stay).expect(409);
   assert.equal(await offered(), undefined);
-  // An unpaid hold that ended 5 minutes ago may still be at the gateway; after 15 more minutes it no longer counts, job or not.
+  // Booking chờ cọc giữ thêm 15 phút sau hạn dù lịch dọn chưa chạy.
   await Booking.updateOne({ _id: held._id }, { status: "pending", holdExpiresAt: new Date(Date.now() - 5 * 60000) });
   await send(b, "post", "/api/bookings", stay).expect(409);
   await Booking.updateOne({ _id: held._id }, { holdExpiresAt: new Date(Date.now() - 16 * 60000) });
@@ -1588,7 +1637,7 @@ test("room holding: a pending cancellation keeps its room (BR-36), an expired ho
   assert.deepEqual([free.roomsLeft, free.nights, free.stayAmount, free.seasonalPricing], [1, 2, 2000, undefined]);
   const both = await Promise.all([send(a, "post", "/api/bookings", stay), send(b, "post", "/api/bookings", stay)]);
   assert.deepEqual(both.map((r) => r.status).sort(), [201, 409]);
-  // UC04 input checks; physical rooms are for staff only
+  // Kiểm tra đầu vào tìm phòng; phòng cụ thể chỉ cho nhân viên truy cập.
   await request(app).get("/api/public/availability?checkIn=2028-01-12&checkOut=2028-01-10").expect(400);
   await request(app).get("/api/rooms/search").expect(401);
   await a.get("/api/rooms/search").expect(403);
@@ -1609,9 +1658,10 @@ test("UC06 quote and UC14 walk-in coupon: the server prices every night, a bad c
   const bad = (await ask(guest, "NOPE").expect(200)).body.data;
   assert.match(bad.couponError, /invalid/);
   assert.deepEqual([bad.discountAmount, bad.totalAmount], [0, 4000]);
-  assert.equal((await ask(staff, "QUOTE10").expect(200)).body.data.depositRequired, 0); // walk-in: no deposit
+  // Booking tại quầy không yêu cầu cọc.
+  assert.equal((await ask(staff, "QUOTE10").expect(200)).body.data.depositRequired, 0);
   await request(app).post("/api/bookings/quote").set("Origin", origin).send({}).expect(401);
-  // UC14 step 3: the walk-in booking takes the coupon and counts one use; cancelling gives the use back
+  // Booking tại quầy dùng một lượt mã giảm giá và hoàn lượt khi hủy.
   const walkIn = { roomTypeId: Q.id, checkInDate: today, checkOutDate: after, guestCount: 1, fullName: "Walk In", phone: "0912345678", idDocumentNo: "012345678" };
   await send(staff, "post", "/api/front-desk/bookings", { ...walkIn, couponCode: "NOPE" }).expect(400);
   const made = (await send(staff, "post", "/api/front-desk/bookings", { ...walkIn, couponCode: "quote10" }).expect(201)).body.data;
@@ -1634,13 +1684,15 @@ test("front-desk booking list: overdue check-in and check-out views, keyword on 
   const only = async (query) => (await ids(query)).filter((id) => mine.includes(id));
   assert.deepEqual(await only("view=overdue_check_in"), [late.id]);
   assert.deepEqual(await only("view=overdue_check_out"), [over.id]);
-  assert.deepEqual(await only("view=arrivals"), [late.id, due.id]); // oldest check-in first
+  // Ưu tiên ngày nhận phòng cũ nhất.
+  assert.deepEqual(await only("view=arrivals"), [late.id, due.id]);
   assert.deepEqual(await only("view=departures"), [over.id]);
   assert.deepEqual(await only("q=late+arr"), [late.id]);
   assert.equal((await only("q=0977000111")).length, 4);
   assert.deepEqual(await only(`q=${late.bookingReference}`), [late.id]);
   await staff.get("/api/bookings/search?view=bogus").expect(400);
-  await staff.get("/api/bookings/search?q=(").expect(200); // a keyword is never a regular expression
+  // Từ khóa tìm kiếm không được hiểu là biểu thức chính quy.
+  await staff.get("/api/bookings/search?q=(").expect(200);
   const page = (await staff.get("/api/bookings/search?q=0977000111&limit=3&page=2").expect(200)).body;
   assert.deepEqual([page.data.length, page.meta.total, page.meta.pages], [1, 4, 2]);
 });
@@ -1658,6 +1710,8 @@ test("BR-26: staff and Admin accounts cannot use the customer self-service funct
     await send(who, "post", `/api/bookings/${booking.id}/modify`, { guestCount: 1 }).expect(403);
     await send(who, "post", `/api/bookings/${booking.id}/requests`, {}).expect(403);
   }
-  await (await srsUser("br26guest", "customer")).get("/api/bookings").expect(200); // a customer still can (own account: earlier tests changed the shared one)
-  await staff.get("/api/bookings/search").expect(200); // front-desk screens are unaffected
+  // Dùng tài khoản khách riêng vì test trước đã thay đổi tài khoản dùng chung.
+  await (await srsUser("br26guest", "customer")).get("/api/bookings").expect(200);
+  // Quyền dùng màn hình lễ tân vẫn giữ nguyên.
+  await staff.get("/api/bookings/search").expect(200);
 });

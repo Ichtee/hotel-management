@@ -6,7 +6,7 @@ const { hashPassword } = require("../utils/password");
 const { editableRoles } = require("../services/staffPermissions");
 const { staffView, createStaff, updateStaff } = require("../services/staff");
 
-// Chỉ chấp nhận các trường Manager được phép sửa theo UC22.
+// Chỉ nhận các trường quản lý được phép sửa trên tài khoản nhân viên.
 function validate(body, creating = false) {
   v.keys(body, ["fullName", "email", "phone", "role", "status", "reason", "position", "shift", "hireDate",
     ...(creating ? ["username", "password"] : [])]);
@@ -68,7 +68,7 @@ async function update(req, res) {
   res.json(await updateStaff(req, validate(req.body)));
 }
 
-// Giữ endpoint cũ nhưng bắt buộc lý do và chỉ vô hiệu hóa mềm.
+// Giữ API cũ nhưng yêu cầu lý do và chỉ vô hiệu hóa tài khoản.
 async function deactivate(req, res) {
   v.keys(req.body, ["reason"]);
   const reason = v.text(req.body.reason, "reason", 1, 500);

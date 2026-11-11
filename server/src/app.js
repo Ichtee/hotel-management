@@ -29,7 +29,7 @@ const housekeepingTasks = require("./controllers/housekeepingTasks");
 const { HttpError } = require("./utils/validation");
 const RoomType = require("./models/RoomType");
 
-// Member 2 Routes & Controllers
+// Bộ xử lý khách hàng, loại phòng và tìm phòng.
 const roomTypeController = require("./controllers/roomTypeController");
 const catalog = require("./controllers/catalog");
 const notifications = require("./controllers/notifications");
@@ -38,8 +38,7 @@ const roomController = require("./controllers/roomController");
 
 const customerRoutes = require("./routes/customer.routes");
 
-// The gateway calls this server-to-server, so it has no browser Origin or session; its HMAC signature authenticates it.
-// SRS BR-26: booking, payment, review and the other self-service functions need a logged-in Customer; staff and Admin accounts are refused.
+// Chỉ khách hàng đã đăng nhập được dùng chức năng tự phục vụ; từ chối nhân viên và Admin.
 const customerOnly = (req, res, next) => {
   if (req.role.key !== "customer") throw new HttpError(403, "Only a customer account can use this function.");
   next();
@@ -57,7 +56,8 @@ function createApp({
     throw new Error("JWT_SECRET must contain at least 32 characters.");
   const app = express();
   app.disable("x-powered-by");
-  if (production) app.set("trust proxy", Number(process.env.TRUST_PROXY) || 1); // 2 when Vercel proxies /api to Render
+  // Dùng hai lớp proxy khi Vercel chuyển tiếp /api đến Render.
+  if (production) app.set("trust proxy", Number(process.env.TRUST_PROXY) || 1);
   app.use(helmet());
 
   app.use((req, res, next) => {
@@ -81,7 +81,7 @@ function createApp({
 
   app.use(express.json({ limit: "32kb" }));
 
-  // SDS: stateless JWT authentication (middleware/auth.js); the secret signs the tokens.
+  // Dùng khóa cấu hình để ký và kiểm tra JWT.
   app.set("jwtSecret", jwtSecret);
   app.set("production", production);
 
@@ -92,12 +92,11 @@ function createApp({
 
   app.get("/api/health", (req, res) => res.json({ data: { status: "ok" } }));
 
-  // UC04 for Guests and Customers: room types with rooms left and the price of the stay; no physical room is exposed.
+  // API công khai trả loại phòng, số phòng còn lại và giá, không lộ phòng cụ thể.
   app.get("/api/public/availability", bookingCreation.availability);
 
 
-  // Creation (UC06), cancel (UC08) and cancel-payment are session-authenticated and registered below (bookingCreation, cancellations).
-  // --- Auth Rate Limiter & Public Auth Routes ---
+  // Khai báo API xác thực công khai và giới hạn tần suất đăng nhập.
   const authLimit = rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 100,
@@ -126,7 +125,7 @@ function createApp({
   app.post("/api/auth/resend-verification", authLimit, auth.resendVerification);
   app.get("/api/auth/captcha-config", auth.captchaConfig);
 
-  // --- Authenticated Routes ---
+  // Cổng thanh toán và cron dùng cơ chế xác minh riêng, không dùng phiên trình duyệt.
   app.post(GATEWAY_CALLBACK, payments.callback);
   app.post("/api/payments/sepay/ipn", payments.sepayIpn);
   app.get("/api/payments/return", payments.back);
@@ -134,37 +133,39 @@ function createApp({
   app.get("/api/hotel-info", policies.hotelInfo);
   app.get("/api/public/policies", policies.publicSummary);
   app.get("/api/public/promotions", promotions.publicListing);
+  // Các API bên dưới yêu cầu đăng nhập.
   app.use("/api", authenticate);
 
   app.get("/api/auth/me", auth.profile);
-  // UC13 View Notifications: each user reads only their own (BR-28).
+  // Mỗi người dùng chỉ đọc thông báo của chính mình.
   app.get("/api/notifications", notifications.listing);
   app.post("/api/notifications/read", notifications.markRead);
   app.get("/api/audit-logs", auditLogs.listing);
   app.get("/api/profile", auth.profile);
   app.put("/api/profile/password", authLimit, auth.changePassword);
   app.use("/api", requirePasswordChanged);
-  // Member 2 modify / withdraw / search. The customer is always the signed-in user (never a body field or header),
-  // so nobody can change another customer's booking; searching all bookings is for front-desk staff only.
+  // Cho Admin, quản lý hoặc nhân viên có quyền đọc booking tìm danh sách của mọi khách.
   const staffSearch = (req, res, next) => {
     if (!["manager", "admin"].includes(req.role.key)) return permit("bookings.managed.read")(req, res, next);
     next();
   };
-  app.post("/api/bookings/:id/withdraw-cancellation", customerOnly, cancellations.withdraw); // UC08 2b (same as DELETE /cancel)
-  app.post("/api/bookings/:id/modify", customerOnly, bookingCreation.modifyOwn); // UC07
+  // Rút yêu cầu hủy như API DELETE /cancel.
+  app.post("/api/bookings/:id/withdraw-cancellation", customerOnly, cancellations.withdraw);
+  app.post("/api/bookings/:id/modify", customerOnly, bookingCreation.modifyOwn);
   app.patch("/api/bookings/:id/modify", customerOnly, bookingCreation.modifyOwn);
   app.get("/api/bookings/search", staffSearch, bookings.search);
-  app.post("/api/bookings/quote", bookingCreation.quote); // UC06 price summary (also the walk-in form, UC14)
-  // Front-desk Room Availability screen: physical rooms, so staff only (registered before the manager-only /api/rooms).
+  // Báo giá dùng chung cho đặt phòng trực tuyến và tại quầy.
+  app.post("/api/bookings/quote", bookingCreation.quote);
+  // Phòng cụ thể chỉ dành cho nhân viên có quyền tìm phòng.
   app.get("/api/rooms/search", permit("rooms.search"), roomController.search);
   app.patch("/api/profile", auth.updateProfile);
-  // UC12 Submit Review (Customer session)
+  // Khách đã đăng nhập gửi đánh giá booking của mình.
   app.post("/api/reviews", customerOnly, roomTypes.submitReview);
   app.get("/api/reviews/my", customerOnly, roomTypes.customerReviews);
   app.get("/api/room-issues/options", permit("room_issues.report"), roomIssues.options);
   app.post("/api/room-issues", permit("room_issues.report"), roomIssues.create);
   app.get("/api/room-issues", requireManager, roomIssues.listing);
-  // M5 housekeeping workflows are authenticated: a Housekeeping user can only see/update own tasks.
+  // Housekeeping chỉ xem và cập nhật nhiệm vụ được giao cho mình.
   app.get("/api/housekeeping/tasks/mine", permit("cleaning_tasks.own.read"), housekeepingTasks.mine);
   app.patch("/api/housekeeping/tasks/:id/status", permit("cleaning_tasks.status.update"), housekeepingTasks.updateMine);
   app.get("/api/housekeeping/tasks/ad-hoc/options", permit("cleaning_tasks.ad_hoc.create"), housekeepingTasks.adHocOptions);
@@ -201,7 +202,7 @@ function createApp({
   app.get("/api/room-types/:id/reviews", roomTypes.reviews);
   app.put("/api/room-types/:id/pricing", roomTypeController.updatePricing);
   app.patch("/api/reviews/:id/visibility", requireManager, roomTypes.visibility);
-  // UC34 Additional services & compensation items (manager)
+  // Quản lý danh mục dịch vụ và vật phẩm bồi thường.
   app.get("/api/catalog/:catalog", requireManager, catalog.listing);
   app.post("/api/catalog/:catalog", requireManager, catalog.create);
   app.patch("/api/catalog/:catalog/:id", requireManager, catalog.update);
@@ -217,12 +218,12 @@ function createApp({
   app.patch("/api/promotions/:id", promotions.update);
   app.delete("/api/promotions/:id", promotions.remove);
 
-  // UC10 View Booking History (Session-authenticated)
+  // Lấy lịch sử booking của người đang đăng nhập.
   app.get("/api/bookings", customerOnly, bookings.listing);
-  // BR-29 / MSG-81: online bookings are limited per IP address, generously enough for shared networks.
+  // Giới hạn đặt phòng theo IP, vẫn cho phép nhiều khách dùng chung mạng.
   const bookingLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: "draft-8", legacyHeaders: false, message: { error: { message: "Too many requests. Please try again later." } } });
   app.post("/api/bookings", customerOnly, bookingLimit, bookingCreation.create);
-  // SRS 2.4.3 permissions, so the manager's changes in UC33 apply to these front-desk functions.
+  // Áp dụng quyền đã cấu hình cho từng thao tác tại quầy.
   app.post("/api/front-desk/bookings", permit("bookings.walk_in.create"), bookingCreation.createWalkIn);
   app.patch("/api/front-desk/bookings/:id", permit("bookings.managed.update"), bookingCreation.modifyWalkIn);
   app.post("/api/front-desk/bookings/:id/cancel", permit("bookings.managed.cancel"), cancellations.recordAtDesk);
@@ -236,7 +237,7 @@ function createApp({
   app.post("/api/front-desk/bookings/:id/check-out/start", permit("stays.check_out"), bookingCreation.startCheckOut);
   app.post("/api/front-desk/bookings/:id/check-out", permit("stays.check_out"), bookingCreation.checkOut);
   app.post("/api/front-desk/bookings/:id/invoice", permit("stays.check_out"), bookingCreation.generateInvoice);
-  // UC11 View Booking Details
+  // Xem chi tiết booking theo quyền của người gọi.
   app.get("/api/bookings/:id", bookings.detail);
   app.get("/api/bookings/:bookingId/invoice", invoices.customerDetail);
   app.post("/api/bookings/:id/requests", customerOnly, stayRequests.create);
@@ -247,18 +248,17 @@ function createApp({
   app.post("/api/bookings/:id/payments/deposit", customerOnly, payments.deposit);
   app.get("/api/payments/methods", payments.methods);
   app.get("/api/payments/:id", payments.show);
-  if (!production || process.env.ENABLE_SANDBOX_GATEWAY === "true") app.post("/api/sandbox-gateway/orders/:orderId", payments.sandbox); // demo deployments only: moves no money
-  // UC08 Cancel Reservation (customer)
+  // Cổng giả lập chỉ dùng cho demo, không chuyển tiền thật.
+  if (!production || process.env.ENABLE_SANDBOX_GATEWAY === "true") app.post("/api/sandbox-gateway/orders/:orderId", payments.sandbox);
   app.get("/api/bookings/:id/refund-estimate", customerOnly, cancellations.estimate);
   app.post("/api/bookings/:id/cancel", customerOnly, cancellations.requestOnline);
   app.delete("/api/bookings/:id/cancel", customerOnly, cancellations.withdraw);
   app.post("/api/bookings/:id/cancel-payment", customerOnly, cancellations.cancelPayment);
 
-  // Front desk money flows: UC11, UC16, UC35, UC21
-  // SRS 2.4.3 permissions (UC33 lets the manager change them).
+  // Kiểm tra quyền trước các thao tác thanh toán, hủy và hoàn tiền tại quầy.
   const settle = permit("payments.settle"), cancel = permit("bookings.managed.cancel"), review = permit("cancellations.review"), refund = permit("refunds.handle");
   app.post("/api/frontdesk/bookings/:id/payments", settle, payments.finalPayment);
-  // Receptionists (payments.settle) and the Hotel Manager (revenue.read) read the billing lists.
+  // Lễ tân có quyền thu tiền và quản lý có quyền doanh thu được xem danh sách thanh toán.
   const billing = (req, res, next) => (req.role.permissions.includes("revenue.read") ? next() : settle(req, res, next));
   app.get("/api/frontdesk/payments", billing, payments.listing);
   app.get("/api/frontdesk/invoices", billing, invoices.listing);
@@ -276,14 +276,14 @@ function createApp({
   app.put("/api/frontdesk/refunds/:id/account", refund, refunds.setAccount);
   app.post("/api/frontdesk/refunds/:id/contacts", refund, refunds.addContact);
   app.post("/api/frontdesk/refunds/:id", refund, refunds.record);
-  // UC38 Record Damage / Loss Penalty
+  // Ghi nhận và xử lý khoản bồi thường hư hỏng hoặc mất mát.
   const penalize = permit("penalties.record");
   app.get("/api/frontdesk/compensation-items", penalize, penalties.items);
   app.get("/api/frontdesk/bookings/:id/penalties", penalize, penalties.listing);
   app.post("/api/frontdesk/bookings/:id/penalties", penalize, penalties.record);
   app.patch("/api/frontdesk/penalties/:id", penalize, penalties.review);
 
-  // UC27 Deposit & Cancellation Policy, hotel information
+  // Quản lý chính sách đặt cọc, hủy phòng và thông tin khách sạn.
   app.use("/api/policies", permit("policies.manage"));
   app.get("/api/policies/deposit", policies.listing);
   app.post("/api/policies/deposit", policies.create);
@@ -291,7 +291,7 @@ function createApp({
   app.post("/api/policies/cancellation", policies.createCancellation);
   app.put("/api/hotel-info", permit("policies.manage"), policies.updateHotelInfo);
 
-  // Guest contact data is front-desk only (SRS 4.2.4); a Customer session must not read or change other customers.
+  // Chỉ lễ tân được truy cập thông tin liên hệ của khách khác.
   app.use("/api/front-desk/customers", (req, res, next) => permit(req.method === "GET" ? "bookings.managed.read" : "bookings.managed.update")(req, res, next), customerRoutes);
 
   app.get("/api/reports/revenue", permit("revenue.read"), revenue);

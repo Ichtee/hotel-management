@@ -4,7 +4,7 @@ import { DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useEdit
 
 const BEDS = ['King bed', 'Queen bed', '2 single beds', '2 queen beds'];
 
-/* UC24 room types (add, edit, deactivate, delete when nothing is linked) and UC25 seasonal prices. */
+// Quản lý loại phòng và giá theo mùa; chỉ xóa khi không có dữ liệu liên quan.
 export default function AdminRoomTypes() {
   const list = useApi('/room-types?limit=100');
   const E = useEditPage(list.data);
@@ -63,7 +63,7 @@ function RoomTypeForm({ type, onClose, onSaved }) {
       name: f.name.trim(), bedType: f.bedType, description: f.description.trim(),
       roomSizeSqm: Number(f.roomSizeSqm), maxOccupancy: Number(f.maxOccupancy), basePrice: Number(f.basePrice),
       amenities: f.amenities.split(',').map((a) => a.trim()).filter(Boolean),
-      // the first image is the one entered here; other images already on the room type are kept
+      // Thay ảnh đầu tiên và giữ nguyên các ảnh còn lại.
       images: [...(f.image.trim() ? [f.image.trim()] : []), ...(type.images || []).slice(1)],
     };
     setSaving(true); setError(null);
@@ -87,7 +87,7 @@ function RoomTypeForm({ type, onClose, onSaved }) {
   </form></Screen>;
 }
 
-// UC25: rates for date periods; overlapping rates are refused (MSG-60). Existing bookings keep their price (BR-35).
+// Không cho khoảng giá chồng lấn; booking cũ giữ giá đã chốt.
 function SeasonalRates({ type, onClose }) {
   const [rates, setRates] = useState(type.seasonalPricing || []);
   const [error, setError] = useState(null); const [saving, setSaving] = useState(false); const [ok, setOk] = useState(null);

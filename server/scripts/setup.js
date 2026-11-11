@@ -9,7 +9,7 @@ const { seedRoles } = require("../src/services/roles");
 const { hashPassword } = require("../src/utils/password");
 const v = require("../src/utils/validation");
 
-// Explicit one-time setup for a persistent database; never runs at API startup.
+// Khởi tạo database lâu dài bằng lệnh riêng, không tự chạy khi API khởi động.
 async function bootstrap(env) {
   const username = v.username(env.ADMIN_USERNAME);
   const email = v.email(env.ADMIN_EMAIL);

@@ -11,7 +11,7 @@ function getResendClient() {
   return resendInstance;
 }
 
-// For unit testing
+// Cho phép thay bộ gửi trong kiểm thử.
 function setResendClient(client) {
   resendInstance = client;
 }
@@ -28,7 +28,7 @@ function getClientUrl() {
   ).replace(/\/+$/, "");
 }
 
-// The saved Hotel information name (UC27); "GrandStay" when the database is not reachable or empty.
+// Dùng tên khách sạn đã lưu; mặc định GrandStay nếu database trống hoặc không truy cập được.
 async function hotelName() {
   try {
     if (require("mongoose").connection.readyState !== 1) return "GrandStay";
@@ -37,7 +37,7 @@ async function hotelName() {
   } catch { return "GrandStay"; }
 }
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-// "Sunrise Hotel" -> Sunrise<span>Hotel</span>, "GrandStay" -> Grand<span>Stay</span>, same split as the website logo.
+// Tách phần cuối tên để tô màu giống logo trên website.
 function brandHtml(name) {
   const m = name.match(/^(.*\s)(\S+)$/) || name.match(/^(.+?)([A-Z][a-z]+)$/);
   return m ? `${esc(m[1])}<span>${esc(m[2])}</span>` : esc(name);
@@ -175,14 +175,7 @@ function buildVerificationHtml({ fullName, verificationUrl, name = "GrandStay" }
 </html>`;
 }
 
-/**
- * Send an email verification link via Resend.
- * @param {Object} options
- * @param {string} options.email - Recipient email
- * @param {string} options.fullName - Recipient display name
- * @param {string} options.token - Raw verification token
- * @returns {Promise<{ success: boolean, messageId?: string, error?: string, simulated?: boolean }>}
- */
+// Gửi liên kết xác minh email và trả kết quả gửi.
 async function sendVerificationEmail({ email, fullName, token }) {
   const clientUrl = getClientUrl();
   const name = await hotelName();
@@ -196,7 +189,7 @@ async function sendVerificationEmail({ email, fullName, token }) {
       return { success: false, error: err.message, verificationUrl };
     }
   }
-  // SMTP_URL (e.g. Gmail app password) needs no verified domain, so it wins over Resend.
+  // Ưu tiên SMTP đã cấu hình trước Resend.
   if (process.env.SMTP_URL) {
     try {
       const info = await require("nodemailer").createTransport(process.env.SMTP_URL).sendMail({

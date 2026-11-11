@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 const OperationLock = require("../models/OperationLock");
 
-// Tuần tự hóa thay đổi tồn phòng và phân công trong transaction để tránh ghi lệch.
+// Tuần tự hóa thay đổi phòng và phân công trong giao dịch để tránh ghi lệch.
 async function hotelTransaction(work) {
   try {
     await OperationLock.updateOne({ _id: "hotel" }, { $setOnInsert: { version: 0 } }, { upsert: true });

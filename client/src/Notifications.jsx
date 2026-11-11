@@ -10,7 +10,7 @@ const ago = (iso) => {
   return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 };
 
-/* UC13: the signed-in user's notifications (BR-28). Opening one marks it read. */
+// Hiện thông báo của người đăng nhập và đánh dấu đã đọc khi mở.
 export default function NotificationBell({ bookingHref, allHref }) {
   const list = useApi('/notifications');
   const [open, setOpen] = useState(false);
@@ -23,7 +23,8 @@ export default function NotificationBell({ bookingHref, allHref }) {
     return () => { removeEventListener('click', close); removeEventListener('keydown', close); };
   }, []);
   const unread = list.meta?.unread || 0;
-  const read = async (body) => { try { await api('/notifications/read', { method: 'POST', body }); reload(); } catch { /* the list simply stays unread */ } };
+  // Giữ trạng thái chưa đọc nếu cập nhật thất bại.
+  const read = async (body) => { try { await api('/notifications/read', { method: 'POST', body }); reload(); } catch {} };
   const openOne = (n) => { if (!n.isRead) read({ id: n._id }); if (n.bookingId && bookingHref) { location.hash = bookingHref; setOpen(false); } };
   return (
     <div className="bell" ref={ref}>
@@ -57,7 +58,8 @@ export default function NotificationBell({ bookingHref, allHref }) {
 export function NotificationsPage({ bookingHref }) {
   const list = useApi('/notifications');
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const read = async (body) => { try { await api('/notifications/read', { method: 'POST', body }); list.reload(); } catch { /* the list simply stays unread */ } };
+  // Giữ trạng thái chưa đọc nếu cập nhật thất bại.
+  const read = async (body) => { try { await api('/notifications/read', { method: 'POST', body }); list.reload(); } catch {} };
   const unread = list.meta?.unread || 0;
   const items = (list.data || []).filter((n) => !unreadOnly || !n.isRead);
   const open = (n) => { if (!n.isRead) read({ id: n._id }); if (n.bookingId && bookingHref) location.hash = bookingHref; };

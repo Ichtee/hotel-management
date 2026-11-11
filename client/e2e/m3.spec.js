@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 const password = "HotelDemo123!";
-// Waits for the post-login landing page so later navigation is not overridden by the redirect.
+// Chờ chuyển trang sau đăng nhập để tránh ghi đè điều hướng của test.
 async function signIn(page, email, route, landing) {
   await page.goto(route);
   await page.getByRole("textbox", { name: "Email" }).fill(email);
@@ -44,7 +44,7 @@ test("manager validates and saves the deposit policy", async ({ page }) => {
   await expect(page.getByText("Saved. New online reservations now require a 35% deposit.")).toBeVisible();
   await expect(page.locator(".pct")).toHaveText("35%");
 
-  // UC27: a tier closer to check-in may not refund more than an earlier one (MSG-63).
+  // Mốc gần giờ nhận phòng không được hoàn nhiều hơn mốc trước đó.
   const refund = page.getByRole("combobox", { name: "Refund" });
   const saveTiers = page.getByRole("button", { name: "Save cancellation policy" });
   await refund.nth(0).selectOption("0");
@@ -57,7 +57,7 @@ test("manager validates and saves the deposit policy", async ({ page }) => {
   await expect(page.getByText("Saved. New bookings use these tiers")).toBeVisible();
 });
 
-// The deposit test changes the demo data (it pays a seeded booking), so run these against a fresh `npm run demo`.
+// Test thanh toán thay đổi dữ liệu mẫu; chạy với phiên npm run demo mới.
 test("customer pays the deposit: declined once, retried and approved, then the booking is confirmed", async ({ page }) => {
   await signIn(page, "customer@demo.hotel", "/#/login", "My bookings");
   const pending = page.locator("article", { hasText: "BK2610B2" });
@@ -82,7 +82,7 @@ test("customer pays the deposit: declined once, retried and approved, then the b
   await expect(paid.getByRole("link", { name: "Pay deposit" })).toHaveCount(0);
 });
 
-// BR-14: only the deposit is paid online; the balance is settled at the front desk at check-out (UC11).
+// Chỉ trả cọc trực tuyến; phần còn lại thanh toán tại quầy khi trả phòng.
 test("customer cannot pay the balance online and is told to pay it at the front desk", async ({ page }) => {
   await signIn(page, "customer@demo.hotel", "/#/login", "My bookings");
   const booking = page.locator("article", { hasText: "BK2610A1" });
@@ -94,7 +94,7 @@ test("customer cannot pay the balance online and is told to pay it at the front 
   await expect(page.getByText("Only the deposit is paid online.")).toBeVisible();
 });
 
-// UC08 -> UC35 -> UC21 on BK2610A1 (check-in in 14 days: full deposit refund under the 48 h tier).
+// Kiểm tra hủy và hoàn toàn bộ cọc cho booking còn cách ngày nhận phòng 14 ngày.
 test("cancellation and refund: the customer requests, the receptionist approves and records the bank transfer", async ({ page, browser }) => {
   await signIn(page, "customer@demo.hotel", "/#/login", "My bookings");
   const booking = page.locator("article", { hasText: "BK2610A1" });

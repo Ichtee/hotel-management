@@ -2,10 +2,7 @@ const RoomType = require('../models/RoomType');
 const Room = require('../models/Room');
 
 class RoomTypeService {
-  /**
-   * Get all room types, optionally filtered by hotelId or isActive
-   * (UC31 - Manage Room Types)
-   */
+  // Lấy loại phòng theo khách sạn hoặc trạng thái hoạt động.
   async getAllRoomTypes(filter = {}) {
     const query = {};
     if (filter.hotelId) query.hotelId = filter.hotelId;
@@ -13,10 +10,7 @@ class RoomTypeService {
     return RoomType.find(query).sort({ createdAt: -1 });
   }
 
-  /**
-   * Get room type details by ID
-   * (UC06 - View Room Details)
-   */
+  // Lấy chi tiết loại phòng theo mã.
   async getRoomTypeById(id) {
     const roomType = await RoomType.findById(id);
     if (!roomType) {
@@ -27,10 +21,7 @@ class RoomTypeService {
     return roomType;
   }
 
-  /**
-   * Create a new room type
-   * (UC31 - Manage Room Types)
-   */
+  // Tạo loại phòng mới.
   async createRoomType(data) {
     const existing = await RoomType.findOne({ hotelId: data.hotelId, name: data.name });
     if (existing) {
@@ -42,10 +33,7 @@ class RoomTypeService {
     return roomType.save();
   }
 
-  /**
-   * Update room type details
-   * (UC31 - Manage Room Types)
-   */
+  // Cập nhật thông tin loại phòng.
   async updateRoomType(id, data) {
     const roomType = await RoomType.findByIdAndUpdate(id, data, {
       new: true,
@@ -59,12 +47,9 @@ class RoomTypeService {
     return roomType;
   }
 
-  /**
-   * Delete room type (soft delete or verify no rooms are attached)
-   * (UC31 - Manage Room Types)
-   */
+  // Xóa loại phòng khi không còn phòng liên kết.
   async deleteRoomType(id) {
-    // Check if any physical room is using this room type
+    // Kiểm tra phòng đang sử dụng loại phòng này.
     const roomCount = await Room.countDocuments({ roomTypeId: id });
     if (roomCount > 0) {
       const error = new Error(`Cannot delete room type: ${roomCount} room(s) are currently assigned to it. Deactivate instead.`);
@@ -80,14 +65,11 @@ class RoomTypeService {
     return { success: true, message: 'Room type deleted successfully' };
   }
 
-  /**
-   * Manage Seasonal and Dynamic Pricing
-   * (UC32 - Manage Room Prices)
-   */
+  // Quản lý giá theo mùa và khoảng thời gian.
   async updatePricing(id, { basePrice, seasonalPricing }) {
     const update = {};
     const { HttpError } = require('../utils/validation');
-    // BR-01 / CR-20: prices are whole VND amounts greater than 0.
+    // Giá phải là số nguyên đồng lớn hơn không.
     const whole = (n) => typeof n === 'number' && Number.isSafeInteger(n) && n > 0;
     if (basePrice !== undefined) {
       if (!whole(basePrice)) throw new HttpError(400, 'The base price must be a whole amount greater than 0.');
@@ -95,7 +77,7 @@ class RoomTypeService {
     }
     if (seasonalPricing !== undefined) {
       if (!Array.isArray(seasonalPricing)) throw new HttpError(400, 'seasonalPricing must be a list.');
-      // UC25: valid dates and price (MSG-23 / MSG-24), and no two rates of a room type overlap (MSG-60).
+      // Kiểm tra ngày, giá và chặn khoảng giá chồng lấn của cùng loại phòng.
       const spans = seasonalPricing.map((season) => {
         const start = new Date(season.startDate);
         const end = new Date(season.endDate);
@@ -106,7 +88,8 @@ class RoomTypeService {
         return { name: season.description || 'Custom', start, end };
       }).sort((a, b) => a.start - b.start);
       for (let i = 1; i < spans.length; i++)
-        if (spans[i].start <= spans[i - 1].end) // ranges include both days
+        // Khoảng giá tính cả ngày bắt đầu và ngày kết thúc.
+        if (spans[i].start <= spans[i - 1].end)
           throw new HttpError(409, `Rate "${spans[i].name}" overlaps "${spans[i - 1].name}". Change its dates.`);
       update.seasonalPricing = seasonalPricing;
     }
@@ -123,16 +106,12 @@ class RoomTypeService {
     return roomType;
   }
 
-  /**
-   * Calculate effective room price on a specific target date
-   * Considers seasonal price overrides vs base price
-   * (Shared helper for Member 3's Booking calculation)
-   */
+  // Tính giá áp dụng theo ngày, ưu tiên giá mùa rồi đến giá cơ bản.
   async calculatePriceForDate(roomTypeId, targetDate = new Date()) {
     const roomType = await this.getRoomTypeById(roomTypeId);
     const date = new Date(targetDate);
 
-    // Look for matching seasonal rate
+    // Tìm khoảng giá mùa chứa ngày yêu cầu.
     if (roomType.seasonalPricing && roomType.seasonalPricing.length > 0) {
       const matchedSeason = roomType.seasonalPricing.find(season => {
         const start = new Date(season.startDate);

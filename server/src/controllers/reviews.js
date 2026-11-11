@@ -2,7 +2,7 @@ const Booking = require("../models/Booking");
 const Review = require("../models/Review");
 const v = require("../utils/validation");
 
-// UC12: one review per completed stay, always bound to the signed-in customer.
+// Mỗi booking đã hoàn tất chỉ có một đánh giá của đúng khách đăng nhập.
 async function create(req, res) {
   v.keys(req.body, ["rating", "title", "comment"]);
   const booking = await Booking.findOne({ _id: v.id(req.params.id), customerId: req.user._id, status: "checked_out" });

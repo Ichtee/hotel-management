@@ -35,7 +35,8 @@ async function revenue(req, res) {
     Payment.aggregate([
       {
         $match: {
-          status: { $in: ["success", "refunded"] }, // BR-27: Paid or Refunded; refunds are subtracted below
+          // Lấy cả khoản đã thu và đã hoàn; trừ tiền hoàn ở bước sau.
+          status: { $in: ["success", "refunded"] },
           currency: "VND",
           paidAt: { $gte: start, $lt: end },
         },

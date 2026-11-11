@@ -4,8 +4,7 @@ const connectDatabase = require("../src/config/database");
 const User = require("../src/models/User");
 const { seedDemo } = require("./seedDemo");
 
-// One-time: fills an EMPTY cloud database (MONGO_URI, e.g. MongoDB Atlas) with the demo hotel and the demo accounts.
-// Run: MONGO_URI="mongodb+srv://..." npm run seed:cloud --prefix server
+// Nạp dữ liệu demo một lần vào database trống; cấu hình MONGO_URI rồi chạy npm run seed:cloud --prefix server.
 async function main() {
   await connectDatabase();
   if (await User.exists({})) throw new Error(`Database "${mongoose.connection.name}" already has accounts; nothing was changed.`);

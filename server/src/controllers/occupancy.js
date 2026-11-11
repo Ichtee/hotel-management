@@ -6,7 +6,7 @@ const dayMs = 86400000;
 const atStart = (day) => new Date(`${day}T00:00:00+07:00`);
 const dayKey = (date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh" }).format(date);
 
-// T09 / UC28: actual occupied room-nights divided by saleable room-nights.
+// Tính tỷ lệ đêm phòng có khách trên tổng đêm phòng bán được.
 async function occupancy(req, res) {
   v.keys(req.query, ["from", "to"]);
   const today = dayKey(new Date());

@@ -54,7 +54,7 @@ function SiteHeader({ route }) {
                 {open === i && (
                   <ul className="dd-menu">
                     {m.items.map(([h, l, s]) => <li key={l}><a href={h} onClick={done}><strong>{l}</strong>{s && <small>{s}</small>}</a></li>)}
-                    {/* My trips dropdown sign out */ user && m.label === "My trips" && (
+                    {  user && m.label === "My trips" && (
                       <li style={{ borderTop: "1px solid rgba(255,255,255,0.1)", marginTop: 4, paddingTop: 4 }}>
                         <button type="button" onClick={async () => { done(); await signOut(); location.hash = "#/"; }} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", padding: ".5rem 1rem", color: "#ff6b6b", cursor: "pointer", fontSize: ".9rem", fontWeight: 600 }}>Sign out</button>
                       </li>
@@ -119,10 +119,11 @@ function SearchBar({ q = {} }) {
   );
 }
 
-// `q` carries the searched stay ("?in=…&out=…&guests=…"): the card then shows the price of that stay, the rooms left and "Book now" (UC04).
+// Dùng ngày và số khách trong URL để hiện giá, phòng trống và nút đặt phòng.
 function RoomCard({ r, q = '' }) {
   const { user } = useAuth();
-  const canBook = !user || user.scope === 'self'; // staff and Admin accounts do not book online (BR-26)
+  // Nhân viên và Admin không được đặt phòng trực tuyến.
+  const canBook = !user || user.scope === 'self';
   return (
     <article className="c-card">
       <a className="c-media" href={`#/room/${r.id}${q}`} tabIndex={-1} aria-hidden="true">
@@ -144,7 +145,7 @@ function RoomCard({ r, q = '' }) {
 }
 
 let hotelReq;
-// The hotel's own name, city and contact details (Hotel & policies screen), fetched once.
+// Tải một lần thông tin khách sạn để dùng chung trên giao diện.
 function useHotel() {
   const [h, setH] = useState(null);
   useEffect(() => {
@@ -153,7 +154,7 @@ function useHotel() {
       hotelReq.then(setH);
     };
     load();
-    // Hotel information saved: drop the cached copy so the hero and footer show the new name.
+    // Xóa dữ liệu đệm sau khi lưu để đầu trang và chân trang hiện tên mới.
     const again = () => { hotelReq = null; load(); };
     addEventListener('hotel-info-saved', again);
     return () => removeEventListener('hotel-info-saved', again);
@@ -197,7 +198,7 @@ function Home() {
         setReviews(lists.flat().slice(0, 3));
       }
     } catch {
-      // Fallback
+      // Dùng dữ liệu dự phòng khi tải thông tin thất bại.
     }
   };
 
@@ -293,8 +294,7 @@ function Offers() {
   );
 }
 
-// Room-type card shape used by the room list, detail and checkout pages. A search result also has the price of the
-// stay, its nights and the rooms left (GET /public/availability).
+// Chuẩn hóa dữ liệu loại phòng dùng chung cho danh sách, chi tiết và đặt phòng.
 const toCard = (rt) => ({
   id: rt._id, _id: rt._id, name: rt.name, price: rt.basePrice, guests: rt.maxOccupancy,
   bed: rt.bedType || '', size: rt.roomSizeSqm || null, amenities: rt.amenities || [],
@@ -303,7 +303,7 @@ const toCard = (rt) => ({
 });
 const availability = (d) => api(`/public/availability?${new URLSearchParams({ checkIn: d.in, checkOut: d.out, guests: d.guests || 1 })}`).then((res) => res.data || []);
 
-// The amenity tags are typed by the Hotel Manager (Room types); the filter groups them without caring about case or spaces.
+// Gộp tiện nghi mà không phân biệt chữ hoa hoặc khoảng trắng.
 const tagKey = (t) => t.trim().toLowerCase();
 const NO_FILTER = { text: '', min: '', max: '', size: '', guests: '', beds: [], tags: [], sort: 'price_asc' };
 const SORTS = { price_asc: ['Price: low to high', (a, b, cost) => cost(a) - cost(b)], price_desc: ['Price: high to low', (a, b, cost) => cost(b) - cost(a)], size_desc: ['Largest first', (a, b) => (b.size || 0) - (a.size || 0)], guests_desc: ['Most guests first', (a, b) => b.guests - a.guests], name: ['Name A-Z', (a, b) => a.name.localeCompare(b.name)] };
@@ -311,7 +311,7 @@ function Rooms({ q }) {
   const [f, setF] = useState(NO_FILTER);
   const [state, setState] = useState({ rooms: null, error: '' });
 
-  // With dates: only room types that still have a free room for the whole stay (UC04). Without dates: every active room type.
+  // Có ngày tìm kiếm thì chỉ lấy loại phòng còn trống suốt kỳ; nếu không, lấy mọi loại đang hoạt động.
   useEffect(() => {
     setState({ rooms: null, error: '' });
     (q.in && q.out ? availability(q) : api('/public/room-types').then((res) => res.data || []))
@@ -324,7 +324,7 @@ function Rooms({ q }) {
   const cost = (r) => (searched ? r.stayAmount : r.price);
   const set = (patch) => setF({ ...f, ...patch });
   const toggle = (key, value) => set({ [key]: f[key].includes(value) ? f[key].filter((x) => x !== value) : [...f[key], value] });
-  // Filter options come from the rooms themselves, so a tag the manager adds shows up here without a code change.
+  // Tạo bộ lọc từ tiện nghi thực tế để tự nhận mục quản lý vừa thêm.
   const tags = [...new Map(rooms.flatMap((r) => r.amenities).map((t) => [tagKey(t), t.trim()])).values()].sort((x, y) => x.localeCompare(y));
   const beds = [...new Set(rooms.map((r) => r.bed).filter(Boolean))].sort();
   const sizes = [...new Set(rooms.map((r) => r.size).filter(Boolean))].sort((x, y) => x - y);
@@ -350,7 +350,7 @@ function Rooms({ q }) {
       <SearchBar key={route0(q)} q={q} />
       {!searched && <p className="muted">Choose your dates and search to see prices, rooms left and book.</p>}
       <div className="c-layout">
-        {/* On a phone the filters start folded so the rooms come first; on a wide screen they start open. */}
+        {/* Thu gọn bộ lọc trên điện thoại để ưu tiên danh sách phòng. */}
         <details className="panel filters" open={window.matchMedia('(min-width: 1000px)').matches}>
           <summary><h2>Filters{active > 0 ? ` (${active})` : ''}</h2></summary>
           <label>Search by name<input type="search" value={f.text} onChange={(e) => set({ text: e.target.value })} placeholder="e.g. Suite" /></label>
@@ -380,7 +380,7 @@ function Rooms({ q }) {
   );
 }
 
-// Room types are public (no staff endpoint), so customers always see the real name, photos and price.
+// Lấy loại phòng qua API công khai để khách thấy giá và hình ảnh thực tế.
 function useRoomType(id) {
   const [state, setState] = useState({ room: null, loading: true });
   useEffect(() => {
@@ -401,7 +401,7 @@ function RoomDetail({ id, q }) {
   const policies = usePolicies();
   const nights = nightsBetween(d.in, d.out);
   const set = (k) => (e) => setD({ ...d, [k]: e.target.value });
-  // UC05: the price of the selected dates and the rooms left; "Book now" only while the room type is available (BR-10).
+  // Chỉ cho đặt khi còn phòng trong khoảng ngày đã chọn.
   const [stay, setStay] = useState({ loading: true });
   useEffect(() => {
     if (!nights) { setStay({}); return undefined; }
@@ -462,7 +462,7 @@ function RoomDetail({ id, q }) {
   );
 }
 
-// UC07: Make Reservation (Core)
+// Tạo booking từ lựa chọn của khách.
 function Checkout({ q, user }) {
   const { user: authUser } = useAuth();
   const currentUser = user || authUser;
@@ -471,8 +471,7 @@ function Checkout({ q, user }) {
   const policies = usePolicies();
   const nights = nightsBetween(q.in, q.out);
   const [saving, setSaving] = useState(false);
-  // UC06 steps 2-4: the server prices the stay (every night at its rate, coupon, deposit). A coupon that is not valid is
-  // reported and the booking continues without the discount (4a).
+  // Máy chủ tính giá từng đêm, giảm giá và cọc; mã không hợp lệ thì tiếp tục với giá gốc.
   const [typed, setTyped] = useState(q.coupon || ''); const [coupon, setCoupon] = useState(q.coupon || '');
   const [quote, setQuote] = useState({ loading: true });
   useEffect(() => {
@@ -485,7 +484,7 @@ function Checkout({ q, user }) {
   const price = quote.data;
   const [error, setError] = useState('');
   const [token, setToken] = useState(''); const [tries, setTries] = useState(0);
-  // UC06 steps 3-5: contact data (pre-filled from the profile), privacy consent (CR-21) and CAPTCHA (BR-29).
+  // Điền liên hệ từ hồ sơ, yêu cầu đồng ý chính sách và CAPTCHA trước khi đặt.
   const confirm = async (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
@@ -498,7 +497,7 @@ function Checkout({ q, user }) {
         guestCount: Number(q.guests), couponCode: coupon && !price?.couponError ? coupon : undefined,
         fullName: f.fullName, email: f.email, phone: f.phone, consent: f.consent === 'on', captchaToken: token || undefined,
       } });
-      // A pending booking goes straight to the deposit payment (UC10); one with nothing to pay is already confirmed.
+      // Booking chờ cọc chuyển sang thanh toán; booking không cần cọc được xác nhận ngay.
       location.hash = created.data.status === 'pending' ? `#/pay/${created.data._id}?kind=deposit` : `#/confirmation?${new URLSearchParams({ ref: created.data.bookingReference })}`;
     } catch (err) { setError(err.message || 'Unable to create your booking.'); setTries((t) => t + 1); }
     finally { setSaving(false); }
@@ -608,7 +607,7 @@ function Auth({ note }) {
   );
 }
 
-// Target of the link in the verification email: #/verify-email?token=…&email=…
+// Xử lý liên kết xác minh email có token và địa chỉ email.
 function VerifyEmail({ token, email }) {
   const [state, setState] = useState({ busy: true });
   useEffect(() => {
@@ -626,7 +625,7 @@ function VerifyEmail({ token, email }) {
   );
 }
 
-// Target of the link in the password-reset e-mail: #/reset-password?token=…&email=…
+// Xử lý liên kết đặt lại mật khẩu có token và địa chỉ email.
 function ResetPassword({ token, email }) {
   return (
     <AuthShell>

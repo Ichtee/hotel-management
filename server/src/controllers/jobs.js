@@ -2,7 +2,7 @@ const { createHash, timingSafeEqual } = require("node:crypto");
 const v = require("../utils/validation");
 const { jobs } = require("../services/jobs");
 const digest = (s) => createHash("sha256").update(String(s)).digest();
-// SDS endpoint 82: an external cron runs a job with the JOB_SECRET header. Off when JOB_SECRET is not set.
+// Chạy tác vụ từ cron qua header X-Job-Secret; tắt endpoint nếu chưa có JOB_SECRET.
 async function run(req, res) {
   const secret = process.env.JOB_SECRET;
   if (!secret || !Object.hasOwn(jobs, req.params.name)) throw new v.HttpError(404, "Endpoint not found.");

@@ -16,8 +16,7 @@ async function create(req, res) {
   const quantity = req.body.quantity === undefined || req.body.quantity === "" ? 1 : Number(req.body.quantity);
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 20) v.fail("Quantity must be a whole number from 1 to 20.", "quantity");
   const input = { roomId: v.id(req.body.roomId, "roomId"), title: v.text(req.body.title, "title", 2, 120), description: v.text(req.body.description, "description", 0, 2000), severity: v.choice(req.body.severity, "severity", ["low", "medium", "high"]) };
-  // UC31 (a): a damaged / missing item alone is only a Proposed penalty. No room issue is opened for it, so the room is not
-  // sent to Maintenance at check-out (BR-05 is for a room that cannot be used).
+  // Hư hỏng vật phẩm chỉ tạo bồi thường đề xuất; không đưa phòng vào bảo trì nếu vẫn sử dụng được.
   if (chargeItemId && input.severity !== "high") {
     if (!(await Room.exists({ _id: input.roomId }))) throw new v.HttpError(404, "Room not found.");
     return res.status(201).json({ data: { issue: null, maintenanceApplied: false, penalty: await proposePenalty(input, chargeItemId, req.user._id, quantity) } });
@@ -30,7 +29,7 @@ async function create(req, res) {
     let maintenanceApplied = false;
     if (input.severity === "high" && ["available", "cleaning"].includes(room.status)) {
       const before = room.toObject();
-      // The capacity check detects an upcoming booking shortfall before this room is removed from sale.
+      // Kiểm tra thiếu phòng cho booking sắp tới trước khi đưa phòng ra khỏi nguồn bán.
       let shortfall = false;
       try { await assertCapacity(room.roomTypeId, room._id, session); } catch { shortfall = true; }
       room.status = "maintenance";
@@ -62,8 +61,7 @@ async function options(_req, res) {
   res.json({ data, meta: { compensationItems } });
 }
 
-// UC31 -> UC38: damage or a missing item caused by the guest becomes a Proposed penalty on the stay in the room
-// (or, found at turnover, on the last checked-out stay, step 4b) for the Receptionist to confirm or waive (BR-43).
+// Gắn bồi thường đề xuất vào booking đang ở hoặc lần trả phòng gần nhất để lễ tân xử lý.
 async function proposePenalty(issue, itemId, reportedBy, quantity = 1) {
   const item = await CompensationItem.findOne({ _id: itemId, isActive: true });
   if (!item) throw new v.HttpError(404, "Compensation item not found.");

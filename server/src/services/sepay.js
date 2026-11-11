@@ -1,14 +1,12 @@
 const { createHmac, createHash, timingSafeEqual } = require("node:crypto");
-// SePay Payment Gateway adapter: https://developer.sepay.vn/vi/cong-thanh-toan/bat-dau
-// Env: SEPAY_ENV (sandbox|production), SEPAY_MERCHANT_ID, SEPAY_SECRET_KEY, PUBLIC_URL.
-// Optional overrides because the docs disagree on the sandbox host: SEPAY_CHECKOUT_URL, SEPAY_API_URL.
+// Kết nối SePay theo môi trường và khóa cấu hình; cho phép ghi đè URL cổng khi cần.
 const HOSTS = {
   sandbox: { checkout: "https://pay-sandbox.sepay.vn/v1/checkout/init", api: "https://pgapi-sandbox.sepay.vn" },
   production: { checkout: "https://pay.sepay.vn/v1/checkout/init", api: "https://pgapi.sepay.vn" },
 };
-// Our method names -> SePay payment_method values.
+// Ánh xạ phương thức nội bộ sang giá trị SePay yêu cầu.
 const METHOD = { bank_transfer: "BANK_TRANSFER", e_wallet: "NAPAS_BANK_TRANSFER", credit_card: "CARD" };
-// Field order matters: SePay rejects the form when the signature is built in another order.
+// Giữ đúng thứ tự trường khi ký để SePay chấp nhận biểu mẫu.
 const SIGN_ORDER = ["order_amount", "merchant", "currency", "operation", "order_description", "order_invoice_number", "customer_id", "payment_method", "success_url", "error_url", "cancel_url"];
 
 function config() {
@@ -17,15 +15,14 @@ function config() {
   const hosts = HOSTS[process.env.SEPAY_ENV === "production" ? "production" : "sandbox"];
   return { merchantId, secret, checkoutUrl: process.env.SEPAY_CHECKOUT_URL || hosts.checkout, apiUrl: process.env.SEPAY_API_URL || hosts.api };
 }
-// Payment methods this deployment offers, e.g. SEPAY_METHODS=bank_transfer,credit_card (default: bank transfer only).
+// Lấy phương thức từ SEPAY_METHODS, mặc định chỉ chuyển khoản ngân hàng.
 const methods = () => (process.env.SEPAY_METHODS || "bank_transfer").split(",").map((m) => m.trim()).filter((m) => METHOD[m]);
 
 function signature(fields, secret) {
   const data = SIGN_ORDER.filter((k) => fields[k] !== undefined && fields[k] !== "").map((k) => `${k}=${fields[k]}`).join(",");
   return createHmac("sha256", secret).update(data).digest("base64");
 }
-// Everything the browser must POST to SePay's checkout. The secret key never leaves the server.
-// Redirects are cosmetic: they only open the result screen, the IPN or a lookup decides the outcome.
+// Tạo biểu mẫu đã ký, giữ khóa bí mật ở máy chủ; kết quả dựa trên thông báo cổng hoặc tra cứu.
 function checkout(payment, booking) {
   const cfg = config();
   const base = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
@@ -46,7 +43,7 @@ function checkout(payment, booking) {
   };
   return { action: cfg.checkoutUrl, fields: { ...fields, signature: signature(fields, cfg.secret) } };
 }
-// The IPN carries only a static key, so callers confirm it with retrieveOrder before trusting it.
+// Thông báo dùng khóa cố định; nơi gọi có thể kiểm tra thêm bằng retrieveOrder.
 function isIpnKey(header) {
   const digest = (s) => createHash("sha256").update(String(s ?? "")).digest();
   return timingSafeEqual(digest(header), digest(config().secret));
@@ -60,7 +57,7 @@ async function retrieveOrder(invoice) {
   if (!res.ok) throw new Error(`SePay order lookup failed with ${res.status}.`);
   return (await res.json()).data;
 }
-// SePay is on when PAYMENT_PROVIDER=sepay, or when it is unset and the SePay keys are filled in.
+// Bật SePay khi chọn rõ nhà cung cấp hoặc khi có đủ khóa và chưa chọn cổng khác.
 const enabled = () => process.env.PAYMENT_PROVIDER === "sepay"
   || (!process.env.PAYMENT_PROVIDER && Boolean(process.env.SEPAY_MERCHANT_ID && process.env.SEPAY_SECRET_KEY));
 module.exports = { enabled, METHOD, signature, checkout, isIpnKey, retrieveOrder, methods };

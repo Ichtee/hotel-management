@@ -1,4 +1,4 @@
-/* ---------- Admin shell & dashboard ---------- */
+/* Bố cục quản trị và bảng điều khiển. */
 :root { --series-1: #2a78d6; --series-2: #9aa4b2; }
 .adm { display: grid; min-height: 100vh; background: #f1f4f8; }
 .side { position: fixed; inset: 0 auto 0 0; width: 260px; z-index: 30; background: var(--navy); color: #cfd9e6; display: flex; flex-direction: column; padding: 1rem .75rem; transform: translateX(-100%); transition: transform .25s; overflow: hidden; }
@@ -102,7 +102,7 @@
 }
 @media (prefers-reduced-motion: reduce) { .side { transition: none; } }
 
-/* ---------- Data pages: filters, dialogs, notices ---------- */
+/* Bộ lọc, hộp thoại và thông báo trên trang dữ liệu. */
 .filters-row { display: flex; flex-wrap: wrap; gap: .75rem; align-items: end; margin-bottom: 1rem; }
 .filters-row .grow { flex: 1; min-width: 180px; }
 .row-actions .btn, .queue .btn { white-space: nowrap; flex-shrink: 0; }
@@ -132,7 +132,7 @@
 .form { align-content: start; }
 .two { align-items: start; }
 
-/* ---------- Login / register ---------- */
+/* Giao diện đăng nhập và đăng ký. */
 .split { display: grid; min-height: calc(100vh - 61px); background: #fff; }
 .split.staff { min-height: 100vh; }
 .split-side { display: none; }
@@ -170,7 +170,7 @@
 .split-card .form.one { width: 100%; }
 .split-main { place-items: start center; padding-top: clamp(2rem, 12vh, 7rem); }
 
-/* Live dashboard, queues, row menus */
+/* Bảng điều khiển, hàng đợi và menu thao tác. */
 .atop-gap { flex: 1; }
 .kpi { display: grid; gap: .15rem; }
 .kpi-link { text-decoration: none; color: inherit; transition: border-color .15s, box-shadow .15s; }
@@ -189,7 +189,7 @@
 .qgrid { display: grid; gap: .85rem; margin-bottom: .85rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
 .qgrid .qfull { grid-column: 1 / -1; }
 
-/* Room map: one row of status filters (buttons, keyboard reachable); the dot doubles as the colour key. */
+/* Bộ lọc trạng thái phòng có nhãn và hỗ trợ bàn phím. */
 .room-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: .6rem; margin-bottom: 1.25rem; }
 .room-filter { display: grid; gap: .1rem; min-height: 64px; padding: .6rem .9rem; text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 12px; color: var(--text); cursor: pointer; transition: border-color .15s, background .15s; }
 .room-filter:hover { border-color: var(--navy); }

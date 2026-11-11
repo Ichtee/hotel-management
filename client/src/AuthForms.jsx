@@ -10,7 +10,7 @@ const EYE = 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z M12 15a3 3 0 1 0 0-6 3
 const EYE_OFF = 'M3 3l18 18 M10.6 6.1A9.8 9.8 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.2 4 M6.6 6.6A17 17 0 0 0 2 12s4 7 10 7a9.7 9.7 0 0 0 4.4-1';
 const CHECK = 'M20 6L9 17l-5-5';
 
-// Split layout: brand panel + form card. `staff` swaps the copy for the admin portal.
+// Dùng chung bố cục đăng nhập, đổi nội dung theo cổng khách hoặc nhân viên.
 export function AuthShell({ staff, children }) {
   const hotelName = useHotelName();
   const points = staff
@@ -67,7 +67,7 @@ function PasswordField({ label, name, error, autoComplete, onChange, minLength, 
   );
 }
 
-// Google reCAPTCHA v2 checkbox; the site key comes from the server (Google's test key when none is configured).
+// Lấy khóa reCAPTCHA từ máy chủ; dùng khóa thử nghiệm nếu chưa cấu hình.
 export function Captcha({ onToken, resetKey }) {
   const box = useRef(null); const widget = useRef(null);
   useEffect(() => {
@@ -95,7 +95,8 @@ export function SignIn({ onDone, hint, onForgot }) {
     const f = Object.fromEntries(new FormData(e.target));
     setBusy(true); setResent(null);
     try { await signIn({ email: f.email, password: f.password, captchaToken: token || undefined }); setErr(null); onDone(); }
-    catch (x) { setErr(x); setUnverified(x.code === 'EMAIL_NOT_VERIFIED' ? f.email : null); setBusy(false); setTries((t) => t + 1); } // a token is single-use
+    // Mỗi token CAPTCHA chỉ dùng một lần.
+    catch (x) { setErr(x); setUnverified(x.code === 'EMAIL_NOT_VERIFIED' ? f.email : null); setBusy(false); setTries((t) => t + 1); }
   };
   const resend = async () => {
     try { setResent({ ok: (await api('/auth/resend-verification', { method: 'POST', body: { email: unverified } })).data.message }); }
@@ -127,7 +128,7 @@ export function SignIn({ onDone, hint, onForgot }) {
   );
 }
 
-// With `link` ({ email, token } from the e-mailed link) the form asks only for the new password.
+// Liên kết đặt lại mật khẩu đã có email và token nên chỉ yêu cầu mật khẩu mới.
 export function ForgotPassword({ onDone, onCancel, link }) {
   const step = link ? 'reset' : 'request';
   const [email, setEmail] = useState(link?.email || '');
@@ -162,7 +163,7 @@ export function ForgotPassword({ onDone, onCancel, link }) {
     setErr(null);
     const f = Object.fromEntries(new FormData(e.target));
 
-    if (!RULES.every(([, ok]) => ok(f.newPassword || ''))) { // CR-12
+    if (!RULES.every(([, ok]) => ok(f.newPassword || ''))) {
       setErr({ message: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.', fields: { newPassword: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.' } });
       return;
     }
@@ -296,7 +297,7 @@ export function Register({ onDone, hint }) {
     }
 
     const phone = (f.phone || '').trim();
-    if (!/^(\d{10,11}|\+\d{8,15})$/.test(phone)) { // CR-04
+    if (!/^(\d{10,11}|\+\d{8,15})$/.test(phone)) {
       setErr({
         message: 'Phone number must have 10 to 11 digits, or + and 8 to 15 digits with the country code.',
         fields: { phone: 'Phone number must have 10 to 11 digits, or + and 8 to 15 digits with the country code.' }
@@ -304,7 +305,7 @@ export function Register({ onDone, hint }) {
       return;
     }
 
-    if (!RULES.every(([, ok]) => ok(f.password || ''))) { // CR-12
+    if (!RULES.every(([, ok]) => ok(f.password || ''))) {
       setErr({ message: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.', fields: { password: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.' } });
       return;
     }
@@ -318,8 +319,9 @@ export function Register({ onDone, hint }) {
     }
 
     try {
-      await api('/auth/register', { method: 'POST', body: { ...f, consent: f.consent === 'on' } }); // CR-21
-      onDone(f.email); // the account must verify its email before it can sign in
+      await api('/auth/register', { method: 'POST', body: { ...f, consent: f.consent === 'on' } });
+      // Tài khoản phải xác minh email trước khi đăng nhập.
+      onDone(f.email);
 
     } catch (x) {
       setErr(x);

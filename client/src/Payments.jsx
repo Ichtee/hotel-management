@@ -28,7 +28,7 @@ function useCountdown(until) {
 }
 const Back = () => <p><a href="#/my-bookings">← Back to my bookings</a></p>;
 
-// SePay checkout is a plain form POST to the gateway's own domain; the server already signed the fields.
+// Gửi biểu mẫu đã được máy chủ ký trực tiếp đến cổng SePay.
 function postForm({ action, fields }) {
   const form = Object.assign(document.createElement('form'), { method: 'POST', action });
   for (const [name, value] of Object.entries(fields)) form.append(Object.assign(document.createElement('input'), { type: 'hidden', name, value }));
@@ -36,10 +36,11 @@ function postForm({ action, fields }) {
   form.submit();
 }
 
-// Payment screen (UC10). BR-14: the deposit is the only online payment; the balance is paid at the front desk (UC11).
+// Chỉ trả cọc trực tuyến; số tiền còn lại thanh toán tại quầy.
 export function PaymentPage({ id, kind }) {
   const s = useApi(`/bookings/${id}`, kind === 'deposit');
-  const offered = useApi('/payments/methods'); // which methods this deployment's gateway offers
+  // Lấy các phương thức mà cổng thanh toán hiện tại hỗ trợ.
+  const offered = useApi('/payments/methods');
   const [picked, setMethod] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
@@ -106,7 +107,7 @@ export function PaymentPage({ id, kind }) {
   );
 }
 
-// Sandbox stand-in for the gateway's hosted checkout. A real provider replaces this page.
+// Trang thanh toán giả lập để thử nghiệm, không chuyển tiền thật.
 export function SandboxGateway({ orderId, paymentId }) {
   const s = useApi(paymentId ? `/payments/${paymentId}` : '', Boolean(paymentId));
   const [busy, setBusy] = useState(null);
@@ -153,7 +154,7 @@ export function SandboxGateway({ orderId, paymentId }) {
   );
 }
 
-// Payment Result screen. The gateway's callback may land a moment after the redirect, so poll briefly while pending.
+// Thăm dò ngắn khi còn chờ vì thông báo từ cổng có thể đến sau chuyển hướng.
 export function PaymentResult({ paymentId, back }) {
   const s = useApi(paymentId ? `/payments/${paymentId}` : '', Boolean(paymentId));
   const [tries, setTries] = useState(0);

@@ -1,4 +1,4 @@
-/** Room and inventory API client. */
+// Gọi API quản lý phòng và tình trạng trống.
 
 const API_BASE = '/api';
 
@@ -14,20 +14,20 @@ async function request(endpoint, options = {}) {
     }
     return await res.json();
   } catch (error) {
-    // If backend is not running or network fails, log info and throw for caller fallback
+    // Ghi lỗi kết nối rồi chuyển lỗi cho nơi gọi xử lý.
     console.warn(`[roomApi] Failed ${options.method || 'GET'} ${endpoint}:`, error.message);
     throw error;
   }
 }
 
 export const roomApi = {
-  // --- Room Types (UC31, UC06, UC32) ---
+  // Lấy danh sách loại phòng.
   async getRoomTypes(params = {}) {
     const q = new URLSearchParams(params).toString();
     return request(`/public/room-types${q ? '?' + q : ''}`).catch(() => request(`/room-types${q ? '?' + q : ''}`));
   },
 
-  // --- Rooms & Room Map (UC30, UC05) ---
+  // Lấy danh sách phòng theo bộ lọc.
   async getRooms(params = {}) {
     const q = new URLSearchParams(params).toString();
     return request(`/rooms${q ? '?' + q : ''}`);
@@ -40,7 +40,7 @@ export const roomApi = {
     });
   },
 
-  // UC23: the manager only switches Maintenance on or off; other statuses follow check-in, check-out and cleaning (BR-04, BR-05).
+  // Chỉ đổi bảo trì thủ công; trạng thái khác theo nhận, trả và dọn phòng.
   async updateRoomStatus(id, status) {
     return request(`/rooms/${id}/maintenance`, {
       method: 'PATCH',
@@ -48,7 +48,7 @@ export const roomApi = {
     });
   },
 
-  // UC23 3c: rooms are deactivated, never deleted, so past bookings keep their room.
+  // Vô hiệu hóa phòng để giữ nguyên lịch sử booking.
   async deleteRoom(id) {
     return request(`/rooms/${id}`, {
       method: 'PATCH',

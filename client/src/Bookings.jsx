@@ -8,7 +8,7 @@ const UPCOMING = ['pending', 'confirmed', 'checked_in', 'cancellation_requested'
 const nightsOf = (a, b) => Math.max(1, Math.round((new Date(b) - new Date(a)) / 864e5));
 const part = (d, opt) => new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', ...opt }).format(new Date(d));
 const roomNames = (b) => b.rooms.map((r) => r.roomTypeId?.name).filter(Boolean).join(', ') || 'Room';
-// UC12: a pending booking whose 15-minute hold is still running and whose deposit is unpaid.
+// Cho trả cọc khi booking còn trong thời gian giữ phòng 15 phút.
 const depositDue = (b) => b.status === 'pending' && b.depositRequired > 0 && b.holdExpiresAt && new Date(b.holdExpiresAt) > new Date() && !(b.paidAmount > 0);
 const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
@@ -23,11 +23,11 @@ const Empty = ({ title, text, href, cta }) => (
 const Failed = ({ s }) => <div className="empty"><Notice error={s.error} /><button className="btn" onClick={s.reload}>Try again</button></div>;
 const Row = ({ k, children }) => <><dt>{k}</dt><dd>{children}</dd></>;
 const REFUND = { requested: 'Waiting for refund', completed: 'Refunded' };
-// "48 h or more before check-in: 100% refund" for tiers sorted from the longest time.
+// Hiển thị các mốc hoàn tiền từ xa đến gần giờ nhận phòng.
 const tierText = (t, i, all) =>
   `${t.minHoursBeforeCheckIn > 0 ? `${t.minHoursBeforeCheckIn} h or more before check-in` : i > 0 ? `Less than ${all[i - 1].minHoursBeforeCheckIn} h before check-in` : 'Any time'}: ${t.refundPercent ? 'full refund' : 'no refund'}`;
 
-// UC08 steps 2-5: the estimated refund under the booking's policy, then the request.
+// Ước tính tiền hoàn theo chính sách đã lưu trước khi gửi yêu cầu hủy.
 function CancelPanel({ id, onDone }) {
   const est = useApi(`/bookings/${id}/refund-estimate`);
   const [reason, setReason] = useState('');
@@ -58,7 +58,7 @@ function CancelPanel({ id, onDone }) {
   );
 }
 
-// UC11: stay, charges, payments and refund status of one booking.
+// Hiển thị thông tin lưu trú, chi phí, thanh toán và hoàn tiền của booking.
 function Details({ id, startCancel, onChanged }) {
   const s = useApi(`/bookings/${id}`);
   const [cancelling, setCancelling] = useState(startCancel);
@@ -72,7 +72,7 @@ function Details({ id, startCancel, onChanged }) {
   const b = s.data;
   const due = Math.max(0, b.totalAmount - b.paidAmount);
   const canDeposit = depositDue(b);
-  // BR-14: only the deposit is paid online; the balance is settled at the front desk at check-out.
+  // Chỉ cọc được thanh toán trực tuyến; phần còn lại trả tại quầy.
   const payAtDesk = ['confirmed', 'checked_in'].includes(b.status) && due > 0;
   return (
     <div className="panel details" id={`details-${id}`}>
@@ -189,7 +189,7 @@ function Details({ id, startCancel, onChanged }) {
   );
 }
 
-// UC07: the stay dates, the number of guests and the contact data; the room type stays the same (cancel and book again).
+// Cho sửa ngày, số khách và liên hệ; đổi loại phòng cần hủy rồi đặt lại.
 function ModifyModal({ booking, onClose, onSaved }) {
   const [inDate, setInDate] = useState(inputDate(booking.checkInDate));
   const [outDate, setOutDate] = useState(inputDate(booking.checkOutDate));
@@ -276,7 +276,7 @@ function ModifyModal({ booking, onClose, onSaved }) {
   );
 }
 
-// Modal for confirming cancellation
+// Xác nhận yêu cầu hủy booking.
 function CancelModal({ booking, onClose, onCancelled }) {
   const isPending = booking.status === 'pending';
   const [reason, setReason] = useState('Change of travel plans');
@@ -289,13 +289,13 @@ function CancelModal({ booking, onClose, onCancelled }) {
     setErr(null);
     try {
       if (isPending) {
-        // BR-29: Abandon payment and release 15-min hold immediately
+        // Bỏ thanh toán và giải phóng phòng đang giữ ngay lập tức.
         await api(`/bookings/${booking._id}/cancel-payment`, {
           method: 'POST'
         });
         onCancelled(`Reservation hold for ${booking.bookingReference || ''} has been cancelled and room released.`);
       } else {
-        // UC08 / BR-16, BR-17, BR-32: Cancellation with tiered refund policy
+        // Áp dụng mức hoàn tiền theo thời điểm hủy.
         await api(`/bookings/${booking._id}/cancel`, {
           method: 'POST',
           body: { reason }
@@ -341,7 +341,7 @@ function CancelModal({ booking, onClose, onCancelled }) {
   );
 }
 
-// Modal for submitting a review (UC12, BR-23)
+// Gửi đánh giá sau khi lưu trú.
 function ReviewModal({ booking, onClose, onSaved }) {
   const [rating, setRating] = useState(5);
   const [title, setTitle] = useState('');
@@ -442,8 +442,7 @@ function ReviewModal({ booking, onClose, onSaved }) {
   );
 }
 
-// UC39: before arriving, a check-in request with the pre-registration data; during the stay, a check-out request.
-// A request without early check-in / late check-out is approved at once (BR-44).
+// Gửi yêu cầu nhận hoặc trả phòng; tự duyệt nếu không nhận sớm hay trả muộn.
 function StayRequestModal({ booking, type, onClose, onSaved }) {
   const isIn = type === 'check_in';
   const day = inputDate(isIn ? booking.checkInDate : booking.checkOutDate);
@@ -455,7 +454,8 @@ function StayRequestModal({ booking, type, onClose, onSaved }) {
       const file = isIn && f.idFile;
       if (file?.size) {
         if (file.size > 5e6 || !/^image\/(jpeg|png)$/.test(file.type)) throw new Error('The ID photo must be a JPG or PNG file of at most 5 MB.');
-        const p = (await api(`/bookings/${booking._id}/id-photo-upload`)).data; // signed: goes straight to Cloudinary, private
+        // Tải ảnh riêng tư trực tiếp lên Cloudinary bằng chữ ký máy chủ.
+        const p = (await api(`/bookings/${booking._id}/id-photo-upload`)).data;
         const fd = new FormData(); fd.append('file', file);
         for (const [k, val] of [['api_key', p.apiKey], ['timestamp', p.timestamp], ['folder', p.folder], ['type', p.type], ['format', p.format], ['signature', p.signature]]) fd.append(k, val);
         const up = await fetch(`https://api.cloudinary.com/v1_1/${p.cloudName}/image/upload`, { method: 'POST', body: fd });
@@ -488,7 +488,7 @@ function StayRequestModal({ booking, type, onClose, onSaved }) {
   );
 }
 
-// UC10: a customer's own bookings, split into upcoming and past.
+// Chia booking của khách thành kỳ sắp tới và đã qua.
 export function MyBookings() {
   const [tab, setTab] = useState('upcoming');
   const [notice, setNotice] = useState(null);
@@ -501,7 +501,7 @@ export function MyBookings() {
   const counts = { upcoming: all.filter(isUp).length, past: all.filter((b) => !isUp(b)).length };
   const list = all.filter((b) => isUp(b) === (tab === 'upcoming'));
 
-  // BR-36: Withdraw cancellation request — restore booking to confirmed
+  // Rút yêu cầu hủy và khôi phục booking đã xác nhận.
   const withdraw = async (booking) => {
     if (!window.confirm(`Are you sure you want to withdraw the cancellation request for ${booking.bookingReference}?`)) return;
     try {
@@ -613,7 +613,7 @@ function InvoiceScreen({ id, onClose }) {
 
 function CustomerInvoice({ invoice, onClose }) {
   const b = invoice.bookingId;
-  // BR-21: the lines copied when the invoice was issued; older invoices fall back to the booking totals.
+  // Ưu tiên các dòng hóa đơn đã chốt; hóa đơn cũ dùng tổng tiền booking.
   const rows = invoice.lines?.length
     ? [...invoice.lines.map((l) => [l.name.replace(/Night of (\d{4}-\d{2}-\d{2})/, (_, d) => `Night of ${dateLabel(d)}`), money(l.amount)]), ['Total', money(invoice.totalAmount)], ['Paid', money(invoice.paidAmount ?? invoice.totalAmount)], ['Balance', money(invoice.balance ?? 0)]]
     : [['Room charges', money(b.roomAmount)], ['Additional services', money(b.serviceAmount)], ['Total paid', money(invoice.totalAmount)]];

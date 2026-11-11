@@ -2,7 +2,7 @@ const AuditLog = require("../models/AuditLog");
 const User = require("../models/User");
 const v = require("../utils/validation");
 
-// UC32 step 5: the Admin reads the audit log (read-only), filtered by actor, action, target and date.
+// Admin xem và lọc nhật ký thao tác; không cho sửa dữ liệu nhật ký.
 async function listing(req, res) {
   if (req.role.key !== "admin") throw new v.HttpError(403, "Only the Admin can view the audit log.");
   v.keys(req.query, ["actor", "action", "targetType", "from", "to", "page", "limit"]);

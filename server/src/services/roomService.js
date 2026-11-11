@@ -3,10 +3,7 @@ const RoomType = require('../models/RoomType');
 const Booking = require('../models/Booking');
 
 class RoomService {
-  /**
-   * Get all physical rooms (UC30 - Manage Rooms)
-   * Supports filtering by floor, status, roomTypeId, hotelId
-   */
+  // Lọc danh sách phòng theo khách sạn, tầng, trạng thái và loại phòng.
   async getAllRooms(filter = {}) {
     const query = {};
     if (filter.hotelId) query.hotelId = filter.hotelId;
@@ -19,9 +16,7 @@ class RoomService {
       .sort({ floor: 1, roomNumber: 1 });
   }
 
-  /**
-   * Get single room details
-   */
+  // Lấy chi tiết một phòng theo mã.
   async getRoomById(id) {
     const room = await Room.findById(id)
       .populate('roomTypeId');
@@ -33,9 +28,7 @@ class RoomService {
     return room;
   }
 
-  /**
-   * Create a physical room (UC30)
-   */
+  // Tạo phòng mới sau khi kiểm tra dữ liệu liên quan.
   async createRoom(data) {
     const existing = await Room.findOne({ hotelId: data.hotelId, roomNumber: data.roomNumber.trim() });
     if (existing) {
@@ -44,7 +37,7 @@ class RoomService {
       throw error;
     }
 
-    // Verify roomTypeId belongs to this hotel
+    // Kiểm tra loại phòng thuộc đúng khách sạn.
     const roomType = await RoomType.findById(data.roomTypeId);
     if (!roomType) {
       const error = new Error('Invalid roomTypeId: Room type does not exist');
@@ -61,9 +54,7 @@ class RoomService {
     return room.save();
   }
 
-  /**
-   * Update room details (UC30)
-   */
+  // Cập nhật thông tin phòng theo dữ liệu hợp lệ.
   async updateRoom(id, data) {
     if (data.roomNumber && data.hotelId) {
       const duplicate = await Room.findOne({
@@ -88,10 +79,7 @@ class RoomService {
     return room;
   }
 
-  /**
-   * Update room operational status (UC30 / Lifecycle transition)
-   * statuses: available, occupied, cleaning, maintenance
-   */
+  // Đổi trạng thái vận hành giữa trống, có khách, đang dọn và bảo trì.
   async updateRoomStatus(id, newStatus) {
     const validStatuses = ['available', 'occupied', 'cleaning', 'maintenance'];
     if (!validStatuses.includes(newStatus)) {
@@ -113,9 +101,7 @@ class RoomService {
     return room;
   }
 
-  /**
-   * Delete room (UC30)
-   */
+  // Xóa phòng sau khi kiểm tra điều kiện sử dụng.
   async deleteRoom(id) {
     const room = await Room.findById(id);
     if (!room) {
@@ -124,7 +110,7 @@ class RoomService {
       throw error;
     }
 
-    // Check if room is currently occupied
+    // Không xóa phòng đang có khách.
     if (room.status === 'occupied') {
       const error = new Error('Cannot delete an occupied room.');
       error.status = 400;
@@ -135,19 +121,12 @@ class RoomService {
     return { success: true, message: `Room ${room.roomNumber} deleted successfully` };
   }
 
-  /**
-   * Search available rooms / room types (UC05 / UC06 - Search & Check Room Availability)
-   * Core availability algorithm (T06):
-   * 1. Finds all rooms not under maintenance and active.
-   * 2. Finds overlapping bookings (checkIn < requestedCheckOut && checkOut > requestedCheckIn)
-   *    with status in ['pending', 'confirmed', 'checked_in'].
-   * 3. Filters out rooms currently booked or in maintenance.
-   */
+  // Tìm phòng đang hoạt động, không bảo trì và không bị booking chồng lịch giữ.
   async searchAvailableRooms({ hotelId, checkInDate, checkOutDate, guests = 1, minPrice, maxPrice }) {
     let inDate = null;
     let outDate = null;
 
-    // Validate dates first if provided
+    // Kiểm tra ngày tìm kiếm trước khi truy vấn.
     if (checkInDate || checkOutDate) {
       if (!checkInDate || !checkOutDate) {
         const error = new Error('Both checkInDate and checkOutDate must be provided together');
@@ -172,16 +151,17 @@ class RoomService {
     }
 
     const query = { status: { $ne: 'maintenance' }, isActive: { $ne: false } };
-    // Single-hotel system: rooms belong to this hotel property
+    // Giới hạn dữ liệu theo mô hình một khách sạn.
 
     let availableRooms = await Room.find(query).populate('roomTypeId');
 
-    // If dates are provided, filter out booked rooms
+    // Nếu có ngày lưu trú, loại các phòng đã được đặt trong kỳ.
     if (inDate && outDate) {
 
-      // Find conflicting bookings
+      // Tìm booking giao với khoảng ngày yêu cầu.
       const conflictingBookings = await Booking.find({
-        ...require('./roomInventory').sellingFilter(), // BR-29: an expired hold no longer blocks the room
+        // Booking hết thời gian giữ không tiếp tục chặn phòng.
+        ...require('./roomInventory').sellingFilter(),
         checkInDate: { $lt: outDate },
         checkOutDate: { $gt: inDate }
       }).select('rooms.roomId');
@@ -193,11 +173,11 @@ class RoomService {
         }
       }
 
-      // Exclude booked rooms
+      // Loại phòng đang bị booking khác giữ.
       availableRooms = availableRooms.filter(r => !bookedRoomIds.has(String(r._id)));
     }
 
-    // Filter by guests capacity and price if requested
+    // Lọc thêm theo sức chứa và mức giá nếu có yêu cầu.
     const filtered = availableRooms.filter(r => {
       const rt = r.roomTypeId;
       if (!rt || rt.isActive === false) return false;
@@ -210,9 +190,7 @@ class RoomService {
     return filtered;
   }
 
-  /**
-   * Validate if a specific physical room is available for the given date range (T06)
-   */
+  // Kiểm tra một phòng cụ thể có trống trong khoảng ngày yêu cầu không.
   async isRoomAvailable(roomId, checkInDate, checkOutDate, excludeBookingId = null) {
     const room = await Room.findById(roomId);
     if (!room || room.isActive === false || room.status === 'maintenance') {
@@ -237,9 +215,7 @@ class RoomService {
     return !conflict;
   }
 
-  /**
-   * Find an available physical room for a given roomTypeId during the target date range
-   */
+  // Tìm phòng trống thuộc loại yêu cầu cho toàn kỳ lưu trú.
   async findAvailableRoomForType({ hotelId, roomTypeId, checkInDate, checkOutDate, excludeBookingId = null }) {
     const inDate = new Date(checkInDate);
     const outDate = new Date(checkOutDate);
@@ -249,14 +225,14 @@ class RoomService {
       status: { $ne: 'maintenance' },
       isActive: { $ne: false }
     };
-    // Hotel is single-property system; Room schema matches by roomTypeId
+    // Phòng được liên kết bằng roomTypeId trong mô hình một khách sạn.
 
     const candidateRooms = await Room.find(roomQuery);
     if (!candidateRooms.length) return null;
 
     const candidateIds = candidateRooms.map(r => r._id);
 
-    // Find conflicting bookings for these candidate rooms
+    // Tìm booking chồng lịch trên các phòng ứng viên.
     const bookingQuery = {
       status: { $in: ['pending', 'confirmed', 'cancellation_requested', 'checked_in'] },
       'rooms.roomId': { $in: candidateIds },
@@ -275,7 +251,7 @@ class RoomService {
       }
     }
 
-    // Pick first available room
+    // Chọn phòng đầu tiên còn trống.
     return candidateRooms.find(r => !bookedIds.has(String(r._id))) || null;
   }
 }

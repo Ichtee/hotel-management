@@ -5,9 +5,9 @@ const v = require("../utils/validation");
 const c = require("../services/cancellations");
 
 const MSG = {
-  requested: "Your cancellation request has been sent to the front desk (Receptionist) for review.", // MSG-57
-  cancelled: "Booking cancelled successfully.", // MSG-33
-  withdrawn: "Your cancellation request has been withdrawn. The booking is active again.", // MSG-67
+  requested: "Your cancellation request has been sent to the front desk (Receptionist) for review.",
+  cancelled: "Booking cancelled successfully.",
+  withdrawn: "Your cancellation request has been withdrawn. The booking is active again.",
 };
 const outcome = (res, { booking, refundableAmount }) =>
   res.json({
@@ -15,18 +15,17 @@ const outcome = (res, { booking, refundableAmount }) =>
     message: booking.status === "cancellation_requested" ? MSG.requested : MSG.cancelled,
   });
 const reasonOf = (value, required) => {
-  if (value === undefined || (typeof value === "string" && !value.trim())) return required ? v.fail("Enter the reason for the cancellation.", "reason") : undefined; // MSG-04
+  if (value === undefined || (typeof value === "string" && !value.trim())) return required ? v.fail("Enter the reason for the cancellation.", "reason") : undefined;
   return v.text(value, "reason", 1, 500);
 };
-// BR-26: a customer reaches only their own bookings.
+// Khách chỉ được thao tác trên booking của chính mình.
 async function own(req) {
   const booking = await Booking.findOne({ _id: v.id(req.params.id), customerId: req.user._id });
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   return booking;
 }
 
-// ---- Customer (UC08) ----
-// Step 2-3: the estimated refundable amount and the tiers of the booking.
+// Ước tính tiền hoàn theo các mốc chính sách của booking.
 async function estimate(req, res) {
   const booking = await own(req);
   if (booking.status === "cancellation_requested")
@@ -43,7 +42,7 @@ async function withdraw(req, res) {
   const booking = await c.withdraw(v.id(req.params.id), req.user._id, { customerId: req.user._id });
   res.json({ data: { _id: booking._id, status: booking.status }, message: MSG.withdrawn });
 }
-// UC35 1a: the Receptionist withdraws a request at the customer's request (e.g. one recorded at the front desk).
+// Lễ tân rút yêu cầu hủy theo đề nghị của khách.
 async function withdrawAtDesk(req, res) {
   const booking = await c.withdraw(v.id(req.params.id), req.user._id);
   res.json({ data: { _id: booking._id, status: booking.status }, message: "The cancellation request was withdrawn. The booking is active again." });
@@ -53,7 +52,7 @@ async function cancelPayment(req, res) {
   res.json({ data: { _id: booking._id, status: booking.status }, message: "The payment was cancelled and the room released." });
 }
 
-// ---- Front desk (UC16, UC35) ----
+// Các thao tác hủy tại quầy.
 const BOOKER = "username email phone customerProfile.fullName";
 const booker = (b) => ({
   name: b.customerId?.customerProfile?.fullName || b.guestName || b.customerId?.username,
@@ -64,7 +63,7 @@ const summary = (b) => ({
   _id: b._id, bookingReference: c.reference(b), status: b.status, bookingSource: b.bookingSource,
   checkInDate: b.checkInDate, checkOutDate: b.checkOutDate, totalAmount: b.totalAmount, booker: booker(b),
 });
-// Step 1: find the booking by booking code or phone number.
+// Tìm booking bằng mã hoặc số điện thoại.
 async function lookup(req, res) {
   const q = v.text(req.query.q, "q", 3, 40).toUpperCase();
   const or = [{ bookingReference: q }];
@@ -84,13 +83,13 @@ async function sendOtp(req, res) {
   await c.sendOtp(booking, req.user._id);
   res.json({ data: { sent: true, expiresInMinutes: 10 } });
 }
-// UC16: verify the requester (OTP by phone or ID document at the desk), then record the request.
+// Xác minh người yêu cầu bằng OTP hoặc giấy tờ trước khi ghi nhận hủy.
 async function record(req, res) {
   v.keys(req.body, ["bookingId", "reason", "verifyMethod", "otp", "hotelCaused"]);
   const hotelCaused = req.body.hotelCaused === undefined ? false : v.boolean(req.body.hotelCaused, "hotelCaused");
   const booking = await Booking.findById(v.id(req.body.bookingId, "bookingId"));
   if (!booking) throw new v.HttpError(404, "Booking not found.");
-  // BR-37: the hotel is the requester, so no customer verification is needed.
+  // Khách sạn chủ động hủy thì không cần xác minh khách hàng.
   const verifyMethod = hotelCaused ? "hotel" : v.choice(req.body.verifyMethod, "verifyMethod", ["otp", "id_document"]);
   const reason = hotelCaused ? reasonOf(req.body.reason, false) || c.HOTEL_REASON : reasonOf(req.body.reason, true);
   if (verifyMethod === "otp") {
@@ -99,7 +98,7 @@ async function record(req, res) {
   }
   outcome(res.status(201), await c.request(booking, { actorId: req.user._id, channel: "front_desk", verifyMethod, reason, hotelCaused }));
 }
-// UC35 step 1-2: requests waiting for review, oldest first.
+// Liệt kê yêu cầu chờ duyệt theo thứ tự cũ nhất trước.
 async function listing(req, res) {
   const rows = await Booking.find({ status: "cancellation_requested" }).populate("customerId", BOOKER).sort({ "cancellation.requestedAt": 1 }).limit(200);
   const paid = await Payment.aggregate([
@@ -123,7 +122,7 @@ async function approve(req, res) {
     message: amount > 0 ? "Cancellation approved. The booking is waiting for refund." : "The booking has been cancelled and is not eligible for a refund.",
   });
 }
-// UC16 from the booking row: the ID document was checked at the desk; the bank account is asked later, in UC21 (BR-17).
+// Giấy tờ đã kiểm tra tại quầy; thông tin ngân hàng được lấy ở bước hoàn tiền.
 async function recordAtDesk(req, res) {
   v.keys(req.body, ["reason", "hotelCaused"]);
   const hotelCaused = req.body.hotelCaused === undefined ? false : v.boolean(req.body.hotelCaused, "hotelCaused");

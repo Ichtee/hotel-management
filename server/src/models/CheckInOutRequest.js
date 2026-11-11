@@ -7,12 +7,14 @@ const schema = new Schema({
   type: { type: String, enum: ["check_in", "check_out"], required: true },
   requestedTime: { type: Date, required: true },
   note: { type: String, trim: true, maxlength: 1000 },
-  earlyOrLate: { type: Boolean, default: false }, // early check-in / late check-out wish (BR-44)
-  // Check-in pre-registration (UC39 step 2); the ID number is verified against the document at check-in (BR-18).
+  // Đánh dấu yêu cầu nhận sớm hoặc trả muộn.
+  earlyOrLate: { type: Boolean, default: false },
+  // Thông tin đăng ký trước được đối chiếu giấy tờ tại quầy.
   numberOfGuests: { type: Number, min: 1 },
   mainGuestName: { type: String, trim: true },
   mainGuestIdNumber: { type: String, trim: true, select: false },
-  idPhoto: { type: String, select: false }, // private Cloudinary id of the ID document photo; deleted when the request closes
+  // Mã ảnh giấy tờ riêng tư trên Cloudinary, được xóa khi đóng yêu cầu.
+  idPhoto: { type: String, select: false },
   hasIdPhoto: { type: Boolean, default: false },
   quotedFee: { type: Number, min: 0, default: 0 },
   status: { type: String, enum: ["pending", "approved", "rejected", "completed", "cancelled"], default: "pending", index: true },

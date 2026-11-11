@@ -148,8 +148,15 @@ let hotelReq;
 function useHotel() {
   const [h, setH] = useState(null);
   useEffect(() => {
-    hotelReq ??= api('/hotel-info').then((x) => x.data).catch(() => { hotelReq = null; return null; });
-    hotelReq.then(setH);
+    const load = () => {
+      hotelReq ??= api('/hotel-info').then((x) => x.data).catch(() => { hotelReq = null; return null; });
+      hotelReq.then(setH);
+    };
+    load();
+    // Hotel information saved: drop the cached copy so the hero and footer show the new name.
+    const again = () => { hotelReq = null; load(); };
+    addEventListener('hotel-info-saved', again);
+    return () => removeEventListener('hotel-info-saved', again);
   }, []);
   return h;
 }

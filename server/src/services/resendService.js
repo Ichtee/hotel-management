@@ -28,13 +28,28 @@ function getClientUrl() {
   ).replace(/\/+$/, "");
 }
 
-function buildVerificationHtml({ fullName, verificationUrl }) {
+// The saved Hotel information name (UC27); "GrandStay" when the database is not reachable or empty.
+async function hotelName() {
+  try {
+    if (require("mongoose").connection.readyState !== 1) return "GrandStay";
+    const h = await require("../models/HotelInfo").findOne({ key: "main" }).select("name").lean();
+    return h?.name || "GrandStay";
+  } catch { return "GrandStay"; }
+}
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+// "Sunrise Hotel" -> Sunrise<span>Hotel</span>, "GrandStay" -> Grand<span>Stay</span>, same split as the website logo.
+function brandHtml(name) {
+  const m = name.match(/^(.*\s)(\S+)$/) || name.match(/^(.+?)([A-Z][a-z]+)$/);
+  return m ? `${esc(m[1])}<span>${esc(m[2])}</span>` : esc(name);
+}
+
+function buildVerificationHtml({ fullName, verificationUrl, name = "GrandStay" }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Verify Your Email - GrandStay</title>
+  <title>Verify Your Email - ${esc(name)}</title>
   <style>
     body {
       margin: 0;
@@ -133,12 +148,12 @@ function buildVerificationHtml({ fullName, verificationUrl }) {
   <div class="wrapper">
     <div class="container">
       <div class="header">
-        <div class="brand">Grand<span>Stay</span></div>
+        <div class="brand">${brandHtml(name)}</div>
       </div>
       <div class="content">
         <h1>Verify your email address</h1>
         <p>Hello <strong>${fullName || "there"}</strong>,</p>
-        <p>Thank you for signing up with <strong>GrandStay Hotel</strong>. To complete your registration and secure your account, please verify your email address.</p>
+        <p>Thank you for signing up with <strong>${esc(name)}</strong>. To complete your registration and secure your account, please verify your email address.</p>
         <div class="btn-container">
           <a href="${verificationUrl}" class="btn" target="_blank">Verify Email</a>
         </div>
@@ -151,8 +166,8 @@ function buildVerificationHtml({ fullName, verificationUrl }) {
         </div>
       </div>
       <div class="footer">
-        <p style="margin: 0;">If you did not create an account with GrandStay, you can safely ignore this email.</p>
-        <p style="margin: 8px 0 0;">&copy; 2026 GrandStay Hotel Management. All rights reserved.</p>
+        <p style="margin: 0;">If you did not create an account with ${esc(name)}, you can safely ignore this email.</p>
+        <p style="margin: 8px 0 0;">&copy; 2026 ${esc(name)}. All rights reserved.</p>
       </div>
     </div>
   </div>
@@ -170,10 +185,11 @@ function buildVerificationHtml({ fullName, verificationUrl }) {
  */
 async function sendVerificationEmail({ email, fullName, token }) {
   const clientUrl = getClientUrl();
+  const name = await hotelName();
   const verificationUrl = `${clientUrl}/#/verify-email?token=${token}&email=${encodeURIComponent(email)}`;
   if (emailjs.enabled()) {
     try {
-      await emailjs.sendMail({ to: email, subject: "GrandStay - Verify your email address", html: buildVerificationHtml({ fullName, verificationUrl }) });
+      await emailjs.sendMail({ to: email, subject: `${name} - Verify your email address`, html: buildVerificationHtml({ fullName, verificationUrl, name }) });
       return { success: true };
     } catch (err) {
       console.error("[EmailJS] Verification email failed:", err.message);
@@ -186,8 +202,8 @@ async function sendVerificationEmail({ email, fullName, token }) {
       const info = await require("nodemailer").createTransport(process.env.SMTP_URL).sendMail({
         from: process.env.MAIL_FROM || "GrandStay <no-reply@grandstay.local>",
         to: email,
-        subject: "GrandStay - Verify your email address",
-        html: buildVerificationHtml({ fullName, verificationUrl }),
+        subject: `${name} - Verify your email address`,
+        html: buildVerificationHtml({ fullName, verificationUrl, name }),
       });
       return { success: true, messageId: info.messageId };
     } catch (err) {
@@ -210,8 +226,8 @@ async function sendVerificationEmail({ email, fullName, token }) {
     const result = await resend.emails.send({
       from,
       to: email,
-      subject: "GrandStay - Verify your email address",
-      html: buildVerificationHtml({ fullName, verificationUrl }),
+      subject: `${name} - Verify your email address`,
+      html: buildVerificationHtml({ fullName, verificationUrl, name }),
     });
 
     if (result.error) {
@@ -231,6 +247,7 @@ async function sendVerificationEmail({ email, fullName, token }) {
 
 module.exports = {
   sendVerificationEmail,
+  hotelName,
   setResendClient,
   getResendClient,
   getClientUrl,

@@ -4,7 +4,7 @@ const Role = require("../models/Role");
 const v = require("../utils/validation");
 const { hashPassword, verifyPassword } = require("../utils/password");
 const { publicUser, issueToken, clearToken, tokenClaims } = require("../middleware/auth");
-const { sendVerificationEmail, getClientUrl } = require("../services/resendService");
+const { sendVerificationEmail, getClientUrl, hotelName } = require("../services/resendService");
 const { verifyCaptcha, getSiteKey } = require("../services/captchaService");
 const AuditLog = require("../models/AuditLog");
 const MAX_FAILED_LOGINS = 5;
@@ -352,7 +352,7 @@ async function forgotPassword(req, res) {
     if (typeof sendMail === "function") {
       await sendMail(
         user._id,
-        "GrandStay - Reset your password",
+        `${await hotelName()} - Reset your password`,
         `Open this link to choose a new password: ${getClientUrl()}/#/reset-password?token=${token}&email=${encodeURIComponent(email)}\nThe link is valid for 30 minutes and can be used once.`,
       );
     }

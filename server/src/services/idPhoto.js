@@ -12,7 +12,8 @@ const cfg = () => {
 const folderOf = (userId, kind = "id") => `grandstay/${kind}/${userId}`; // kind "refund": the bank receipt of a refund (UC21)
 function uploadParams(userId, kind) {
   const { cloud, key, secret } = cfg();
-  const p = { timestamp: Math.round(Date.now() / 1000), folder: folderOf(userId, kind), type: "authenticated", format: "jpg" };
+  // kind "room": a public room photo (shown on the website), so no "authenticated" type
+  const p = { timestamp: Math.round(Date.now() / 1000), ...(kind === "room" ? { folder: "grandstay/room" } : { folder: folderOf(userId, kind), type: "authenticated", format: "jpg" }) };
   return { cloudName: cloud, apiKey: key, ...p, signature: cloudinary.utils.api_sign_request(p, secret) };
 }
 const ownsPhoto = (userId, publicId, kind) => typeof publicId === "string" && new RegExp(`^${folderOf(userId, kind)}/[A-Za-z0-9_-]{6,60}$`).test(publicId);

@@ -195,6 +195,7 @@ function createApp({
   app.use("/api/room-types", requireManager);
   app.get("/api/room-types", roomTypes.listing);
   app.post("/api/room-types", roomTypes.create);
+  app.get("/api/room-types/image-upload", roomTypes.imageUploadParams);
   app.get("/api/room-types/:id", roomTypes.detail);
   app.patch("/api/room-types/:id", roomTypes.update);
   app.delete("/api/room-types/:id", roomTypes.remove);

@@ -56,7 +56,7 @@ async function detail(req, res) {
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   const [payments, refunds, penalties, invoices, requests] = await Promise.all([
     Payment.find({ bookingId: booking._id }).select("kind amount currency method status paidAt createdAt").sort({ createdAt: 1 }).lean(),
-    Refund.find({ bookingId: booking._id }).select("amount currency status reason bankTransactionCode processedAt createdAt").sort({ createdAt: 1 }).lean(),
+    Refund.find({ bookingId: booking._id }).select("amount currency status reason processedAt createdAt").sort({ createdAt: 1 }).lean(),
     // UC09: penalties and invoices; a Proposed penalty is not shown until the front desk confirms it with the guest (UC38).
     Penalty.find({ bookingId: booking._id, status: { $ne: "proposed" } }).select("itemName amount status waivedReason afterCheckout").sort({ createdAt: 1 }).lean(),
     Invoice.find({ bookingId: booking._id }).select("invoiceNumber kind lines totalAmount issuedAt createdAt").sort({ createdAt: 1 }).lean(),

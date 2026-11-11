@@ -1256,7 +1256,7 @@ test("UC21: the receptionist enters the customer's bank account, notes contact a
   assert.deepEqual([r.amount, r.booker.phone, r.account], [600, "0912345678", null]);
   await customer.get("/api/frontdesk/refunds").expect(403);
   const url = `/api/frontdesk/refunds/${r._id}`;
-  await send(staff, "post", url, { bankTransactionCode: "FT123" }).expect(409); // account first
+  const bill = `grandstay/refund/${(await User.findOne({ username: "staff" })).id}/bill0001`; // what a signed Cloudinary upload returns
   await send(staff, "post", `${url}/contacts`, { note: "No answer" }).expect(201);
   await send(staff, "put", `${url}/account`, { bank: "VCB", accountNumber: "0123456789", holderName: "Someone Else" }).expect(400); // MSG-84
   await send(staff, "put", `${url}/account`, { bank: "VCB", accountNumber: "12ab34", holderName: "customer" }).expect(400);
@@ -1264,18 +1264,20 @@ test("UC21: the receptionist enters the customer's bank account, notes contact a
   assert.deepEqual([acc.account.accountNumber, acc.account.holderName, acc.contacts[0].note], ["0123456789", "CUSTOMER", "No answer"]);
   const stored = await Refund.findById(r._id);
   assert.equal(stored.bankAccount.accountNumber.includes("0123456789"), false); // encrypted at rest
-  const done = (await send(staff, "post", url, { bankTransactionCode: "FT26110100001", note: "Sent" }).expect(200)).body;
+  await send(staff, "post", url, { billPhoto: "grandstay/refund/someone-else/bill0001" }).expect(400); // not an upload of this receptionist
+  await send(staff, "post", url, { note: "Sent" }).expect(400); // the bill is required
+  const done = (await send(staff, "post", url, { billPhoto: bill, note: "Sent" }).expect(200)).body;
   assert.equal(done.data.status, "completed");
   assert.match(done.message, /Refund recorded/);
   assert.equal((await Payment.findById(stored.paymentId)).status, "refunded"); // BR-17: whole deposit, once
-  await send(staff, "post", url, { bankTransactionCode: "FT2" }).expect(409);
-  assert.match((await Notification.findOne({ type: "refund_completed", bookingId: booking._id })).message, /FT26110100001/);
+  await send(staff, "post", url, { billPhoto: bill }).expect(409);
+  assert.match((await Notification.findOne({ type: "refund_completed", bookingId: booking._id })).message, /by bank transfer/);
   assert.ok((await staff.get("/api/frontdesk/refunds?status=completed").expect(200)).body.data.some((x) => x._id === r._id));
-  assert.equal((await customer.get(`/api/bookings/${booking.id}`).expect(200)).body.data.refunds[0].bankTransactionCode, "FT26110100001");
+  assert.equal((await Refund.findById(r._id)).billPhoto, bill);
 
   // A deposit is refunded only once (MSG-42).
   const dup = await Refund.create({ paymentId: stored.paymentId, bookingId: booking._id, amount: 600, status: "requested", bankAccount: stored.bankAccount });
-  await send(staff, "post", `/api/frontdesk/refunds/${dup.id}`, { bankTransactionCode: "FT3" }).expect(409);
+  await send(staff, "post", `/api/frontdesk/refunds/${dup.id}`, { billPhoto: bill }).expect(409);
   assert.equal((await Refund.findById(dup.id)).status, "requested");
 });
 

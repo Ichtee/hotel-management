@@ -275,6 +275,8 @@ function createApp({
   app.get("/api/frontdesk/refunds", refund, refunds.listing);
   app.put("/api/frontdesk/refunds/:id/account", refund, refunds.setAccount);
   app.post("/api/frontdesk/refunds/:id/contacts", refund, refunds.addContact);
+  app.get("/api/frontdesk/refunds/:id/bill-upload", refund, refunds.billUploadParams);
+  app.get("/api/frontdesk/refunds/:id/bill", refund, refunds.billLink);
   app.post("/api/frontdesk/refunds/:id", refund, refunds.record);
   // UC38 Record Damage / Loss Penalty
   const penalize = permit("penalties.record");

@@ -5,6 +5,9 @@ import { DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useEdit
 /* UC34: catalogs of additional services and compensation items. Entries are deactivated, never deleted (BR-43). */
 export function Catalog() {
   const tab = new URLSearchParams(location.hash.split('?')[1] || '').get('tab') || 'services'; // in the URL so a refresh keeps the tab
+  return <CatalogTab key={tab} tab={tab} />; // a new tab is a new mount: the list is loaded for it (the list used to stay on the first tab)
+}
+function CatalogTab({ tab }) {
   const setTab = (k) => { location.hash = `#/admin/catalog?tab=${k}`; };
   const list = useApi(`/catalog/${tab}`);
   const E = useEditPage(list.data);

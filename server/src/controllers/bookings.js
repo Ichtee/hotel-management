@@ -15,7 +15,14 @@ function paymentStatus(booking, payments) {
   return { paidAmount: paid, paymentStatus: status };
 }
 // BR-26: a customer reaches only their own bookings.
-const mine = (req, id) => req.role.key !== "customer" ? { ...(id ? { _id: v.id(id) } : {}) } : { ...(id ? { _id: v.id(id) } : {}), customerId: req.user._id };
+// Same rule as GET /bookings/search: Manager, Admin, or a role with bookings.managed.read; Housekeeping and others are refused.
+const staffReads = (req) => ["manager", "admin"].includes(req.role.key) || req.role.permissions.includes("bookings.managed.read");
+const mine = (req, id) => {
+  const base = id ? { _id: v.id(id) } : {};
+  if (req.role.key === "customer") return { ...base, customerId: req.user._id };
+  if (!staffReads(req)) throw new v.HttpError(403, "You do not have permission to use this feature.");
+  return base;
+};
 // UC10 View Booking History.
 async function listing(req, res) {
   const filter = mine(req);

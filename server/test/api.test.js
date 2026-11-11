@@ -591,6 +591,10 @@ test("booking history and details expose only the customer's own bookings with p
   const withRefund = await customer.get(`/api/bookings/${cancelled.id}`).expect(200);
   assert.equal(withRefund.body.data.refunds[0].status, "completed");
   await customer.get(`/api/bookings/${foreign.id}`).expect(404);
+  // Booking details follow the booking search rule: Manager and front desk read any booking, Housekeeping does not.
+  await manager.get(`/api/bookings/${mineBooking.id}`).expect(200);
+  await (await srsUser("detailrec", "receptionist")).get(`/api/bookings/${foreign.id}`).expect(200);
+  await (await srsUser("detailhk", "housekeeping")).get(`/api/bookings/${mineBooking.id}`).expect(403);
   await customer.get("/api/bookings/not-an-id").expect(400);
   await request(app).get("/api/bookings").expect(401);
 });

@@ -664,7 +664,6 @@ const PAGES = {
 
 const Forbidden = () => <><PageHead title="No access" sub="Your role does not include this area." /><a className="btn" href="#/admin">Back to dashboard</a></>;
 
-const NEEDS = { '#/admin/users': 'users.manage', '#/admin/staff': 'staff.manage', '#/admin/coupons': 'promotions.manage', '#/admin/revenue': 'revenue.read', '#/admin/occupancy': 'revenue.read', '#/admin/policy': 'policies.manage', '#/admin/cancellations': 'cancellations.review', '#/admin/refunds': 'refunds.handle', '#/admin/room-availability': 'rooms.search', '#/admin/cleaning': 'cleaning_tasks.own.read', '#/admin/cleaning-request': 'cleaning_tasks.ad_hoc.create', '#/admin/stay-requests': 'stay_requests.manage' };
 
 export default function Admin({ route: fullRoute }) {
   const route = fullRoute.split('?')[0];
@@ -673,7 +672,9 @@ export default function Admin({ route: fullRoute }) {
   if (loading) return <p className="muted center-msg">Loading…</p>;
   if (route === '#/admin/login') return <Login />;
   if (!user || user.scope === 'self') { if (location.hash !== '#/admin/login') location.hash = '#/admin/login'; return null; }
-  const denied = (['#/admin/customers', '#/admin/assignments', '#/admin/catalog', '#/admin/permissions', '#/admin/reviews', '#/admin/rooms', '#/admin/roomtypes'].includes(route) && user.role !== 'manager') || (route === '#/admin/audit' && user.role !== 'admin') || (NEEDS[route] && !user.permissions.includes(NEEDS[route]));
+  // One rule table for the menu and the route guard: a page that is not in MENU (profile, notifications) is open to every staff account.
+  const rule = MENU.flatMap((g) => g.items || []).find((item) => item[0] === route);
+  const denied = rule && !allowed(rule, user.permissions, user.role);
   const Page = denied ? Forbidden : PAGES[route] || Dashboard;
   return (
     <div className="adm">

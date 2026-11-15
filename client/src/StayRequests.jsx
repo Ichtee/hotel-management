@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { api, dateLabel } from './api/client.js';
 import { Badge, DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useScreen } from './ui.jsx';
 
-// date and hour in the hotel's time: the hour is what the receptionist decides on (BR-44)
+// Hiển thị ngày giờ theo múi giờ khách sạn để lễ tân duyệt đúng thời điểm.
 const when = (v) => `${dateLabel(v)}, ${new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' }).format(new Date(v))}`;
 
-// Front desk: opens the private ID photo of a request in a new tab through a 5-minute link (each view is audited).
+// Mở ảnh giấy tờ qua liên kết riêng tư hạn năm phút; ghi nhật ký mỗi lần xem.
 export function IdPhotoLink({ requestId }) {
   const [error, setError] = useState(null);
   const open = async () => { setError(null); try { window.open((await api(`/frontdesk/requests/${requestId}/id-photo`)).data.url, '_blank', 'noopener'); } catch (x) { setError(x); } };

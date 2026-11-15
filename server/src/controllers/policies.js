@@ -8,7 +8,7 @@ async function listing(req, res) {
   result.meta.current = await currentDepositPolicy();
   res.json(result);
 }
-// Saving creates a new version and retires the old one, so existing bookings keep their snapshot (BR-31, BR-35).
+// Lưu phiên bản chính sách mới và ngừng bản cũ; booking giữ bản chụp đã lưu.
 async function version(kind, fields, actorId) {
   const now = new Date();
   await HotelPolicy.updateMany({ kind, isActive: true }, { isActive: false, effectiveTo: now });
@@ -16,7 +16,7 @@ async function version(kind, fields, actorId) {
   await audit(actorId, `policy.${kind}_saved`, "hotel_policy", policy._id);
   return policy;
 }
-// UC27: deposit percentage.
+// Quản lý phần trăm đặt cọc.
 async function create(req, res) {
   v.keys(req.body, ["percentage", "name", "description"]);
   const percentage = v.number(req.body.percentage, "percentage", 1, 100);
@@ -28,7 +28,7 @@ async function create(req, res) {
   res.status(201).json({ data: policy });
 }
 
-// UC27: cancellation / refund tiers with the standard check-in / check-out times and the early / late fees.
+// Quản lý mốc hoàn tiền, giờ nhận trả và phí nhận sớm, trả muộn.
 async function cancellationListing(req, res) {
   const result = await v.list(HotelPolicy, { kind: "cancellation" }, req.query);
   result.meta.current = await currentCancellationPolicy();
@@ -50,7 +50,7 @@ async function createCancellation(req, res) {
     };
   });
   if (tiersProblem(clean))
-    v.fail("Cancellation tiers must not overlap or leave gaps, each tier must refund 100% or 0%, and the refund must not increase as check-in gets closer.", "tiers"); // MSG-63
+    v.fail("Cancellation tiers must not overlap or leave gaps, each tier must refund 100% or 0%, and the refund must not increase as check-in gets closer.", "tiers");
   clean.sort((a, b) => b.minHoursBeforeCheckIn - a.minHoursBeforeCheckIn);
   const policy = await version("cancellation", {
     name: req.body.name === undefined ? "Cancellation policy" : v.text(req.body.name, "name", 2, 100),
@@ -63,7 +63,7 @@ async function createCancellation(req, res) {
   res.status(201).json({ data: policy });
 }
 
-// Hotel & Room Information (public) and its edit in UC27.
+// Đọc thông tin khách sạn công khai và cập nhật từ trang quản lý.
 async function hotelInfo(req, res) {
   res.json({ data: await HotelInfo.findOne({ key: "main" }).select("-key").lean() });
 }
@@ -82,7 +82,7 @@ async function updateHotelInfo(req, res) {
   await audit(req.user._id, "hotel_info.updated", "hotel_info", info._id);
   res.json({ data: info });
 }
-// Public summary of the policies in force, for the website (no internal ids or history).
+// Trả chính sách đang áp dụng, không lộ mã nội bộ và lịch sử.
 async function publicSummary(req, res) {
   const [deposit, cancellation] = await Promise.all([currentDepositPolicy(), currentCancellationPolicy()]);
   res.json({ data: {

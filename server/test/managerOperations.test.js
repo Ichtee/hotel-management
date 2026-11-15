@@ -202,7 +202,7 @@ test("UC36 shift boundaries use hotel timezone and night belongs to its start da
   assert.equal(shiftWindow("2090-01-02", "night").end.toISOString(), new Date("2090-01-03T06:00:00+07:00").toISOString());
 });
 
-// Tạo thêm nhân viên Housekeeping để kiểm tra chuyển trách nhiệm.
+// Tạo thêm nhân viên housekeeping để kiểm tra chuyển người phụ trách.
 async function anotherHousekeeper() {
   const role = await Role.findOne({ key: "housekeeping" });
   return User.create({ username: `hk${++n}`, email: `hk${n}@example.com`, roleId: role._id,
@@ -257,7 +257,8 @@ test("UC36 assigns Pending tasks, moves Assigned and In Progress tasks on manage
   const other = await anotherHousekeeper();
   await send(manager, "patch", `/api/housekeeping-assignments/${plan._id}`, { staffId: other.id }).expect(200);
   assert.equal(String((await Task.findById(pending.id)).assignedTo), other.id);
-  const moved = await Task.findById(inProgress.id); // back to Pending, then assigned to the new responsible staff member
+  // Đưa nhiệm vụ về chờ rồi giao cho người phụ trách mới.
+  const moved = await Task.findById(inProgress.id);
   assert.deepEqual([String(moved.assignedTo), moved.status], [other.id, "assigned"]);
   await send(manager, "delete", `/api/housekeeping-assignments/${plan._id}`).expect(200);
   assert.equal((await Assignment.findById(plan._id)).isActive, false);
@@ -395,7 +396,8 @@ test("UC23/UC36 floor moves reject overlapping responsibility and safely transfe
   const started = await Task.create({ roomId: room._id, status: "in_progress", assignedTo: housekeeping._id });
   await send(manager, "patch", `/api/rooms/${room._id}`, { floor: 32 }).expect(200);
   assert.equal(String((await Task.findById(task.id)).assignedTo), other.id);
-  assert.equal(String((await Task.findById(started.id)).assignedTo), other.id); // BR-41: In Progress moves too
+  // Nhiệm vụ đang làm cũng phải chuyển người phụ trách.
+  assert.equal(String((await Task.findById(started.id)).assignedTo), other.id);
 });
 
 test("UC23 room creation racing with type deletion cannot produce an orphan room", async () => {

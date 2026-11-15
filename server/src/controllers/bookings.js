@@ -25,7 +25,7 @@ const mine = (req, id) => {
 };
 // UC10 View Booking History.
 async function listing(req, res) {
-  const filter = mine(req);
+  const filter = { customerId: req.user._id }; // this account's own bookings: a Customer's, or those a Receptionist made for guests
   if (req.query.status)
     filter.status = v.choice(req.query.status, "status", Booking.schema.path("status").enumValues);
   const { page, limit } = v.pagination(req.query);

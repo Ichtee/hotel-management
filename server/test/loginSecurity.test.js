@@ -44,7 +44,7 @@ test("CAPTCHA verification: invalid or expired captcha is rejected with HTTP 400
     isVerified: true,
   });
 
-  // Invalid CAPTCHA token
+  // Từ chối token CAPTCHA sai.
   const resInvalid = await send(request(app), "post", "/api/auth/login", {
     email: "captcha@example.com",
     password,
@@ -54,7 +54,7 @@ test("CAPTCHA verification: invalid or expired captcha is rejected with HTTP 400
   assert.equal(resInvalid.body.success, false);
   assert.equal(resInvalid.body.code, "CAPTCHA_FAILED");
 
-  // Expired CAPTCHA token
+  // Từ chối token CAPTCHA hết hạn.
   const resExpired = await send(request(app), "post", "/api/auth/login", {
     email: "captcha@example.com",
     password,
@@ -64,7 +64,7 @@ test("CAPTCHA verification: invalid or expired captcha is rejected with HTTP 400
   assert.equal(resExpired.body.success, false);
   assert.equal(resExpired.body.code, "CAPTCHA_FAILED");
 
-  // Verify failedLoginAttempts / failedLogins was NOT incremented
+  // Lỗi CAPTCHA không được tăng bộ đếm sai mật khẩu.
   const checkUser = await User.findById(user._id).select("+failedLogins +lockedUntil");
   assert.equal(checkUser.failedLogins, 0);
   assert.equal(checkUser.failedLoginAttempts, 0);
@@ -89,45 +89,42 @@ test("Account Lockout: 5 failed attempts locks account for 15 minutes, remaining
       captchaToken: token,
     });
 
-  // Attempt 1: 4 attempts remaining
+  // Lần sai đầu tiên còn bốn lượt thử.
   const att1 = await loginWithToken("wrong1").expect(401);
   assert.equal(att1.body.success, false);
   assert.equal(att1.body.remainingAttempts, 4);
 
-  // Attempt 2: 3 attempts remaining
   const att2 = await loginWithToken("wrong2").expect(401);
   assert.equal(att2.body.remainingAttempts, 3);
 
-  // Attempt 3: 2 attempts remaining
   const att3 = await loginWithToken("wrong3").expect(401);
   assert.equal(att3.body.remainingAttempts, 2);
 
-  // Attempt 4: 1 attempt remaining
   const att4 = await loginWithToken("wrong4").expect(401);
   assert.equal(att4.body.remainingAttempts, 1);
 
-  // Attempt 5: Account locked for 15 minutes (HTTP 423)
+  // Lần sai thứ năm khóa tài khoản 15 phút.
   const att5 = await loginWithToken("wrong5").expect(423);
   assert.equal(att5.body.success, false);
   assert.equal(att5.body.locked, true);
   assert.ok(att5.body.remainingTime > 0 && att5.body.remainingTime <= 900);
   assert.match(att5.body.message, /temporarily locked/);
 
-  // While locked: even the correct password is refused with HTTP 423
+  // Khi đang khóa, mật khẩu đúng vẫn bị từ chối.
   const attCorrectWhileLocked = await loginWithToken(password).expect(423);
   assert.equal(attCorrectWhileLocked.body.locked, true);
 
-  // Simulate 15 minutes passing (lock expires)
+  // Giả lập đã qua 15 phút để khóa hết hạn.
   await User.updateOne(
     { _id: user._id },
     { $set: { lockedUntil: new Date(Date.now() - 1000) } }
   );
 
-  // Now login with correct password succeeds
+  // Cho đăng nhập bằng mật khẩu đúng khi hết khóa.
   const loginUnlocked = await loginWithToken(password).expect(200);
   assert.equal(loginUnlocked.body.data?.email, "lockout@example.com");
 
-  // Verify counters were reset to 0
+  // Bộ đếm sai được đặt lại bằng không.
   const checkUser = await User.findById(user._id).select("+failedLogins +lockedUntil");
   assert.equal(checkUser.failedLogins, 0);
   assert.equal(checkUser.failedLoginAttempts, 0);
@@ -152,5 +149,6 @@ test("Unverified user with valid password and valid captcha is rejected with HTT
   }).expect(403);
 
   assert.equal(res.body.error?.code, "EMAIL_NOT_VERIFIED");
-  assert.equal(res.headers["set-cookie"], undefined); // No session issued
+  // Không cấp phiên đăng nhập.
+  assert.equal(res.headers["set-cookie"], undefined);
 });

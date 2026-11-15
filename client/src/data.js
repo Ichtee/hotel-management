@@ -1,4 +1,4 @@
-// Staff navigation. Everything else comes from the API.
+// Khai báo menu nhân viên; dữ liệu nghiệp vụ lấy từ API.
 export const MENU = [
   { label: 'Dashboard', href: '#/admin' },
   { label: 'Front desk', items: [['#/admin/bookings', 'Bookings', 'All reservations', ['bookings.managed.read', 'manager.only']], ['#/admin/room-availability', 'Room availability', 'Check rooms for a stay', ['rooms.search']], ['#/admin/stay-requests', 'Stay requests', 'Customer check-in/out requests', ['stay_requests.manage']], ['#/admin/cancellations', 'Cancellations', 'Requests to review', ['cancellations.review']]] },

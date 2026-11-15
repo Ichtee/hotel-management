@@ -22,7 +22,7 @@ function staffView(user, role) {
   };
 }
 
-// Giới hạn vai trò đích theo UC22, kể cả khi vai trò cũ đang bị tắt.
+// Giới hạn vai trò nhân viên được phép quản lý, kể cả khi vai trò cũ bị tắt.
 async function staffRole(key, session, requireActive = true) {
   v.choice(key, "role", editableRoles);
   const role = await Role.findOne({ key, ...(requireActive ? { isActive: true } : {}) }).session(session);
@@ -30,7 +30,7 @@ async function staffRole(key, session, requireActive = true) {
   return role;
 }
 
-// UC22 3b / BR-41: thu hồi phân công còn hiệu lực; task Assigned hoặc In Progress về Pending, task đã đóng giữ nguyên.
+// Thu hồi phân công, đưa việc được giao hoặc đang làm về chờ; giữ nguyên việc đã đóng.
 async function releaseResponsibilities(userId, req, reason, session) {
   const now = new Date();
   const tasks = await CleaningTask.updateMany(
@@ -67,7 +67,7 @@ async function notifyResponsibilityChange(user, changes) {
   }
 }
 
-// Lưu tài khoản và audit log trong cùng giao dịch.
+// Lưu tài khoản và nhật ký trong cùng giao dịch.
 async function createStaff(req, data, passwordHash) {
   return User.db.transaction(async (session) => {
     const role = await staffRole(data.role, session);

@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-// Prevent StrictPopulateError across all models
+// Cho phép populate ngoài schema theo cấu hình dùng chung hiện tại.
 mongoose.set('strictPopulate', false);
 
 async function connectDatabase(uri = process.env.MONGO_URI) {

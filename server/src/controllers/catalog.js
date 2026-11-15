@@ -3,8 +3,7 @@ const CompensationItem = require("../models/CompensationItem");
 const v = require("../utils/validation");
 const { audit } = require("../services/audit");
 
-// UC34: the Hotel Manager keeps two catalogs. There is no delete: an entry already used on a booking is only
-// deactivated, and amounts already recorded never change (BR-19, BR-43).
+// Chỉ vô hiệu hóa dịch vụ và vật phẩm bồi thường để giữ lịch sử và số tiền đã ghi.
 const catalogs = {
   services: { Model: Service, price: "unitPrice", min: 0 },
   "compensation-items": { Model: CompensationItem, price: "price", min: 1 },

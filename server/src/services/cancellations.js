@@ -10,7 +10,7 @@ const User = require("../models/User");
 const v = require("../utils/validation");
 const notifications = require("./notifications");
 const { email, getTransport } = notifications;
-// A notification problem must never undo or fail a cancellation that is already saved.
+// Lỗi thông báo không làm thất bại yêu cầu hủy đã lưu.
 const quiet = (p) => p.catch((e) => console.error("Notification failed:", e.message));
 const notify = (...a) => quiet(notifications.notify(...a));
 const notifyRole = (...a) => quiet(notifications.notifyRole(...a));
@@ -19,34 +19,34 @@ const { currentCancellationPolicy, refundPercent, checkInAt, DEFAULT_CHECK_IN } 
 
 const DAY = 864e5;
 const HOTEL_REASON = "Hotel cannot provide the room";
-const NOT_ALLOWED = "This booking can no longer be cancelled."; // MSG-34
-const WRONG_OTP = "The verification code is incorrect or has expired. Please request a new code."; // MSG-83
+const NOT_ALLOWED = "This booking can no longer be cancelled.";
+const WRONG_OTP = "The verification code is incorrect or has expired. Please request a new code.";
 const reference = (b) => b.bookingReference || String(b._id).slice(-8).toUpperCase();
 
-// Verified deposits not refunded yet, newest first (BR-17: a deposit is refunded whole, once).
+// Lấy các khoản cọc đã thu nhưng chưa hoàn, mới nhất trước.
 const deposits = (bookingId) => Payment.find({ bookingId, kind: "deposit", status: "success" }).sort({ paidAt: -1 });
 const held = (p) => p.amount;
 
-// BR-32 / BR-37: the refundable amount if the request were made at `now`.
+// Tính số tiền được hoàn tại thời điểm yêu cầu.
 async function estimate(booking, { now = new Date(), hotelCaused = false } = {}) {
   const policy = await currentCancellationPolicy(now);
   const start = checkInAt(booking.checkInDate, policy?.checkInTime || DEFAULT_CHECK_IN);
-  // BR-35: the tiers copied into the booking; ponytail: bookings created without a snapshot use the current policy.
+  // Ưu tiên chính sách đã chụp trên booking; booking cũ chưa có thì dùng chính sách hiện tại.
   const tiers = booking.policySnapshot?.cancellationTiers?.length ? booking.policySnapshot.cancellationTiers : policy?.cancellationTiers || [];
   const percent = hotelCaused ? 100 : refundPercent(tiers, (start - now) / 36e5);
   const depositPaid = (await deposits(booking._id)).reduce((s, p) => s + held(p), 0);
   return { depositPaid, refundPercent: percent, refundableAmount: Math.round((depositPaid * percent) / 100), checkInAt: start, tiers };
 }
 
-// BR-09: a cancelled or abandoned booking gives its coupon use back.
+// Hoàn lại lượt dùng mã giảm giá khi hủy hoặc bỏ booking.
 async function restoreCoupon(booking) {
   const usage = await CouponUsage.findOneAndDelete({ bookingId: booking._id });
   if (usage) await Coupon.updateOne({ _id: usage.couponId, usageCount: { $gt: 0 } }, { $inc: { usageCount: -1 } });
-  // A walk-in booking has no customer account, so its coupon use is counted without a usage row (UC14).
+  // Booking tại quầy không có tài khoản nên chỉ giảm lượt dùng chung của mã.
   else if (booking.bookingSource === "front_desk" && booking.couponCode) await Coupon.updateOne({ code: booking.couponCode, usageCount: { $gt: 0 } }, { $inc: { usageCount: -1 } });
 }
 
-// BR-16: a Confirmed booking without a paid deposit (walk-in, total 0) is cancelled at once.
+// Hủy ngay booking đã xác nhận nhưng không có cọc đã thu.
 async function cancelNow(booking, actorId, reason) {
   const done = await Booking.findOneAndUpdate(
     { _id: booking._id, status: "confirmed" },
@@ -62,8 +62,7 @@ async function cancelNow(booking, actorId, reason) {
   return done;
 }
 
-// UC08 / UC16: a Confirmed booking with a paid deposit becomes Cancellation Requested, keeps its room and
-// locks the refundable amount (BR-32, BR-36). A cancellation caused by the hotel is approved at once with 100% (BR-37).
+// Chốt tiền hoàn và giữ phòng trong lúc chờ duyệt; khách sạn chủ động hủy thì hoàn toàn bộ ngay.
 async function request(booking, { actorId, channel, verifyMethod, reason, hotelCaused = false }) {
   if (booking.status === "cancellation_requested") throw new v.HttpError(409, "A cancellation request for this booking is already waiting for review.");
   if (booking.status === "pending")
@@ -86,8 +85,7 @@ async function request(booking, { actorId, channel, verifyMethod, reason, hotelC
   return { booking: updated, refundableAmount };
 }
 
-// UC08 2b / UC35 1a: the request is withdrawn until it is approved, by the customer online (customerId) or by the
-// Receptionist at the customer's request (no customerId); the booking is Confirmed again (BR-36).
+// Khách hoặc lễ tân rút yêu cầu chưa duyệt để khôi phục booking đã xác nhận.
 async function withdraw(bookingId, actorId, { customerId } = {}) {
   const booking = await Booking.findOneAndUpdate(
     { _id: bookingId, ...(customerId ? { customerId } : {}), status: "cancellation_requested" },
@@ -100,8 +98,7 @@ async function withdraw(bookingId, actorId, { customerId } = {}) {
   return booking;
 }
 
-// UC35: the request is never rejected. The booking is Cancelled, the room released, the coupon restored and,
-// when the locked amount is > 0, a refund case is opened for UC21 (MSG-58). approverId null = the auto-approval job (BR-36).
+// Duyệt hủy, giải phóng phòng, hoàn lượt mã và tạo hồ sơ hoàn tiền khi cần; không từ chối yêu cầu.
 async function approve(bookingId, approverId) {
   const open = await Booking.findOne({ _id: bookingId, status: "cancellation_requested" });
   if (!open) throw new v.HttpError(409, "This request is no longer waiting for review.");
@@ -114,7 +111,7 @@ async function approve(bookingId, approverId) {
   await dropPhotos({ bookingId: booking._id, status: { $in: ["pending", "approved"] } });
   await CheckInOutRequest.updateMany({ bookingId: booking._id, status: { $in: ["pending", "approved"] } }, { $set: { status: "cancelled" } });
   const amount = booking.cancellation.refundableAmount || 0;
-  // One refund case per deposit payment, so each payment is refunded at most once (BR-17).
+  // Mỗi khoản cọc chỉ được tạo một hồ sơ hoàn tiền.
   let left = amount;
   for (const p of await deposits(booking._id)) {
     const part = Math.min(left, held(p));
@@ -132,7 +129,7 @@ async function approve(bookingId, approverId) {
   return booking;
 }
 
-// T20 (job 02, every 5 minutes): approve requests undecided after 24 hours or at the check-in time (BR-36).
+// Tự duyệt yêu cầu sau 24 giờ hoặc khi đến giờ nhận phòng, kiểm tra mỗi năm phút.
 async function autoApprove(now = new Date()) {
   const time = (await currentCancellationPolicy(now))?.checkInTime || DEFAULT_CHECK_IN;
   const open = await Booking.find({ status: "cancellation_requested" }).select("checkInDate cancellation.requestedAt");
@@ -143,13 +140,14 @@ async function autoApprove(now = new Date()) {
       await approve(b._id, null);
       approved++;
     } catch (error) {
-      if (error.status !== 409) throw error; // approved or withdrawn meanwhile
+      // Bỏ qua yêu cầu vừa được duyệt hoặc rút bởi thao tác khác.
+      if (error.status !== 409) throw error;
     }
   }
   return { approved };
 }
 
-// UC08 3b / BR-29: "Cancel payment" on a Pending Payment booking releases the held room at once.
+// Bỏ thanh toán sẽ giải phóng phòng đang giữ ngay lập tức.
 async function cancelPayment(bookingId, customerId) {
   const booking = await Booking.findOneAndUpdate(
     { _id: bookingId, customerId, status: "pending" },
@@ -157,15 +155,13 @@ async function cancelPayment(bookingId, customerId) {
     { new: true },
   );
   if (!booking) throw new v.HttpError(409, "This booking is not waiting for a payment.");
-  // A result that still arrives for these orders is settled as a late deposit (refund case).
+  // Khoản tiền đến sau khi hủy đơn được chuyển sang xử lý hoàn cọc muộn.
   await Payment.updateMany({ bookingId: booking._id, status: "pending" }, { status: "cancelled", failureReason: "Payment abandoned by the customer" });
   await restoreCoupon(booking);
   return booking;
 }
 
-// T10 / BR-29 (every minute): a Pending booking whose 15-minute hold ended without a deposit becomes Expired,
-// so its room is bookable again. A deposit already pending at the gateway when the hold ended keeps the room
-// 15 more minutes, the same grace payments.settle gives it.
+// Cho booking chờ cọc hết hạn sau 15 phút; đơn đang chờ ở cổng được gia hạn thêm 15 phút.
 const HOLD_GRACE = 15 * 60000;
 async function expireHolds(now = new Date()) {
   const due = await Booking.find({ status: "pending", holdExpiresAt: { $lte: now } }).select("_id holdExpiresAt");
@@ -174,8 +170,8 @@ async function expireHolds(now = new Date()) {
     const atGateway = await Payment.exists({ bookingId: b._id, status: "pending", createdAt: { $lt: b.holdExpiresAt } });
     if (atGateway && now - b.holdExpiresAt < HOLD_GRACE) continue;
     const done = await Booking.findOneAndUpdate({ _id: b._id, status: "pending" }, { $set: { status: "expired" }, $unset: { holdExpiresAt: 1 } }, { new: true });
-    if (!done) continue; // paid or abandoned meanwhile
-    // A result that still arrives for these orders is settled as a late deposit (refund case).
+    // Bỏ qua booking vừa trả tiền hoặc bị hủy; khoản đến muộn chuyển sang hoàn tiền.
+    if (!done) continue;
     await Payment.updateMany({ bookingId: done._id, status: "pending" }, { status: "cancelled", failureReason: "Room hold expired" });
     await restoreCoupon(done);
     await notify("hold_expired", done.customerId, { reference: reference(done) }, { bookingId: done._id });
@@ -184,7 +180,7 @@ async function expireHolds(now = new Date()) {
   return { expired };
 }
 
-// T19 / BR-42: a phone cancellation is verified with a code sent to the e-mail of the booking's customer account.
+// Gửi mã xác minh hủy qua điện thoại đến email tài khoản của khách đặt phòng.
 const otpHash = (bookingId, code) => createHash("sha256").update(`${bookingId}:${code}`).digest("hex");
 async function sendOtp(booking, actorId) {
   if (booking.bookingSource === "front_desk") v.fail("A walk-in booking is cancelled only at the front desk, after checking the ID document.");
@@ -192,14 +188,15 @@ async function sendOtp(booking, actorId) {
   if (!user?.email) v.fail("The booking has no customer e-mail to send a code to.");
   if (!getTransport() && process.env.NODE_ENV === "production") throw new v.HttpError(503, "E-mail is not configured, so no code can be sent.");
   const code = String(randomInt(0, 1e6)).padStart(6, "0");
-  // A new code replaces the previous one.
+  // Mã mới thay thế mã đã cấp trước đó.
   await Booking.updateOne({ _id: booking._id }, { $set: { cancellationOtp: { hash: otpHash(booking._id, code), expiresAt: new Date(Date.now() + 10 * 60000), attempts: 0 } } });
   const text = `Your cancellation code for booking ${reference(booking)} is ${code}. It is valid for 10 minutes.`;
   if (getTransport()) await email(user._id, "Cancellation code", text);
-  else console.info(`[dev mail to ${user.email}] ${text}`); // development only: no SMTP_URL
+  // Chỉ trả mã trong môi trường phát triển khi chưa cấu hình SMTP.
+  else console.info(`[dev mail to ${user.email}] ${text}`);
   await audit(actorId, "cancellation.otp_sent", "booking", booking._id);
 }
-// Valid for 10 minutes and at most 5 wrong entries; a used code is cleared.
+// Mã hiệu lực mười phút, cho nhập sai tối đa năm lần và xóa sau khi dùng.
 async function verifyOtp(bookingId, code) {
   const booking = await Booking.findById(bookingId).select("+cancellationOtp");
   const otp = booking?.cancellationOtp;

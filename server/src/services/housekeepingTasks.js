@@ -11,7 +11,7 @@ const { hotelTransaction } = require("./hotelOperations");
 const { deliver } = require("./operationNotifications");
 const checklist = ["Change bed linen and pillowcases", "Replace towels", "Refill amenities", "Empty bins", "Clean bathroom", "Vacuum"];
 
-// Áp dụng người phụ trách theo ca, ghi sự kiện để gửi sau commit.
+// Chọn người phụ trách theo ca, lưu sự kiện để gửi sau khi giao dịch hoàn tất.
 async function assignTask(task, room, slot, session, events) {
   const person = await responsibleStaff(room, slot.date, slot.shift, session);
   const previous = task.assignedTo ? String(task.assignedTo) : null;
@@ -37,7 +37,7 @@ async function assignTask(task, room, slot, session, events) {
   await task.save({ session });
 }
 
-// Giao task Pending; khi Manager đổi kế hoạch, task đang mở (Assigned, In Progress) về Pending và được giao lại (BR-41).
+// Giao nhiệm vụ chờ; khi quản lý đổi kế hoạch, đưa việc đang mở về chờ rồi giao lại.
 async function reconcileTasks(session, events, { now = new Date(), roomIds, reassignAssigned = false } = {}) {
   const filter = { status: { $in: reassignAssigned ? ["pending", "assigned", "in_progress"] : ["pending"] },
     $or: [{ scheduledDate: { $lte: now } }, { scheduledDate: null }] };
@@ -61,18 +61,18 @@ async function taskPriority(room, type, session, now) {
   return arrival && !available ? "urgent" : "normal";
 }
 
-// Tạo task trong giao dịch hiện tại và tự chọn người theo kế hoạch.
+// Tạo nhiệm vụ trong giao dịch hiện tại và chọn người theo kế hoạch.
 async function createTaskInSession(input, session, events, now) {
   const room = await Room.findById(input.roomId).session(session);
   if (!room || !room.isActive) throw new v.HttpError(409, "An active room is required for a cleaning task.");
-  // BR-41: an Ad-hoc request marked Urgent by the Receptionist is urgent; otherwise the rule of taskPriority applies.
+  // Ưu tiên khẩn cấp nếu lễ tân đánh dấu; trường hợp khác dùng quy tắc ưu tiên chung.
   const priority = input.priority === "urgent" ? "urgent" : await taskPriority(room, input.type, session, now);
   const task = new Task({ ...input, priority, scheduledDate: now });
   await assignTask(task, room, currentShift(now), session, events);
   return task;
 }
 
-// Điểm tích hợp cho module check-out, đổi phòng, kiểm tra và yêu cầu vệ sinh.
+// Điểm dùng chung để tạo nhiệm vụ sau trả phòng, đổi phòng hoặc yêu cầu dọn.
 async function createCleaningTask(input, { now = new Date() } = {}) {
   v.keys(input, ["roomId", "bookingId", "type", "requestContent", "priority", "preferredTime", "requestedBy", "assignTo", "inspectionKey"]);
   const data = { roomId: v.id(String(input.roomId), "roomId"), type: v.choice(input.type, "type", ["turnover", "ad_hoc", "inspection"]) };
@@ -81,13 +81,14 @@ async function createCleaningTask(input, { now = new Date() } = {}) {
   if (input.priority !== undefined) data.priority = v.choice(input.priority, "priority", ["normal", "urgent"]);
   if (input.preferredTime !== undefined) data.preferredTime = input.preferredTime;
   if (input.requestedBy !== undefined) data.requestedBy = input.requestedBy;
-  if (input.inspectionKey !== undefined) data.inspectionKey = String(input.inspectionKey); // unique: one inspection per stay and room
+  // Mỗi kỳ lưu trú và phòng chỉ có một nhiệm vụ kiểm tra.
+  if (input.inspectionKey !== undefined) data.inspectionKey = String(input.inspectionKey);
   const result = await hotelTransaction(async (session) => {
     const events = [];
     if (data.bookingId && !await Booking.exists({ _id: data.bookingId, "rooms.roomId": data.roomId }).session(session))
       throw new v.HttpError(409, "The booking is not linked to this room.");
     const task = await createTaskInSession(data, session, events, now);
-    // UC37 4a / BR-41: only when nobody is responsible for the room may the Receptionist pick a staff member on duty in this shift.
+    // Chỉ cho lễ tân chọn nhân viên trực khi phòng chưa có người phụ trách.
     if (task.status === "pending" && input.assignTo) {
       const slot = currentShift(now);
       if (!(await onDutyStaff(slot, session)).some((id) => String(id) === String(input.assignTo)))
@@ -101,9 +102,8 @@ async function createCleaningTask(input, { now = new Date() } = {}) {
   return { data: result.task, notificationStored: await deliver(result.events) };
 }
 
-// UC30: only the Housekeeping employee assigned to a task can progress it.
-// A room becomes Available only after its Turnover task is actually completed.
-const INVALID_CHANGE = "Invalid status change. A task must follow Assigned, In Progress, Completed (or Skipped)."; // MSG-49
+// Chỉ người được giao được đổi trạng thái; phòng chỉ trống lại khi dọn sau trả phòng hoàn tất.
+const INVALID_CHANGE = "Invalid status change. A task must follow Assigned, In Progress, Completed (or Skipped).";
 async function updateOwnTaskStatus(taskId, actorId, input, { now = new Date() } = {}) {
   v.keys(input, ["status", "reason"]);
   const status = v.choice(input.status, "status", ["in_progress", "completed", "skipped"]);
@@ -112,13 +112,14 @@ async function updateOwnTaskStatus(taskId, actorId, input, { now = new Date() } 
     if (!task) throw new v.HttpError(404, "Cleaning task not found.");
     if (!task.assignedTo || String(task.assignedTo) !== String(actorId))
       throw new v.HttpError(403, "You can only update cleaning tasks assigned to you.");
-    // BR-22: Assigned -> In Progress -> Completed; only a Routine or Ad-hoc task can be Skipped (with a reason).
+    // Bắt đầu rồi mới hoàn tất; chỉ dọn định kỳ hoặc đột xuất được bỏ qua kèm lý do.
     if (["completed", "skipped"].includes(task.status)) throw new v.HttpError(409, INVALID_CHANGE);
     if (status === "in_progress" && task.status !== "assigned") throw new v.HttpError(409, INVALID_CHANGE);
     if (status === "completed" && task.status !== "in_progress") throw new v.HttpError(409, INVALID_CHANGE);
     if (status === "skipped") {
       if (!["routine", "ad_hoc"].includes(task.type)) throw new v.HttpError(409, "Only a routine or ad-hoc task can be skipped.");
-      task.skipReason = v.text(input.reason, "reason", 2, 500); // guest declined, Do not disturb...
+      // Ghi lý do như khách từ chối hoặc yêu cầu không làm phiền.
+      task.skipReason = v.text(input.reason, "reason", 2, 500);
     }
 
     task.status = status;
@@ -130,7 +131,7 @@ async function updateOwnTaskStatus(taskId, actorId, input, { now = new Date() } 
 
     return task.populate([{ path: "roomId", select: "roomNumber floor status" }, { path: "assignedTo", select: "username customerProfile.fullName" }]);
   });
-  // BR-28: the Receptionist hears when an ad-hoc task is completed or skipped and when an inspection result is in.
+  // Báo lễ tân khi dọn đột xuất hoàn tất, bị bỏ qua hoặc có kết quả kiểm tra phòng.
   const room = result.roomId?.roomNumber;
   const events = [];
   if (result.type === "ad_hoc" && ["completed", "skipped"].includes(status))
@@ -140,7 +141,7 @@ async function updateOwnTaskStatus(taskId, actorId, input, { now = new Date() } 
   return { data: result, notificationStored: await deliver(events) };
 }
 
-// Mỗi ngày tạo tối đa một Routine cho phòng Occupied, trừ phòng trả trong ngày.
+// Mỗi ngày tạo tối đa một lần dọn định kỳ cho phòng có khách, trừ phòng trả trong ngày.
 async function createRoutineTasks(session, events, now) {
   const date = hotelDay(now);
   const today = dayDate(date), tomorrow = new Date(today.getTime() + 86400000);
@@ -159,7 +160,7 @@ async function createRoutineTasks(session, events, now) {
   return created;
 }
 
-// T18: create one urgent inspection per occupied room in the 30-minute checkout window.
+// Tạo một nhiệm vụ kiểm tra khẩn cho mỗi phòng trong vòng 30 phút trước trả phòng.
 async function createInspectionTasks(session, events, now) {
   const policy = await currentCancellationPolicy(now).session(session);
   const checkOutTime = policy?.checkOutTime || "12:00";
@@ -169,7 +170,7 @@ async function createInspectionTasks(session, events, now) {
   checkOutAt.setTime(checkOutAt.getTime() + (hour * 60 + minute) * 60000);
   const opensAt = new Date(checkOutAt.getTime() - 30 * 60000);
   const inWindow = now >= opensAt && now < checkOutAt;
-  // T18 / UC39: an approved check-out request moves the inspection to 30 minutes before the requested time.
+  // Dùng giờ trả đã duyệt để lên lịch kiểm tra trước 30 phút.
   const soon = await CheckInOutRequest.find({ type: "check_out", status: "approved", requestedTime: { $gt: now, $lte: new Date(now.getTime() + 30 * 60000) } })
     .select("bookingId").session(session);
   if (!inWindow && !soon.length) return 0;
@@ -178,7 +179,7 @@ async function createInspectionTasks(session, events, now) {
     ...(inWindow ? [{ checkOutDate: { $gte: start, $lt: end } }] : []),
     { _id: { $in: soon.map((r) => r.bookingId) } },
   ] }).select("_id rooms").session(session);
-  // A stay with an approved later check-out is inspected at its own time, not at the hotel's check-out time.
+  // Booking được trả muộn đã duyệt dùng giờ riêng thay vì giờ trả chuẩn.
   const later = new Set((await CheckInOutRequest.find({ type: "check_out", status: "approved", bookingId: { $in: bookings.map((b) => b._id) }, requestedTime: { $gt: new Date(now.getTime() + 30 * 60000) } })
     .select("bookingId").session(session)).map((r) => String(r.bookingId)));
   let created = 0;
@@ -186,7 +187,7 @@ async function createInspectionTasks(session, events, now) {
     if (later.has(String(booking._id))) continue;
     if (!line.roomId) continue;
     const inspectionKey = `${booking.id}:${line.roomId}`;
-    // One inspection per stay: the Receptionist may already have requested it at check-out (UC20 step 2).
+    // Không tạo thêm nếu lễ tân đã yêu cầu kiểm tra cho kỳ lưu trú này.
     if (await Task.exists({ $or: [{ inspectionKey }, { bookingId: booking._id, type: "inspection" }] }).session(session)) continue;
     await createTaskInSession({ roomId: line.roomId, bookingId: booking._id, type: "inspection", inspectionKey,
       requestContent: "Inspect room before scheduled checkout." }, session, events, now);
@@ -195,8 +196,8 @@ async function createInspectionTasks(session, events, now) {
   return created;
 }
 
-// Runs housekeeping schedules and assigns Pending tasks without moving active work between shifts.
-// `routine: true` forces the 07:00 routine tasks (one per room and day, so a repeat adds nothing): used by the external cron.
+// Chạy lịch và giao việc chờ, không tự chuyển việc đang làm khi đổi ca.
+// Cron có thể yêu cầu dọn định kỳ bằng routine: true; mỗi phòng chỉ tạo một lần mỗi ngày.
 async function runHousekeepingTick(now = new Date(), { routine } = {}) {
   const local = new Date(now.getTime() + 7 * 3600000);
   const result = await hotelTransaction(async (session) => {

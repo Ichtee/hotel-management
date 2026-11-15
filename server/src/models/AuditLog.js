@@ -1,8 +1,9 @@
 const mongoose = require('mongoose');
 const { Schema } = mongoose;
-// SRS 4.2.4: append-only record of sensitive operations (account/role/staff/price/coupon changes, cancellations, refunds, invoices).
+// Nhật ký chỉ ghi thêm các thao tác nhạy cảm, không sửa bản ghi cũ.
 const schema = new Schema({
-  actorId: { type: Schema.Types.ObjectId, ref: 'User', index: true }, // empty = a scheduled job (system)
+  // Không có người thực hiện khi tác vụ chạy tự động.
+  actorId: { type: Schema.Types.ObjectId, ref: 'User', index: true },
   action: { type: String, required: true, trim: true },
   targetType: { type: String, required: true, trim: true },
   targetId: Schema.Types.ObjectId,

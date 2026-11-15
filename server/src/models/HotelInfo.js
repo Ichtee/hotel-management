@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const { Schema } = mongoose;
-// Single-hotel system: exactly one document, shown on "Hotel & Room Information" and invoices.
+// Chỉ lưu một bộ thông tin khách sạn để dùng trên trang công khai và hóa đơn.
 const schema = new Schema({
   key: { type: String, default: 'main', unique: true, immutable: true },
   name: { type: String, required: true, trim: true },

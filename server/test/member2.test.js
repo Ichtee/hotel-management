@@ -15,7 +15,7 @@ async function testMember2Logic() {
   const id = () => new mongoose.Types.ObjectId();
   const hotelId = id();
 
-  // 1. Test RoomType seasonal price calculation
+  // Kiểm tra giá loại phòng theo mùa.
   const testSeasonal = {
     _id: id(),
     hotelId,
@@ -32,7 +32,7 @@ async function testMember2Logic() {
     ]
   };
 
-  // Mock getRoomTypeById for calculatePriceForDate test
+  // Giả lập truy vấn loại phòng khi tính giá theo ngày.
   const originalGetById = roomTypeService.getRoomTypeById;
   roomTypeService.getRoomTypeById = async () => testSeasonal;
 
@@ -45,9 +45,10 @@ async function testMember2Logic() {
   assert.equal(seasonalDatePrice.isSeasonal, true);
   assert.equal(seasonalDatePrice.seasonName, 'Christmas & New Year');
 
-  roomTypeService.getRoomTypeById = originalGetById; // restore
+  // Khôi phục hàm gốc sau test.
+  roomTypeService.getRoomTypeById = originalGetById;
 
-  // 2. Validate Room model operational status enums
+  // Kiểm tra các trạng thái vận hành hợp lệ của phòng.
   const validRoom = new Room({
     hotelId,
     roomTypeId: id(),
@@ -65,14 +66,14 @@ async function testMember2Logic() {
   });
   assert.match(invalidStatusRoom.validateSync().message, /status/, 'Invalid status should be rejected by enum validator');
 
-  // 3. Validate CleaningTask model status enums
+  // Kiểm tra các trạng thái hợp lệ của nhiệm vụ dọn phòng.
   const validTask = new CleaningTask({
     roomId: id(),
     status: 'pending'
   });
   assert.equal(validTask.validateSync(), undefined);
 
-  // 4. Validate RoomIssue model severity and status enums
+  // Kiểm tra mức độ và trạng thái sự cố phòng.
   const validIssue = new RoomIssue({
     roomId: id(),
     reportedBy: id(),
@@ -82,10 +83,10 @@ async function testMember2Logic() {
   assert.equal(validIssue.validateSync(), undefined);
   assert.equal(validIssue.severity, 'high');
 
-  // 5. T06: Room Availability Validation (Date overlap & Double booking prevention)
+  // Kiểm tra phòng trống, ngày giao nhau và phòng bị đặt trùng.
   console.log('[Test Member 2] Testing T06: Room Availability & Validation rules...');
 
-  // 5a. Validate duplicate room in same booking is rejected by model validator
+  // Từ chối một phòng xuất hiện hai lần trong cùng booking.
   const duplicateRoomId = id();
   const doubleBooked = new Booking({
     customerId: id(),
@@ -104,7 +105,7 @@ async function testMember2Logic() {
   assert.ok(doubleBookingErr, 'Double booking identical roomId should trigger error');
   assert.match(doubleBookingErr.message, /A room cannot be assigned twice in one booking/);
 
-  // 5b. Validate date inversion (checkOut <= checkIn) throws error in searchAvailableRooms
+  // Từ chối ngày trả không sau ngày nhận.
   await assert.rejects(
     async () => {
       await roomService.searchAvailableRooms({
@@ -115,7 +116,7 @@ async function testMember2Logic() {
     /checkOutDate must be after checkInDate/
   );
 
-  // 5c. Validate date overlap calculation logic
+  // Kiểm tra logic giao nhau của khoảng ngày.
   const roomId1 = id();
   const roomId2 = id();
   const sampleRooms = [
@@ -123,7 +124,7 @@ async function testMember2Logic() {
     { _id: roomId2, roomNumber: '102', status: 'available', isActive: true, roomTypeId: { _id: id(), isActive: true, basePrice: 150, maxOccupancy: 2 } }
   ];
 
-  // Mock Room.find and Booking.find for unit validation
+  // Giả lập truy vấn phòng và booking để kiểm tra độc lập.
   const originalRoomFind = Room.find;
   const originalBookingFind = Booking.find;
 
@@ -131,14 +132,14 @@ async function testMember2Logic() {
     populate: async () => sampleRooms
   });
 
-  // Conflicting booking on roomId1: [2026-11-10 to 2026-11-15]
+  // Tạo booking giữ phòng từ 10/11 đến 15/11/2026.
   Booking.find = () => ({
     select: async () => [
       { rooms: [{ roomId: roomId1 }] }
     ]
   });
 
-  // Search during overlapping window: [2026-11-12 to 2026-11-16]
+  // Tìm từ 12/11 đến 16/11/2026 để tạo khoảng chồng lấn.
   const availableDuringOverlap = await roomService.searchAvailableRooms({
     checkInDate: '2026-11-12',
     checkOutDate: '2026-11-16'
@@ -147,14 +148,14 @@ async function testMember2Logic() {
   assert.equal(availableDuringOverlap.length, 1, 'Overlapping booked room must be excluded');
   assert.equal(String(availableDuringOverlap[0]._id), String(roomId2), 'Only non-conflicting room 102 should be available');
 
-  // Restore mocks
+  // Khôi phục truy vấn thật sau test.
   Room.find = originalRoomFind;
   Booking.find = originalBookingFind;
 
-  // 6. UC07: Make Reservation Core validation
+  // Kiểm tra dữ liệu đầu vào khi tạo booking.
   console.log('[Test Member 2] Testing UC07: Make Reservation core...');
 
-  // 6a. Empty rooms validation
+  // Từ chối danh sách phòng rỗng.
   await assert.rejects(
     async () => {
       await bookingService.createOnlineReservation({
@@ -166,11 +167,11 @@ async function testMember2Logic() {
     /At least one room is required for reservation/
   );
 
-  // 6b. Booking reference generator produces valid BK-XXXX format
+  // Mã booking phải đúng định dạng BK-XXXX.
   const ref = await bookingService.generateBookingReference();
   assert.match(ref, /^BK-\d+$/, 'Booking reference should match BK-XXXX format');
 
-  // 7. UC07: Modify Reservation validation (BR-46)
+  // Kiểm tra điều kiện sửa booking theo chính sách hoàn tiền.
   console.log('[Test Member 2] Testing UC07: Modify Reservation & BR-46 rules...');
   const fakeBookingId = id();
   const mockBooking = {
@@ -178,7 +179,8 @@ async function testMember2Logic() {
     customerId: id(),
     hotelId,
     status: 'confirmed',
-    checkInDate: new Date('2026-11-05T14:00:00Z'), // > 48h away
+    // Còn hơn 48 giờ trước nhận phòng.
+    checkInDate: new Date('2026-11-05T14:00:00Z'),
     checkOutDate: new Date('2026-11-09T12:00:00Z'),
     rooms: [
       { roomId: roomId1, roomTypeId: id(), priceAtBooking: 500000, guestCount: 1 }
@@ -207,7 +209,7 @@ async function testMember2Logic() {
     return null;
   };
 
-  // 7a. Non-existent booking throws 404
+  // Booking không tồn tại trả lỗi 404.
   await assert.rejects(
     async () => {
       await bookingService.modifyReservation(id(), { checkInDate: '2026-11-06' });
@@ -215,7 +217,7 @@ async function testMember2Logic() {
     /Booking not found/
   );
 
-  // 7b. Invalid checkOut <= checkIn rejected
+  // Từ chối khoảng ngày có ngày trả không sau ngày nhận.
   await assert.rejects(
     async () => {
       await bookingService.modifyReservation(fakeBookingId, {
@@ -226,7 +228,7 @@ async function testMember2Logic() {
     /checkOutDate must be after checkInDate/
   );
 
-  // 7c. Cancelled booking cannot be modified
+  // Không cho sửa booking đã hủy.
   const cancelledBooking = { ...mockBooking, status: 'cancelled' };
   Booking.findById = async () => cancelledBooking;
   await assert.rejects(
@@ -236,12 +238,14 @@ async function testMember2Logic() {
     /Cannot modify booking with status "cancelled"/
   );
 
-  // 7d. BR-46: Near check-in date (< 48h, 0% refund tier) blocks date modification
+  // Chặn đổi ngày khi còn dưới 48 giờ và không được hoàn cọc.
   const nearCheckinBooking = {
     ...mockBooking,
     status: 'confirmed',
-    checkInDate: new Date(Date.now() + 24 * 3600000), // 24h away (< 48h)
-    checkOutDate: new Date(Date.now() + 5 * 86400000) // relative, so the test does not expire with the calendar
+    // Giả lập còn 24 giờ trước nhận phòng.
+    checkInDate: new Date(Date.now() + 24 * 3600000),
+    // Dùng ngày tương đối để test không lỗi khi lịch thực tế thay đổi.
+    checkOutDate: new Date(Date.now() + 5 * 86400000)
   };
   Booking.findById = async () => nearCheckinBooking;
   await assert.rejects(
@@ -253,10 +257,10 @@ async function testMember2Logic() {
     /Stay dates cannot be modified because cancellation is no longer eligible for a full refund/
   );
 
-  // 8. UC08: Cancel Reservation validation (BR-16, BR-17, BR-29, BR-36)
+  // Kiểm tra hủy booking và giải phóng phòng.
   console.log('[Test Member 2] Testing UC08: Cancel Reservation & Cancellation Requested...');
 
-  // 8a. Pending reservation: calls abandonPayment and sets status to 'expired' (BR-29)
+  // Booking chờ cọc được bỏ thanh toán và chuyển sang hết hạn.
   const pendingBooking = {
     ...mockBooking,
     status: 'pending',
@@ -267,11 +271,12 @@ async function testMember2Logic() {
   const abandonResult = await bookingService.abandonPayment(fakeBookingId);
   assert.equal(abandonResult.status, 'expired', 'Abandoned pending booking must become expired');
 
-  // 8b. Confirmed reservation > 48h away with refundAccount transitions to 'cancellation_requested' (BR-16, BR-32)
+  // Booking đã xác nhận, còn hơn 48 giờ chuyển sang chờ hủy khi có tài khoản nhận hoàn tiền.
   const confirmedBooking = {
     ...mockBooking,
     status: 'confirmed',
-    checkInDate: new Date('2026-11-15T14:00:00Z'), // > 48h away
+    // Còn hơn 48 giờ trước nhận phòng.
+    checkInDate: new Date('2026-11-15T14:00:00Z'),
     events: [],
     save: async function() { return this; }
   };
@@ -288,7 +293,7 @@ async function testMember2Logic() {
   assert.equal(cancelReqResult.cancellation.refundableAmount, 400000, 'Refundable amount must equal 100% of deposit');
   assert.equal(cancelReqResult.refundAccount.bank, 'Vietcombank');
 
-  // 8c. Withdraw cancellation request restores status to 'confirmed' (BR-36)
+  // Rút yêu cầu hủy khôi phục trạng thái đã xác nhận.
   const cancellationRequestedBooking = {
     ...cancelReqResult,
     status: 'cancellation_requested',
@@ -299,12 +304,12 @@ async function testMember2Logic() {
   const withdrawResult = await bookingService.withdrawCancellation(fakeBookingId);
   assert.equal(withdrawResult.status, 'confirmed', 'Withdrawn cancellation request must return status to confirmed');
 
-  // 9. UC37: Occupancy Report Calculation
+  // Kiểm tra tính tỷ lệ lấp đầy.
   console.log('[Test Member 2] Testing UC37: Occupancy Report math & exclusions...');
   const origRoomFind2 = Room.find;
   const origBookingFind2 = Booking.find;
 
-  // 10 total physical rooms: 8 available, 2 maintenance
+  // Mười phòng gồm tám phòng trống và hai phòng bảo trì.
   const mockPhysicalRooms = Array.from({ length: 10 }, (_, i) => ({
     _id: id(),
     roomNumber: `Room-${i + 1}`,
@@ -316,7 +321,7 @@ async function testMember2Logic() {
     populate: async () => mockPhysicalRooms
   });
 
-  // 4 overlapping bookings active during date range
+  // Bốn booking có lịch nằm trong kỳ báo cáo.
   Booking.find = async () => [
     { checkInDate: new Date('2026-11-01'), checkOutDate: new Date('2026-11-04'), rooms: [{ roomId: mockPhysicalRooms[2]._id }] },
     { checkInDate: new Date('2026-11-01'), checkOutDate: new Date('2026-11-04'), rooms: [{ roomId: mockPhysicalRooms[3]._id }] },
@@ -331,16 +336,16 @@ async function testMember2Logic() {
   });
 
   assert.equal(occupancyRep.totals.totalPhysicalRooms, 10, 'Total physical rooms should be 10');
-  // 3 days * 2 maintenance rooms = 6 maintenance nights
+  // Ba ngày nhân hai phòng bảo trì bằng sáu đêm phòng bảo trì.
   assert.equal(occupancyRep.totals.totalMaintenanceNights, 6, '3 days * 2 maintenance = 6');
-  // 3 days * 8 sellable rooms = 24 sellable nights
+  // Ba ngày nhân tám phòng bán được bằng 24 đêm phòng.
   assert.equal(occupancyRep.totals.totalSellableNights, 24, '3 days * 8 sellable = 24');
-  // 3 days * 4 occupied rooms = 12 occupied nights
+  // Ba ngày nhân bốn phòng có khách bằng 12 đêm phòng.
   assert.equal(occupancyRep.totals.totalOccupiedNights, 12, '3 days * 4 occupied = 12');
-  // Average occupancy = (12 / 24) * 100 = 50%
+  // Tỷ lệ lấp đầy là 12 trên 24, tương đương 50%.
   assert.equal(occupancyRep.totals.averageOccupancyRate, 50, 'Occupancy rate should equal 50%');
 
-  // Restore all mocks
+  // Khôi phục tất cả hàm đã giả lập.
   Booking.findById = origBookingFindById;
   Room.find = origRoomFind2;
   Booking.find = origBookingFind2;

@@ -16,12 +16,15 @@ const userSchema = new Schema({
     tokenHash: { type: String, select: false },
     expiresAt: { type: Date, select: false },
     lastSentAt: { type: Date, select: false },
-    sentAt: { type: [Date], select: false } // BR-42: the verification e-mails of the last hour, at most 3
+    // Theo dõi tối đa ba email xác minh trong một giờ.
+    sentAt: { type: [Date], select: false }
   },
-  pendingEmail: { type: String, lowercase: true, trim: true }, // UC03 4b: new e-mail waiting for its link
-  consentAt: Date, // CR-21: time of the privacy consent
+  // Địa chỉ email mới đang chờ xác minh.
+  pendingEmail: { type: String, lowercase: true, trim: true },
+  // Thời điểm khách đồng ý chính sách riêng tư.
+  consentAt: Date,
   authVersion: { type: Number, default: 0, select: false },
-  // BR-42: 5 consecutive failed logins lock the account for 15 minutes.
+  // Khóa tài khoản 15 phút khi đăng nhập sai liên tiếp năm lần.
   failedLogins: { type: Number, default: 0, select: false, alias: 'failedLoginAttempts' },
   lockedUntil: { type: Date, default: null, select: false, alias: 'lockUntil' },
   mustChangePassword: { type: Boolean, default: false },

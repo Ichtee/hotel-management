@@ -1,9 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { createHmac } from "node:crypto";
 
-// Opt-in: needs a demo server in SePay mode (SePay itself is mocked in the browser, the lookup API is unreachable on purpose):
-//   PAYMENT_PROVIDER=sepay SEPAY_MERCHANT_ID=MERCH1 SEPAY_SECRET_KEY=sekret PUBLIC_URL=http://localhost:5173 SEPAY_API_URL=http://127.0.0.1:9 npm run demo
-//   E2E_SEPAY=1 npx playwright test e2e/sepay.spec.js
+// Chỉ chạy khi E2E_SEPAY=1 và máy chủ demo dùng SePay; trình duyệt giả lập cổng, API tra cứu cố ý không truy cập được.
 test.skip(!process.env.E2E_SEPAY, "SePay mode is opt-in");
 
 const SIGN_ORDER = ["order_amount", "merchant", "currency", "operation", "order_description", "order_invoice_number", "customer_id", "payment_method", "success_url", "error_url", "cancel_url"];
@@ -21,7 +19,8 @@ test("customer is sent to SePay with a signed form, comes back, and the IPN conf
   await expect(page.getByRole("heading", { name: "My bookings" })).toBeVisible();
 
   await page.locator("article", { hasText: "BK2610B2" }).getByRole("link", { name: "Pay deposit" }).click();
-  await expect(page.getByRole("radio")).toHaveCount(1); // only the methods this deployment offers
+  // Chỉ hiện phương thức mà cổng hiện tại hỗ trợ.
+  await expect(page.getByRole("radio")).toHaveCount(1);
   await page.getByRole("button", { name: /^Pay ₫/ }).click();
   await expect(page.getByRole("heading", { name: "SePay checkout (mock)" })).toBeVisible();
 
@@ -32,12 +31,12 @@ test("customer is sent to SePay with a signed form, comes back, and the IPN conf
   expect(rest.merchant).toBe("MERCH1");
   expect(rest.order_amount).toBe("2160000");
 
-  // The customer cancels at the gateway and is sent back.
+  // Giả lập khách hủy tại cổng và quay lại ứng dụng.
   const paymentId = new URL(rest.cancel_url).searchParams.get("payment");
   await page.goto(`/api/payments/return?payment=${paymentId}&r=cancel`);
   await expect(page.getByRole("heading", { name: "Payment not completed" })).toBeVisible();
 
-  // The gateway reports the order as paid (the same order, e.g. the customer paid after all).
+  // Giả lập cổng báo đã thanh toán cho cùng đơn hàng.
   const ipn = await page.request.post("/api/payments/sepay/ipn", {
     headers: { "X-Secret-Key": "sekret" },
     data: { notification_type: "ORDER_PAID", order: { order_invoice_number: rest.order_invoice_number, order_amount: "2160000.00" }, transaction: { transaction_id: "TX-E2E-1" } },

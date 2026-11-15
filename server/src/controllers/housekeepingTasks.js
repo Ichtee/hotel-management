@@ -6,7 +6,7 @@ const { createCleaningTask, updateOwnTaskStatus } = require("../services/houseke
 const { onDutyStaff } = require("../services/housekeepingPlans");
 const { currentShift } = require("../utils/hotelTime");
 
-// UC30: the Housekeeping dashboard deliberately exposes only the current user's tasks.
+// Chỉ trả nhiệm vụ housekeeping của người đang đăng nhập.
 async function mine(req, res) {
   v.keys(req.query, ["status"]);
   const filter = { assignedTo: req.user._id };
@@ -23,24 +23,27 @@ async function updateMine(req, res) {
   res.json(await updateOwnTaskStatus(v.id(req.params.id), req.user._id, req.body));
 }
 
-// UC37: the Receptionist pushes a guest's cleaning request; it goes to the staff member responsible for the room (BR-41).
+// Lễ tân tạo yêu cầu dọn và giao cho người phụ trách phòng trong ca.
 async function createAdHoc(req, res) {
   v.keys(req.body, ["roomId", "requestContent", "priority", "preferredTime", "assignTo"]);
   const b = req.body;
-  if (typeof b.requestContent !== "string" || !b.requestContent.trim()) v.fail("Request content is required.", "requestContent"); // MSG-04
+  if (typeof b.requestContent !== "string" || !b.requestContent.trim()) v.fail("Request content is required.", "requestContent");
   let preferredTime;
   if (b.preferredTime) {
-    if (!Number.isFinite(Date.parse(b.preferredTime))) v.fail("Preferred time is invalid.", "preferredTime");
+    // CR-04: a full ISO timestamp with its offset (the form sends hotel time, +07:00); loose strings such as "tomorrow 9" are refused.
+    if (typeof b.preferredTime !== "string" || !/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/.test(b.preferredTime))
+      v.fail("Preferred time is invalid.", "preferredTime");
+    v.date(b.preferredTime.slice(0, 10), "preferredTime"); // no 30 February
     preferredTime = new Date(b.preferredTime);
   }
   const result = await createCleaningTask({
     roomId: b.roomId, type: "ad_hoc", requestContent: b.requestContent, priority: b.priority || "normal", requestedBy: req.user._id,
     ...(preferredTime ? { preferredTime } : {}), ...(b.assignTo ? { assignTo: v.id(b.assignTo, "assignTo") } : {}),
   });
-  res.status(201).json({ ...result, message: "Saved successfully." }); // MSG-01
+  res.status(201).json({ ...result, message: "Saved successfully." });
 }
 
-// Rooms that can get an ad-hoc request and the staff on duty now (for UC37 4a).
+// Lấy phòng có thể yêu cầu dọn và nhân viên đang trực.
 async function adHocOptions(_req, res) {
   const [data, onDuty] = await Promise.all([
     Room.find({ isActive: true, status: { $in: ["available", "occupied", "cleaning"] } }).select("roomNumber floor status").sort({ floor: 1, roomNumber: 1 }).lean(),

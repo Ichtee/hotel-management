@@ -13,11 +13,11 @@ const Penalty = require("../models/Penalty");
 const { notify } = require("../services/notifications");
 
 const ONLINE = ["bank_transfer", "credit_card"];
-// PAYMENT_PROVIDER=sepay uses the SePay gateway; anything else uses the built-in sandbox (tests, offline demo).
+// Chọn cổng SePay hoặc cổng giả lập theo cấu hình.
 const useSepay = () => sepay.enabled();
 const onlineMethods = () => (useSepay() ? sepay.methods() : ONLINE);
 const isStaff = (req) => req.role.permissions.includes("payments.settle");
-// BR-26: customers reach only their own bookings; front-desk staff may pay on a customer's behalf (UC13).
+// Khách chỉ trả tiền booking của mình; nhân viên có quyền được thu thay khách.
 const scope = (req, bookingId) => ({ _id: bookingId, ...(isStaff(req) ? {} : { customerId: req.user._id }) });
 async function findBooking(req, staffAllowed) {
   const filter = { _id: v.id(req.params.id) };
@@ -29,12 +29,11 @@ async function findBooking(req, staffAllowed) {
 async function openOrder(booking, kind, amount, method) {
   const fresh = { bookingId: booking._id, kind, amount, method, status: "pending", gatewayOrderId: gateway.newOrderId() };
   if (useSepay()) {
-    // SePay needs a unique invoice number per attempt, so every attempt is a new order and older open ones are retired.
+    // Mỗi lần thử SePay dùng mã hóa đơn mới và đóng các đơn cũ còn mở.
     await Payment.updateMany({ bookingId: booking._id, kind, status: "pending", gateway: "sepay" }, { status: "cancelled", failureReason: "Replaced by a newer payment attempt" });
     return Payment.create({ ...fresh, gateway: "sepay" });
   }
-  // Sandbox: one open order per booking and kind, so a double click or a retry returns the same order.
-  // ponytail: two truly simultaneous requests can still open two orders; add a partial unique index if that matters.
+  // Dùng lại đơn giả lập đang mở khi thử lại; yêu cầu đồng thời vẫn có thể tạo trùng vì chưa có chỉ mục chặn.
   const open = await Payment.findOne({ bookingId: booking._id, kind, status: "pending", gateway: "sandbox", gatewayOrderId: { $exists: true } });
   if (open) {
     Object.assign(open, { amount, method });
@@ -42,16 +41,16 @@ async function openOrder(booking, kind, amount, method) {
   }
   return Payment.create({ ...fresh, gateway: "sandbox" });
 }
-// SePay: the client auto-submits `checkout` as a form POST. Sandbox: the client opens `payUrl`.
+// SePay nhận biểu mẫu đã ký; cổng giả lập trả đường dẫn thanh toán.
 function order(p, booking, extra) {
   const base = { paymentId: p.id, orderId: p.gatewayOrderId, amount: p.amount, ...extra };
   return p.gateway === "sepay" ? { ...base, checkout: sepay.checkout(p, booking) } : { ...base, payUrl: `${gateway.payUrl(p.gatewayOrderId)}?payment=${p.id}` };
 }
 
-// Which payment methods this deployment offers.
+// Trả các phương thức mà cổng hiện tại hỗ trợ.
 const methods = (req, res) => res.json({ data: { provider: useSepay() ? "sepay" : "sandbox", methods: onlineMethods() } });
 
-// UC12: the customer pays the deposit online to confirm a pending reservation.
+// Thu cọc trực tuyến để xác nhận booking đang chờ.
 async function deposit(req, res) {
   v.keys(req.body, ["method"]);
   const method = v.choice(req.body.method, "method", onlineMethods());
@@ -65,7 +64,7 @@ async function deposit(req, res) {
   res.status(201).json({ data: order(payment, booking, { holdExpiresAt: booking.holdExpiresAt }) });
 }
 
-// Bill lines are copied when the invoice is issued, so later changes never alter it.
+// Chụp dòng thanh toán vào hóa đơn để thay đổi sau này không ảnh hưởng lịch sử.
 async function supplementaryInvoice(booking, issuedBy) {
   const lines = (await Penalty.find({ bookingId: booking._id, status: "confirmed" }).lean()).map((p) => ({ name: p.itemName, amount: p.amount }));
   const total = lines.reduce((sum, l) => sum + l.amount, 0);
@@ -79,10 +78,9 @@ async function supplementaryInvoice(booking, issuedBy) {
   return invoice;
 }
 
-// Collected by the Receptionist and recorded at once (UC11).
+// Ghi nhận ngay khoản lễ tân đã thu tại quầy.
 const DESK = ["cash", "pos", "bank_transfer"];
-// UC11: the Receptionist collects the remaining amount at check-out. BR-14: it is never paid online or through
-// the gateway (the deposit is the only online payment); it may be split over several payments until it is 0 (BR-21).
+// Thu phần còn lại tại quầy, có thể chia nhiều lần đến khi đủ; không thu qua cổng trực tuyến.
 async function finalPayment(req, res) {
   v.keys(req.body, ["method", "amount", "transactionRef"]);
   const method = v.choice(req.body.method, "method", DESK);
@@ -95,7 +93,7 @@ async function finalPayment(req, res) {
   const payment = await Payment.create({ bookingId: booking._id, kind: "final", amount, method, transactionRef, status: "success", paidAt: new Date(), recordedBy: req.user._id });
   await announce(payment, true);
   if (amount === due) {
-    // UC38 4b: a penalty paid after check-out gets its own supplementary invoice; the check-out invoice is not changed.
+    // Khoản bồi thường trả sau khi rời khách sạn có hóa đơn bổ sung riêng.
     if (booking.status === "checked_out") await supplementaryInvoice(booking, req.user._id);
     await settlePaid(booking._id);
   }
@@ -103,7 +101,7 @@ async function finalPayment(req, res) {
   res.status(201).json({ data: { paymentId: payment.id, status: "success", amount, remaining: due - amount } });
 }
 
-// UC38 (built-in sandbox gateway): a signed result. Nothing changes unless the signature, order and amount all match (BR-14, BR-15).
+// Chỉ nhận kết quả giả lập khi chữ ký, đơn hàng và số tiền đều khớp.
 async function callback(req, res) {
   v.keys(req.body, ["orderId", "transactionRef", "status", "amount", "signature"]);
   const p = {
@@ -120,13 +118,14 @@ async function callback(req, res) {
   res.json({ data: { status: result.duplicate ? payment.status : result.payment.status, duplicate: Boolean(result.duplicate) } });
 }
 
-// UC38 (SePay): IPN for a paid order. SePay expects HTTP 200 with {"success": true}; any other answer is retried or logged as failed.
+// Nhận thông báo SePay; phản hồi HTTP 200 với success: true để cổng không gửi lại.
 async function sepayIpn(req, res) {
   if (!useSepay()) throw new v.HttpError(404, "Endpoint not found.");
   if (!sepay.isIpnKey(req.get("X-Secret-Key"))) throw new v.HttpError(401, "Invalid IPN key.");
   const body = req.body;
   if (!body || typeof body !== "object" || Array.isArray(body)) v.fail("A JSON object is required.");
-  if (body.notification_type !== "ORDER_PAID") return res.json({ success: true }); // e.g. TRANSACTION_VOID: acknowledged, not a payment
+  // Xác nhận đã nhận sự kiện hủy giao dịch nhưng không ghi nhận thanh toán.
+  if (body.notification_type !== "ORDER_PAID") return res.json({ success: true });
   const invoice = v.text(body.order?.order_invoice_number, "order_invoice_number", 1, 64);
   const payment = await Payment.findOne({ gateway: "sepay", gatewayOrderId: invoice });
   if (!payment) throw new v.HttpError(404, "Unknown transaction.");
@@ -134,9 +133,10 @@ async function sepayIpn(req, res) {
   const ref = body.transaction?.transaction_id ? String(body.transaction.transaction_id) : invoice;
   let outcome;
   try {
-    outcome = await reconcile(payment, ref); // the IPN carries only a static key, so ask SePay too
+    // Tra cứu thêm từ SePay vì thông báo chỉ dùng khóa xác thực cố định.
+    outcome = await reconcile(payment, ref);
   } catch (error) {
-    // The lookup itself failed (network, wrong lookup path): the key-authenticated IPN is still trustworthy.
+    // Nếu tra cứu thất bại, xử lý theo thông báo đã xác thực bằng khóa.
     console.error("SePay lookup failed, trusting the IPN:", error.message);
     outcome = await settle(payment, { status: "success", transactionRef: ref });
   }
@@ -144,7 +144,7 @@ async function sepayIpn(req, res) {
   res.json({ success: true });
 }
 
-// Sandbox stand-in for the provider's checkout page: sends a signed result through the same callback logic.
+// Cổng giả lập gửi kết quả có chữ ký qua cùng luồng xử lý thông báo.
 async function sandbox(req, res) {
   v.keys(req.body, ["result"]);
   const result = v.choice(req.body.result, "result", ["success", "failed"]);
@@ -156,8 +156,7 @@ async function sandbox(req, res) {
   return callback(req, res);
 }
 
-// Where the gateway sends the browser back to (success / error / cancel). It only opens the result screen:
-// the outcome comes from the IPN or a lookup, never from this redirect.
+// Chuyển hướng chỉ mở màn hình kết quả; trạng thái lấy từ thông báo cổng hoặc tra cứu.
 function back(req, res) {
   const id = String(req.query.payment || "");
   const result = ["success", "error", "cancel"].includes(req.query.r) ? `&r=${req.query.r}` : "";
@@ -165,12 +164,12 @@ function back(req, res) {
   res.redirect(mongoose.isObjectIdOrHexString(id) ? `${base}/#/pay/result?payment=${id}${result}` : `${base}/#/my-bookings`);
 }
 
-// Payment Result screen: polled by the client while the callback is pending.
+// Cho giao diện thăm dò trạng thái khi đang chờ thông báo thanh toán.
 async function show(req, res) {
   let payment = await Payment.findById(v.id(req.params.id));
   if (!payment || !(await Booking.exists(scope(req, payment.bookingId)))) throw new v.HttpError(404, "Payment not found.");
   if (payment.gateway === "sepay" && payment.status === "pending" && Date.now() - payment.createdAt > 10000) {
-    // The IPN may have been lost (e.g. a sleeping free-tier server): ask SePay directly.
+    // Tra cứu SePay nếu thông báo có thể bị mất khi máy chủ tạm ngừng.
     await reconcile(payment).catch((e) => console.error("SePay lookup failed:", e.message));
     payment = await Payment.findById(payment._id);
   }
@@ -178,7 +177,7 @@ async function show(req, res) {
   const { kind, amount, currency, method, status, paidAt, failureReason } = payment;
   res.json({ data: { _id: payment.id, bookingId: payment.bookingId, kind, amount, currency, method, status, paidAt, failureReason, booking } });
 }
-// Billing screens (read-only): the latest payments and invoices with their booking, newest first.
+// Lấy danh sách thanh toán và hóa đơn ở chế độ chỉ đọc, mới nhất trước.
 const BOOKING = { path: "bookingId", select: "bookingReference guestName status" };
 async function listing(req, res) {
   v.keys(req.query, ["status", "kind", "limit"]);

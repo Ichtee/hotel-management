@@ -1,5 +1,4 @@
-// Field-by-field input validation, checked against SRS v2.5 (CR-03, CR-04, CR-12, BR-01..BR-31).
-// Each row: [what is sent, expected HTTP status]. A 400 means the server rejects the value.
+// Kiểm tra từng trường đầu vào; mỗi dòng gồm dữ liệu gửi và mã HTTP mong đợi.
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const mongoose = require("mongoose");
@@ -21,7 +20,7 @@ async function login(email) {
   await send(agent, "post", "/api/auth/login", { email, password }).expect(200);
   return agent;
 }
-// Runs every case and reports all the wrong ones together, so one run shows every gap.
+// Chạy mọi trường hợp rồi báo lỗi cùng lúc để thấy toàn bộ trường chưa đạt.
 async function check(label, cases, call) {
   const wrong = [];
   for (const [name, input, want] of cases) {
@@ -58,7 +57,7 @@ test("register: CR-12 password, CR-04 email and phone, BR-24 name, CR-21 consent
   let n = 0;
   const unique = (o) => reg({ username: `u${++n}x`, email: `u${n}@example.com`, ...o });
   await check("register", [
-    // CR-12: at least 8 characters with an upper-case letter, a lower-case letter and a digit
+    // Mật khẩu ít nhất tám ký tự, có chữ hoa, chữ thường và chữ số.
     ["password 8 chars Abcdefg1 is valid", unique({ password: "Abcdefg1", confirmPassword: "Abcdefg1" }), 201],
     ["password 7 chars", unique({ password: "Abcdef1", confirmPassword: "Abcdef1" }), 400],
     ["no upper-case", unique({ password: "abcdefg1", confirmPassword: "abcdefg1" }), 400],
@@ -69,19 +68,19 @@ test("register: CR-12 password, CR-04 email and phone, BR-24 name, CR-21 consent
     ["password not a string", unique({ password: 12345678, confirmPassword: 12345678 }), 400],
     ["confirm does not match", unique({ confirmPassword: "Abcdefg2" }), 400],
     ["password over 128", unique({ password: "Aa1" + "x".repeat(130), confirmPassword: "Aa1" + "x".repeat(130) }), 400],
-    // BR-24: full name 2-50 characters, trimmed
+    // Họ tên từ hai đến 50 ký tự sau khi bỏ khoảng trắng thừa.
     ["name 1 char", unique({ fullName: "A" }), 400],
     ["name 2 chars", unique({ fullName: "An" }), 201],
     ["name 50 chars", unique({ fullName: "a".repeat(50) }), 201],
     ["name 51 chars", unique({ fullName: "a".repeat(51) }), 400],
     ["name only spaces", unique({ fullName: "     " }), 400],
     ["name missing", unique({ fullName: undefined }), 400],
-    // CR-04 email
+    // Kiểm tra định dạng email.
     ["email without @", unique({ email: "plainaddress" }), 400],
     ["email without domain dot", unique({ email: "a@b" }), 400],
     ["email with space", unique({ email: "a b@example.com" }), 400],
     ["email empty", unique({ email: "" }), 400],
-    // CR-04 / BR-24 phone: 10-11 digits or + and 8-15 digits
+    // Số Việt Nam có 10–11 chữ số; số quốc tế có dấu cộng và 8–15 chữ số.
     ["phone 10 digits", unique({ phone: "0912345678" }), 201],
     ["phone 11 digits", unique({ phone: "09123456789" }), 201],
     ["phone 9 digits", unique({ phone: "091234567" }), 400],
@@ -92,11 +91,11 @@ test("register: CR-12 password, CR-04 email and phone, BR-24 name, CR-21 consent
     ["phone + and 7 digits", unique({ phone: "+1234567" }), 400],
     ["phone + and 16 digits", unique({ phone: "+1234567890123456" }), 400],
     ["phone missing", unique({ phone: undefined }), 400],
-    // CR-21 consent
+    // Kiểm tra đồng ý chính sách riêng tư.
     ["consent false", unique({ consent: false }), 400],
     ["consent missing", unique({ consent: undefined }), 400],
     ["consent string 'true'", unique({ consent: "true" }), 400],
-    // extra field and duplicates
+    // Từ chối trường thừa và dữ liệu trùng.
     ["unknown field is rejected", unique({ role: "admin" }), 400],
     ["duplicate e-mail", { ...reg(), username: "dupuser1", email: "customer@example.com" }, 409],
     ["duplicate username", { ...reg(), username: "customer", email: "dup2@example.com" }, 409],
@@ -112,7 +111,7 @@ test("change password: CR-12 and the current password is required", async () => 
     ["new password no lower-case", { currentPassword: password, newPassword: "ABCDEFG1" }, 400],
     ["new password no digit", { currentPassword: password, newPassword: "Abcdefgh" }, 400],
     ["same as current", { currentPassword: password, newPassword: password }, 400],
-    // last: it really changes the password
+    // Chạy sau cùng vì thao tác thực sự đổi mật khẩu.
     ["a valid 8-character new password", { currentPassword: password, newPassword: "Abcdefg1" }, 200],
   ], (b) => send(customer, "put", "/api/profile/password", b));
 });

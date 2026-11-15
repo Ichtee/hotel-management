@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-// UC38 / BR-43: hotel items a guest can be charged for; every room has the same ones. The Hotel Manager's editor (UC34) can maintain this later.
+// Danh mục vật phẩm bồi thường dùng chung cho mọi phòng, do quản lý cập nhật.
 const schema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, unique: true },
   price: { type: Number, required: true, min: 0 },

@@ -30,7 +30,8 @@ export default function AdminRoomMap() {
     setLoading(true);
     try {
       const [roomsRes, typesRes] = await Promise.allSettled([
-        roomApi.getRooms({ limit: 100 }), // the API pages by 10 by default
+        // Chỉ định số bản ghi vì API mặc định phân trang theo mười mục.
+        roomApi.getRooms({ limit: 100 }),
         roomApi.getRoomTypes()
       ]);
 
@@ -72,7 +73,7 @@ export default function AdminRoomMap() {
     loadData();
   }, []);
 
-  // Change room status (UC30, lifecycle)
+  // Chuyển phòng vào hoặc ra khỏi trạng thái bảo trì.
   const handleStatusChange = async (targetRoom, newStatus) => {
     const roomKey = targetRoom._id || targetRoom.no;
     if (newStatus !== 'maintenance' && targetRoom.status !== 'maintenance') {
@@ -89,7 +90,7 @@ export default function AdminRoomMap() {
     }
   };
 
-  // Add room (UC30)
+  // Thêm phòng mới.
   const handleAddRoom = async (e) => {
     e.preventDefault();
     const trimmedNo = newRoomNumber.trim();
@@ -104,7 +105,8 @@ export default function AdminRoomMap() {
       roomNumber: trimmedNo,
       floor: parseInt(newRoomFloor, 10),
       roomTypeId: newRoomTypeId || roomTypes[0]?.id || roomTypes[0]?._id
-    }; // the server starts every new room as Available and refuses a status field
+    // Máy chủ tự đặt phòng mới ở trạng thái trống và không nhận trường status.
+    };
 
     try {
       await roomApi.createRoom(payload);
@@ -117,7 +119,7 @@ export default function AdminRoomMap() {
     }
   };
 
-  // Delete room (UC30)
+  // Vô hiệu hóa phòng đã chọn.
   const handleDeleteRoom = async (targetRoom) => {
     if (!window.confirm(`Deactivate room ${targetRoom.no}? It will no longer be sold; past bookings keep it.`)) return;
     try {
@@ -225,7 +227,7 @@ export default function AdminRoomMap() {
         </div>
       </div>
 
-      {/* One row of filters: each count is a button, its dot is the colour key of the map (no colour-only meaning: the label is there too). */}
+      {/* Bộ lọc có số lượng, nhãn và màu trạng thái để dễ nhận biết. */}
       <div className="room-filters" role="group" aria-label="Filter rooms by status">
         <button type="button" className={`room-filter ${filterStatus === 'all' ? 'on' : ''}`} aria-pressed={filterStatus === 'all'} onClick={() => setFilterStatus('all')}>
           <span>All rooms</span><strong>{counts.total}</strong>
@@ -237,7 +239,7 @@ export default function AdminRoomMap() {
         ))}
       </div>
 
-      {/* Floors grid */}
+      {/* Danh sách phòng theo tầng. */}
       {floors.map(fl => {
         const floorRooms = filteredRooms.filter(r => String(r.floor ?? '?') === fl);
         if (floorRooms.length === 0) return null;

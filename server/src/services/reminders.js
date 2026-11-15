@@ -2,9 +2,9 @@ const Booking = require("../models/Booking");
 const { notify } = require("./notifications");
 const { currentCancellationPolicy, DEFAULT_CHECK_IN } = require("./policies");
 
-// Notification service (SRS 2.4.4 #6): the arrival reminder one day before check-in, sent once per booking.
+// Gửi nhắc lịch trước ngày nhận phòng một ngày, mỗi booking chỉ một lần.
 async function arrivalReminders(now = new Date()) {
-  // Tomorrow in Asia/Ho_Chi_Minh (UTC+7); booking dates are stored as UTC midnight of the stay date.
+  // Tính ngày mai theo giờ Việt Nam rồi đối chiếu ngày lưu trú lưu ở UTC.
   const local = new Date(now.getTime() + 7 * 3600000);
   const tomorrow = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + 1));
   const due = await Booking.find({
@@ -16,7 +16,7 @@ async function arrivalReminders(now = new Date()) {
   const time = (await currentCancellationPolicy(now))?.checkInTime || DEFAULT_CHECK_IN;
   let sent = 0;
   for (const b of due) {
-    // Claim first, so two runs never send the same reminder twice.
+    // Đánh dấu trước khi gửi để hai lượt chạy không gửi trùng.
     const claimed = await Booking.updateOne({ _id: b._id, reminderSentAt: { $exists: false } }, { $set: { reminderSentAt: now } });
     if (!claimed.modifiedCount) continue;
     await notify("arrival_reminder", b.customerId, { reference: b.bookingReference, date: b.checkInDate.toISOString().slice(0, 10), time }, { bookingId: b._id })

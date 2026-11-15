@@ -2,7 +2,7 @@ const Notification = require("../models/Notification");
 const User = require("../models/User");
 const Role = require("../models/Role");
 
-// Gửi thông báo sau commit, lỗi thông báo không làm mất giao dịch nghiệp vụ.
+// Gửi thông báo sau khi giao dịch hoàn tất; lỗi gửi không làm mất dữ liệu nghiệp vụ.
 async function deliver(events) {
   let stored = true;
   for (const event of events) {

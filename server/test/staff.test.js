@@ -88,7 +88,8 @@ test("UC22/UC33 deny non-manager access including custom roles with staff.manage
   await request(app).get("/api/staff").expect(401);
   await send(admin, "post", "/api/users", { ...payload(), username: "backdoor" }).expect(403);
   await send(admin, "patch", `/api/users/${staff.id}`, { status: "suspended" }).expect(403);
-  await send(admin, "patch", `/api/roles/${roles.receptionist.id}`, { permissions: [] }).expect(404); // roles are fixed (SRS 2.4.3): no role editor
+  // Danh sách vai trò cố định, không cho tạo vai trò mới.
+  await send(admin, "patch", `/api/roles/${roles.receptionist.id}`, { permissions: [] }).expect(404);
   await admin.get("/api/users?role=receptionist").expect(403);
   const list = await admin.get("/api/users").expect(200);
   assert.ok(!list.body.data.some((u) => u._id === staff.id));
@@ -147,7 +148,7 @@ test("UC22 validates fields, targets, search and required status reasons without
   assert.equal(audit.detail.after.status, "suspended");
 });
 
-// Tạo nhiệm vụ và kế hoạch để kiểm tra tác động của UC22 lên housekeeping.
+// Tạo nhiệm vụ và kế hoạch để kiểm tra tác động khi thay đổi nhân viên.
 async function responsibilities(staffId) {
   const managerUser = await User.findOne({ email: "manager@example.com" });
   const roomId = new mongoose.Types.ObjectId();
@@ -166,7 +167,7 @@ test("UC22 deactivation or role change returns Assigned and In Progress tasks to
     const staff = await employee("housekeeping");
     const { tasks, plan, past } = await responsibilities(staff.id);
     const result = await send(manager, "patch", `/api/staff/${staff.id}`, patch).expect(200);
-    assert.deepEqual(result.body.meta.responsibility, { pendingTasks: 3, revokedAssignments: 1 }); // BR-41 (SRS v2.5)
+    assert.deepEqual(result.body.meta.responsibility, { pendingTasks: 3, revokedAssignments: 1 });
     assert.equal(result.body.meta.notificationStored, true);
     for (const task of tasks.slice(0, 3)) {
       const saved = await CleaningTask.findById(task._id);

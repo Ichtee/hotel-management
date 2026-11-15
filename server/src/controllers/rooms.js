@@ -26,7 +26,7 @@ function validate(body, creating = false) {
   return input;
 }
 
-// Lấy phòng trong transaction hoặc trả lỗi không tìm thấy.
+// Lấy phòng trong giao dịch hoặc báo không tìm thấy.
 async function findRoom(id, session) {
   const room = await Room.findById(id).session(session);
   if (!room) throw new v.HttpError(404, "Room not found.");
@@ -56,7 +56,7 @@ async function detail(req, res) {
   res.json({ data: room });
 }
 
-// Tạo phòng Available thuộc một loại phòng đang hoạt động.
+// Tạo phòng trống thuộc loại phòng đang hoạt động.
 async function create(req, res) {
   const input = validate(req.body, true);
   const result = await hotelTransaction(async (session) => {
@@ -72,7 +72,7 @@ async function create(req, res) {
   res.status(201).json({ data: result.data, meta: { notificationStored: await deliver(result.events) } });
 }
 
-// Sửa phòng, kiểm tra tồn nguồn khi đổi loại hoặc vô hiệu hóa và cập nhật phạm vi tầng.
+// Kiểm tra sức chứa khi đổi loại hoặc vô hiệu hóa phòng, đồng thời cập nhật phạm vi tầng.
 async function update(req, res) {
   const input = validate(req.body);
   const id = v.id(req.params.id);
@@ -133,7 +133,7 @@ async function maintenance(req, res) {
   res.json({ data });
 }
 
-// Liệt kê sự cố của phòng để Manager xem và xử lý.
+// Liệt kê sự cố của phòng để quản lý xem và xử lý.
 async function issues(req, res) {
   const id = v.id(req.params.id);
   v.keys(req.query, ["status", "page", "limit"]);
@@ -143,7 +143,7 @@ async function issues(req, res) {
   res.json(await v.list(RoomIssue, filter, req.query));
 }
 
-// Đóng sự cố; Manager gỡ bảo trì bằng thao tác riêng khi đã xử lý hết.
+// Đóng sự cố; quản lý gỡ bảo trì riêng khi đã xử lý hết.
 async function resolveIssue(req, res) {
   v.keys(req.body, []);
   const id = v.id(req.params.id);

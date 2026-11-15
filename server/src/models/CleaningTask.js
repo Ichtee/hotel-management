@@ -14,9 +14,12 @@ const schema = new Schema({
   assignmentShift: { type: String, enum: ['morning', 'afternoon', 'night'] },
   checklist: [{ label: String, completed: { type: Boolean, default: false } }],
   requestContent: String,
-  preferredTime: Date, // UC37: empty = as soon as possible
-  requestedBy: { type: Schema.Types.ObjectId, ref: 'User' }, // Receptionist of an ad-hoc task
-  skipReason: String, // UC30 3b: guest declined or Do not disturb
+  // Để trống thời gian nếu cần dọn sớm nhất có thể.
+  preferredTime: Date,
+  // Lễ tân tạo yêu cầu dọn đột xuất.
+  requestedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  // Lý do bỏ qua nhiệm vụ, như khách từ chối hoặc yêu cầu không làm phiền.
+  skipReason: String,
   routineKey: { type: String },
   inspectionKey: { type: String },
   unassignedNotifiedKey: String

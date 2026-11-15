@@ -10,7 +10,7 @@ const { logChange } = require("../services/audit");
 const { uploadParams } = require("../services/idPhoto");
 const visibleStatuses = ["visible", "approved"];
 
-// Kiểm tra dữ liệu loại phòng theo BR-01, không sửa giá mùa qua UC24.
+// Kiểm tra dữ liệu loại phòng; giá theo mùa có luồng cập nhật riêng.
 function validate(body, creating = false) {
   fields.body(body, ["name", "description", "basePrice", "maxOccupancy", "amenities", "images", "bedType", "roomSizeSqm", "isActive"]);
   const data = {};
@@ -30,7 +30,7 @@ function validate(body, creating = false) {
   return data;
 }
 
-// Tính điểm từ review đang hiển thị, không sử dụng giá trị trung bình cũ.
+// Tính điểm từ đánh giá đang công khai, không dùng điểm trung bình cũ.
 async function reviewSummary(id) {
   const rows = await Review.aggregate([
     { $match: { roomTypeId: new mongoose.Types.ObjectId(id), status: { $in: visibleStatuses } } },
@@ -39,7 +39,7 @@ async function reviewSummary(id) {
   return rows.length ? { count: rows[0].count, averageRating: rows[0].averageRating } : { count: 0, averageRating: null };
 }
 
-// Liệt kê loại phòng cho Manager với bộ lọc và phân trang.
+// Liệt kê loại phòng cho quản lý với bộ lọc và phân trang.
 async function listing(req, res) {
   v.keys(req.query, ["q", "status", "page", "limit"]);
   const filter = { name: v.search(req.query) };
@@ -47,7 +47,7 @@ async function listing(req, res) {
   res.json(await v.list(RoomType, filter, req.query));
 }
 
-// Trả chi tiết loại phòng kèm số lượng và điểm review công khai.
+// Trả chi tiết loại phòng, số lượng và điểm đánh giá công khai.
 async function detail(req, res) {
   const id = v.id(req.params.id);
   const data = await RoomType.findById(id).lean();
@@ -56,7 +56,7 @@ async function detail(req, res) {
   res.json({ data });
 }
 
-// Tạo loại phòng và ghi audit trong cùng giao dịch.
+// Tạo loại phòng và ghi nhật ký trong cùng giao dịch.
 async function create(req, res) {
   const input = validate(req.body, true);
   const data = await hotelTransaction(async (session) => {
@@ -67,7 +67,7 @@ async function create(req, res) {
   res.status(201).json({ data });
 }
 
-// Sửa loại phòng mà không thay đổi phòng hoặc snapshot của booking cũ.
+// Sửa loại phòng, giữ nguyên phòng và dữ liệu đã chốt trên booking cũ.
 async function update(req, res) {
   const input = validate(req.body);
   const id = v.id(req.params.id);
@@ -83,7 +83,7 @@ async function update(req, res) {
   res.json({ data });
 }
 
-// Chặn xóa loại phòng còn dữ liệu liên kết, kể cả giá mùa nhúng trong model.
+// Chặn xóa loại phòng còn dữ liệu liên quan, gồm cả giá theo mùa.
 async function remove(req, res) {
   const id = v.id(req.params.id);
   await hotelTransaction(async (session) => {
@@ -103,7 +103,7 @@ async function remove(req, res) {
   res.json({ data: { message: "Room type deleted." } });
 }
 
-// Cho Manager xem cả review ẩn; khách chỉ nhận nội dung đang công khai.
+// Quản lý xem được đánh giá ẩn; khách chỉ xem đánh giá công khai.
 async function reviews(req, res) {
   const id = v.id(req.params.id);
   const publicView = req.path.startsWith("/api/public/");
@@ -118,7 +118,7 @@ async function reviews(req, res) {
   res.json(result);
 }
 
-// Ẩn hoặc hiện review, lưu lý do và người kiểm duyệt vào audit log.
+// Ẩn hoặc hiện đánh giá, ghi lý do và người xử lý vào nhật ký.
 async function visibility(req, res) {
   v.keys(req.body, ["hidden", "reason"]);
   const hidden = v.boolean(req.body.hidden, "hidden");
@@ -138,10 +138,14 @@ async function visibility(req, res) {
   });
   res.json({ data });
 }
-// Submit review for completed booking (UC12, BR-23)
+// Gửi đánh giá cho booking đã hoàn tất lưu trú.
 async function submitReview(req, res) {
-  const { bookingId, rating, title, comment } = req.body;
-  if (!bookingId) throw new v.HttpError(400, "Booking ID is required.");
+  v.keys(req.body, ["bookingId", "rating", "title", "comment"]);
+  const { rating } = req.body;
+  const bookingId = v.id(req.body.bookingId, "bookingId");
+  // Same limits as POST /api/bookings/:id/reviews.
+  const title = v.text(req.body.title || "", "title", 0, 120);
+  const comment = v.text(req.body.comment || "", "comment", 0, 2000);
   const numRating = Number(rating);
   if (!Number.isInteger(numRating) || numRating < 1 || numRating > 5) {
     throw new v.HttpError(400, "Rating must be an integer between 1 and 5.");
@@ -174,8 +178,8 @@ async function submitReview(req, res) {
     bookingId: booking._id,
     roomTypeId,
     rating: numRating,
-    title: title ? String(title).trim() : undefined,
-    comment: comment ? String(comment).trim() : undefined,
+    title: title || undefined,
+    comment: comment || undefined,
     status: "visible"
   });
 
@@ -185,7 +189,7 @@ async function submitReview(req, res) {
   });
 }
 
-// Lấy danh sách review của chính khách hàng đăng nhập
+// Lấy đánh giá của khách đang đăng nhập.
 async function customerReviews(req, res) {
   const userId = req.user?._id;
   if (!userId) return res.json({ data: [] });

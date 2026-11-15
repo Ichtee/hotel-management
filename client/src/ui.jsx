@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from './api/client.js';
 
-// The hotel name for the logo and the © line: the saved Hotel information (UC27), "GrandStay" until it is loaded.
+// Dùng tên khách sạn đã lưu cho logo và bản quyền; tạm dùng GrandStay khi đang tải.
 let hotelNameReq;
-export const forgetHotelName = () => { hotelNameReq = null; dispatchEvent(new Event('hotel-info-saved')); }; // the logos on screen reload the name
+// Yêu cầu các logo đang hiển thị tải lại tên khách sạn.
+export const forgetHotelName = () => { hotelNameReq = null; dispatchEvent(new Event('hotel-info-saved')); };
 export function useHotelName() {
   const [name, setName] = useState('GrandStay');
   useEffect(() => {
@@ -18,7 +19,7 @@ export function useHotelName() {
   }, []);
   return name;
 }
-// "Sunrise Hotel" -> Sunrise <Hotel>, "GrandStay" -> Grand<Stay>; the last part is the gold one. A name that cannot be split stays whole.
+// Tô vàng phần cuối tên khách sạn; giữ nguyên tên nếu không tách được.
 export function BrandName() {
   const n = useHotelName();
   const m = /^(.+ )(\S+)$/.exec(n) || /^(.+?)([A-Z][a-z]+)$/.exec(n);
@@ -40,7 +41,7 @@ export const Field = ({ label, error, children }) => (
   <label className={error ? 'has-err' : ''}>{label}{children}{error && <small className="err">{error}</small>}</label>
 );
 
-// A task is its own page with its own URL: #/path?screen=name&id=123. Back, refresh and a copied link all work.
+// Lưu màn hình thao tác trong URL để hỗ trợ quay lại, tải lại và chia sẻ liên kết.
 const hashParts = () => { const [base, qs = ''] = location.hash.split('?'); return [base, new URLSearchParams(qs)]; };
 let navigated = false;
 export function useScreen() {
@@ -66,7 +67,7 @@ export function useScreen() {
   };
   return { ...s, go, close };
 }
-// New / edit pages of a list: #/path?screen=new, or ?screen=edit&id=... (items are the loaded list).
+// Mở trang thêm hoặc sửa từ tham số URL và danh sách đã tải.
 export function useEditPage(items) {
   const sc = useScreen();
   const open = sc.name === 'new' ? {} : sc.name === 'edit' ? (items || []).find((x) => x._id === sc.id) : undefined;
@@ -112,8 +113,7 @@ export function Screen({ title, onClose, children }) {
   );
 }
 
-// A task opens as its own screen in the page area (no overlay): the page behind is hidden, the header shows "Back",
-// and the browser Back button returns to the list. One history entry is pushed per screen and removed when it closes.
+// Mỗi màn hình thao tác có một mục lịch sử; đóng màn hình sẽ quay lại danh sách.
 let screens = 0;
 export function Modal({ title, onClose, children }) {
   const [id] = useState(() => ++screens);
@@ -132,11 +132,12 @@ export function Modal({ title, onClose, children }) {
     return () => {
       alive.current = false;
       window.removeEventListener('popstate', back); window.removeEventListener('keydown', esc);
-      // Deferred: React strict mode unmounts and remounts once in development; only a real close drops our history entry.
+      // Hoãn dọn lịch sử để lần gắn lại của React StrictMode không bị coi là đóng thật.
       setTimeout(() => {
         if (alive.current) return;
         if (!host?.querySelector('.screen')) host?.classList.remove('has-screen');
-        if (history.state?.screen === id) history.back(); // closed by a button, not by Back
+        // Chỉ lùi lịch sử khi đóng bằng nút, không lùi thêm khi dùng nút quay lại.
+        if (history.state?.screen === id) history.back();
         window.scrollTo(0, scrollY);
       }, 0);
     };
@@ -153,7 +154,7 @@ export function Modal({ title, onClose, children }) {
   return host ? createPortal(screen, host) : screen;
 }
 
-// Fetches a list endpoint and reloads when the path or params change.
+// Tải lại dữ liệu khi đường dẫn hoặc tham số API thay đổi.
 export function useApi(path, enabled = true) {
   const [state, setState] = useState({ data: null, meta: null, error: null, loading: true });
   const load = useCallback(() => {
@@ -168,8 +169,8 @@ export function useApi(path, enabled = true) {
 
 export function DataTable({ cols, rows }) {
   const words = /^(confirmed|cancellation_requested|checked_in|checked_out|cancelled|pending|assigned|active|inactive|paid|completed|skipped|done|in_progress|open|resolved|high|medium|low|normal|urgent|published|suspended|deleted|approved|rejected|refunded|expired|no_show|unpaid|deposit_paid|fully_paid)$/;
-  const figures = /^[\d\s.,:/₫$%+\-–→]+$/; // dates, times and amounts must not wrap
-  // "30 Jan 2027" and codes such as BK-MW7Q-10E2 must not break over two lines either
+  // Giữ ngày, giờ, mã booking và số tiền trên cùng một dòng.
+  const figures = /^[\d\s.,:/₫$%+\-–→]+$/;
   const tight = (c) => figures.test(c) || /^\d{1,2} [A-Za-z]{3,4} \d{4}$/.test(c) || /^[A-Z0-9]+(-[A-Z0-9]+)*$/.test(c);
   return (
     <div className="table-wrap">
@@ -187,7 +188,7 @@ export function DataTable({ cols, rows }) {
 
 const niceMax = (v) => { const p = 10 ** Math.floor(Math.log10(v || 1)); return Math.ceil((v || 1) / p) * p; };
 
-// Line/area chart with a hover crosshair; `prev` is an optional comparison series.
+// Vẽ biểu đồ có đường dò chuột và chuỗi đối chiếu tùy chọn.
 export function LineChart({ labels, cur, prev, format, summary }) {
   const [hover, setHover] = useState(null);
   const W = 640, H = 240, L = 58, R = 12, T = 12, B = 28;

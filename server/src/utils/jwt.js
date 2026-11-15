@@ -1,7 +1,6 @@
 const { createHmac, timingSafeEqual } = require("node:crypto");
 
-// SDS 1 (middlewares): HS256 JSON Web Tokens. The header is fixed, so a token signed with another algorithm
-// (or "none") never matches it.
+// Cố định thuật toán HS256 trong header để từ chối token dùng thuật toán khác hoặc none.
 const encode = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
 const HEADER = encode({ alg: "HS256", typ: "JWT" });
 const mac = (data, secret) => createHmac("sha256", secret).update(data).digest();
@@ -12,7 +11,7 @@ function sign(payload, secret, ttlMs) {
   return `${data}.${mac(data, secret).toString("base64url")}`;
 }
 
-// The payload of a valid, unexpired token, otherwise null.
+// Trả nội dung token còn hạn và hợp lệ, nếu không trả null.
 function verify(token, secret) {
   if (typeof token !== "string") return null;
   const [header, body, signature] = token.split(".");

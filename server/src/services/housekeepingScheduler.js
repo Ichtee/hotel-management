@@ -1,6 +1,6 @@
 const { runHousekeepingTick } = require("./housekeepingTasks");
 
-// Chạy lịch mỗi 30 giây, tránh chồng lượt và dừng gọn trước khi đóng database.
+// Chạy lịch mỗi 30 giây, tránh chồng lượt và dừng trước khi đóng database.
 function startHousekeepingScheduler() {
   let stopped = false;
   let running = null;

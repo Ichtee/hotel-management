@@ -15,7 +15,7 @@ const schema = new Schema({
   revocationReason: String,
 }, { timestamps: true, collection: "housekeeping_assignments" });
 
-// Kiểm tra phạm vi và thời gian của kế hoạch trách nhiệm.
+// Kiểm tra phạm vi và thời gian của kế hoạch phân công.
 function validateAssignment() {
   if (!this.roomIds.length && !this.floors.length)
     this.invalidate("roomIds", "Select at least one room or floor.");

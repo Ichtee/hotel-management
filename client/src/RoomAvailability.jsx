@@ -9,7 +9,8 @@ export default function RoomAvailability() {
   const [type, setType] = useState(''); const [floor, setFloor] = useState(''); const [q, setQ] = useState(''); const [page, setPage] = useState(1);
   const [rows, setRows] = useState(null); const [error, setError] = useState(null); const [loading, setLoading] = useState(false);
   const search = async (event) => { event?.preventDefault(); setLoading(true); setError(null); try { const q = new URLSearchParams(form); const result = await api(`/rooms/search?${q}`); setRows(result.data || []); } catch (x) { setError(x); } finally { setLoading(false); } };
-  useEffect(() => { if (form.checkIn && form.checkOut >= form.checkIn && form.guests) search(); }, [form]); // load on open and on every change; Search button stays as a refresh
+  // Tải lại khi điều kiện tìm kiếm đổi; nút tìm kiếm cho phép tải lại thủ công.
+  useEffect(() => { if (form.checkIn && form.checkOut >= form.checkIn && form.guests) search(); }, [form]);
   useEffect(() => setPage(1), [type, floor, q, rows]);
   const types = [...new Set((rows || []).map((r) => r.roomTypeId?.name).filter(Boolean))].sort();
   const floors = [...new Set((rows || []).map((r) => r.floor))].sort((a, b) => a - b);

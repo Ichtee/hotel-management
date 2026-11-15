@@ -3,7 +3,8 @@
   --text: #172033; --muted: #5d6877; --line: #e0e5ec;
   --green: #1d7a4a; --green-bg: #e0f3e8; --red: #b3261e; --red-bg: #fbe5e3;
   --amber: #8a5300; --amber-bg: #fff1d6; --blue: #1b4f9c; --blue-bg: #e3edfb; --grey-bg: #eceff3;
-  --gold-ink: #8a5f1c; /* gold for text on light backgrounds; --gold is only 2.8:1 on white */
+  /* Dùng màu vàng đậm cho chữ trên nền sáng để đủ tương phản. */
+  --gold-ink: #8a5f1c;
   accent-color: var(--navy);
   font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   color: var(--text); background: var(--bg); line-height: 1.5;
@@ -18,7 +19,7 @@ button { font: inherit; cursor: pointer; }
 :focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
 .skip { position: absolute; left: -999px; } .skip:focus { left: 1rem; top: 1rem; background: #fff; padding: .5rem; z-index: 20; }
 
-/* Navbar */
+/* Thanh điều hướng. */
 .topbar { position: sticky; top: 0; z-index: 10; background: var(--navy); color: #fff; }
 .bar { max-width: 1280px; margin: auto; padding: 0 1rem; display: flex; align-items: center; justify-content: space-between; min-height: 60px; flex-wrap: wrap; }
 .brand { font: 700 1.4rem Fraunces, serif; text-decoration: none; color: #fff; } .brand span { color: var(--gold); } .brand.dark { color: var(--navy); }
@@ -40,7 +41,7 @@ nav li > a:hover, .dd > button:hover { background: var(--navy-2); }
 .icon-btn i { position: absolute; top: 4px; right: 4px; background: var(--gold); color: #1a1205; font: 700 .65rem/1 inherit; padding: 3px 5px; border-radius: 99px; }
 .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--gold); color: #1a1205; display: grid; place-items: center; font-size: .75rem; font-weight: 700; }
 
-/* Layout */
+/* Bố cục trang. */
 .wrap { max-width: 1280px; margin: auto; padding: 1.5rem 1rem 2rem; min-height: 70vh; }
 .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
 .page-head h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); } .page-head p { margin: .2rem 0 0; color: var(--muted); }
@@ -54,10 +55,11 @@ nav li > a:hover, .dd > button:hover { background: var(--navy-2); }
 .stat { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1rem; border-top: 3px solid var(--gold); }
 .stat p { margin: 0; color: var(--muted); font-size: .85rem; } .stat strong { display: block; font: 700 1.8rem Fraunces, serif; color: var(--navy); } .stat small { color: var(--green); }
 
-/* Tables & badges */
+/* Bảng dữ liệu và nhãn trạng thái. */
 .table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--line); border-radius: 14px; }
-.table-wrap:has(.rowmenu[open]) { overflow: visible; } /* an open row menu is not cut off or turned into a scroll area */
-/* Wide screens: nothing clips the row menu ("More"), even in a table of one row. This sits right after the base rule because admin.css loads first and lost to it. */
+/* Cho menu thao tác tràn khỏi bảng để không bị cắt. */
+.table-wrap:has(.rowmenu[open]) { overflow: visible; }
+/* Đặt sau quy tắc gốc để menu không bị cắt trên màn hình rộng. */
 @media (min-width: 1000px) {
   .table-wrap { overflow: visible; }
   .table-wrap th:first-child { border-top-left-radius: 13px; } .table-wrap th:last-child { border-top-right-radius: 13px; }
@@ -68,7 +70,7 @@ table { width: 100%; border-collapse: collapse; min-width: 520px; }
 th, td { text-align: left; padding: .8rem .8rem; border-bottom: 1px solid var(--line); font-size: .92rem; white-space: nowrap; }
 th { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: #fafbfc; }
 tr:last-child td { border-bottom: 0; } tbody tr:hover { background: #fafbfc; }
-/* Let text cells wrap so tables fit the screen; codes, dates and amounts have no break points. */
+/* Cho nội dung dài xuống dòng, giữ nguyên mã, ngày và số tiền. */
 td { white-space: normal; }
 td.nw, td .badge, td .btn { white-space: nowrap; }
 .row-actions { display: flex; flex-wrap: nowrap; gap: .35rem; justify-content: flex-end; }
@@ -85,12 +87,13 @@ textarea { font: inherit; min-height: 88px; padding: .55rem .7rem; }
 .chip { min-height: 44px; padding: 0 1rem; border-radius: 99px; border: 1px solid var(--line); background: #fff; text-transform: capitalize; }
 .chip.on { background: var(--navy); color: #fff; border-color: var(--navy); }
 
-/* Dashboard / front desk / rooms */
+/* Bảng điều khiển, lễ tân và danh sách phòng. */
 .bar-row { display: grid; grid-template-columns: 6.5rem 1fr 2rem; gap: .75rem; align-items: center; margin-bottom: .75rem; text-transform: capitalize; font-size: .9rem; }
 .track { height: 10px; background: var(--grey-bg); border-radius: 99px; overflow: hidden; } .fill { height: 100%; }
 .queue li { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .75rem 0; border-bottom: 1px solid var(--line); }
 .queue small { display: block; color: var(--muted); }
-.s-available { background: #1f7a4c; } /* white text reaches 4.5:1 */ .s-occupied { background: var(--navy-2); } .s-cleaning { background: #e0a030; } .s-maintenance { background: var(--red); }
+/* Nền xanh đủ tương phản với chữ trắng. */
+.s-available { background: #1f7a4c; }  .s-occupied { background: var(--navy-2); } .s-cleaning { background: #e0a030; } .s-maintenance { background: var(--red); }
 .legend { display: flex; gap: 1.25rem; flex-wrap: wrap; margin-bottom: 1rem; text-transform: capitalize; font-size: .9rem; }
 .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: .4rem; }
 .floor { margin-bottom: 1.5rem; }
@@ -99,7 +102,7 @@ textarea { font: inherit; min-height: 88px; padding: .55rem .7rem; }
 .room:hover { transform: translateY(-2px); } .room b { font-size: 1.2rem; } .room small { text-transform: capitalize; opacity: .9; }
 .room.s-cleaning { color: #1a1205; }
 
-/* Forms */
+/* Biểu mẫu. */
 .form { display: grid; gap: 1rem; max-width: 720px; }
 label { display: grid; gap: .3rem; font-size: .85rem; font-weight: 600; color: var(--muted); }
 input, select { min-height: 44px; padding: 0 .75rem; border: 1px solid var(--line); border-radius: 8px; font: 1rem inherit; color: var(--text); background: #fff; }
@@ -123,7 +126,7 @@ input, select { min-height: 44px; padding: 0 .75rem; border: 1px solid var(--lin
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
-/* ---------- Customer site ---------- */
+/* Giao diện khách hàng. */
 .site { background: #fff; color: var(--navy); border-bottom: 1px solid var(--line); }
 .site .brand { color: var(--navy); }
 .site nav li > a, .site .dd > button { color: var(--navy); }
@@ -132,7 +135,7 @@ input, select { min-height: 44px; padding: 0 .75rem; border: 1px solid var(--lin
 .site .dd-menu { background: #fff; border: 1px solid var(--line); }
 .site .dd-menu a:hover { background: var(--grey-bg); }
 .site .menu-btn { color: var(--navy); border-color: var(--line); }
-/* Account menu: one entry point for bookings, profile and sign out. */
+/* Gom booking, hồ sơ và đăng xuất vào menu tài khoản. */
 .site .right { gap: .75rem; }
 .site .dd > button.acct { width: auto; gap: .5rem; padding: 0 .65rem 0 .3rem; border: 1px solid var(--line); border-radius: 99px; background: #fff; }
 .site .dd > button.acct:hover, .site .dd > button.acct[aria-expanded="true"] { background: var(--grey-bg); }
@@ -164,9 +167,10 @@ input, select { min-height: 44px; padding: 0 .75rem; border: 1px solid var(--lin
 .c-grid { display: grid; gap: 1.25rem; margin-top: 1rem; }
 .c-card { background: #fff; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
 .c-card img { aspect-ratio: 3/2; object-fit: cover; width: 100%; height: auto; display: block; transition: transform .3s; }
-/* Placeholder while a room photo loads or when it is missing. */
+/* Hiện khung thay thế khi ảnh phòng chưa tải hoặc bị thiếu. */
 .c-card img, .hero-img, .thumb { background: var(--grey-bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' fill='none' stroke='%239aa4b2' stroke-width='1.5' viewBox='0 0 24 24'%3E%3Crect x='3' y='4' width='18' height='16' rx='2'/%3E%3Ccircle cx='8.5' cy='9.5' r='1.5'/%3E%3Cpath d='m21 16-5-5-9 9'/%3E%3C/svg%3E") center no-repeat; color: var(--muted); } .c-card:hover img { transform: scale(1.03); }
-.c-card > a:first-child { display: block; overflow: hidden; } /* the image link only, not the first button inside the card body */
+/* Chỉ áp dụng cho liên kết chứa ảnh, không áp dụng cho nút trong thẻ. */
+.c-card > a:first-child { display: block; overflow: hidden; }
 .c-body { padding: 1rem; } .c-body h3, .offer h3, .c-band h3 { font-family: Fraunces, serif; margin: 0; font-size: 1.2rem; color: var(--navy); }
 .tags { display: flex; flex-wrap: wrap; gap: .4rem; margin: .75rem 0; } .tags li { background: var(--grey-bg); border-radius: 99px; padding: .15rem .7rem; font-size: .8rem; }
 .tags.big li { font-size: .9rem; padding: .3rem .9rem; }
@@ -213,7 +217,7 @@ a.btn { text-decoration: none; }
 #root > main { flex: 1; }
 #root > .adm { flex: 1; }
 
-/* Promo banner & trust strip */
+/* Dải ưu đãi và thông tin tạo sự tin cậy. */
 .promo { display: grid; border-radius: 20px; overflow: hidden; background: linear-gradient(120deg, #0f2742 0%, #1b3a5f 55%, #2b5a7a 100%); color: #fff; box-shadow: 0 18px 40px rgba(15, 39, 66, .18); }
 .promo-text { padding: 2rem 1.5rem; display: grid; gap: .9rem; align-content: center; }
 .promo-tag { justify-self: start; background: rgba(200, 146, 59, .18); color: #f0c677; border: 1px solid rgba(240, 198, 119, .4); padding: .25rem .8rem; border-radius: 99px; font-size: .78rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
@@ -231,7 +235,7 @@ a.btn { text-decoration: none; }
 
 a.btn { display: inline-flex; align-items: center; justify-content: center; }
 
-/* M3: bookings and deposit policy */
+/* Booking và chính sách đặt cọc. */
 .datetile { width: 64px; height: 64px; border-radius: 12px; background: var(--navy); color: #fff; display: grid; place-content: center; text-align: center; line-height: 1.1; }
 .datetile b { font-family: Fraunces, serif; font-size: 1.5rem; }
 .datetile span { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: #e6c98f; }
@@ -242,7 +246,8 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; }
 .details dt { color: var(--muted); } .details dd { margin: 0; text-align: right; }
 .lines { display: grid; gap: .4rem; margin-top: .75rem; }
 .lines li { display: flex; justify-content: space-between; gap: .5rem 1rem; flex-wrap: wrap; padding-top: .4rem; border-top: 1px solid var(--line); font-size: .9rem; }
-.lines li span:first-child { text-transform: none; } /* free text (notes, item names) must keep its own capitals */
+/* Giữ nguyên chữ hoa, chữ thường của ghi chú và tên hạng mục. */
+.lines li span:first-child { text-transform: none; }
 .empty { text-align: center; padding: 2.5rem 1rem; background: #fff; border: 1px dashed var(--line); border-radius: 14px; display: grid; gap: .75rem; justify-items: center; }
 .empty h2 { margin: 0; }
 .skel-card { height: 96px; border-radius: 14px; background: linear-gradient(90deg, var(--grey-bg) 25%, #f6f8fa 50%, var(--grey-bg) 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite linear; }
@@ -262,7 +267,7 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; }
 .preview { padding: .6rem .85rem; border-radius: 10px; background: var(--blue-bg); color: var(--blue); }
 @media (min-width: 720px) { .details { grid-template-columns: repeat(2, 1fr); } .policy-grid { grid-template-columns: 1fr 1.6fr; } }
 
-/* M3: payment screens */
+/* Giao diện thanh toán. */
 .pay { max-width: 640px; }
 .pay-sum { display: grid; gap: .25rem; margin-bottom: 1rem; }
 .pay-sum p { margin: 0; }
@@ -285,7 +290,7 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; }
 .done.bad-circle { background: var(--red-bg); color: var(--red); }
 .cta-row { grid-column: 1 / -1; display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; }
 .cta-row p { margin: 0; }
-/* UC08 cancellation, UC21 refunds */
+/* Yêu cầu hủy và hoàn tiền. */
 .btn.danger { color: var(--red); border-color: var(--red); } .btn.danger:hover { background: var(--red-bg); }
 .cancel-box { grid-column: 1 / -1; display: grid; gap: .5rem; padding: 1rem; border: 1px solid var(--line); border-radius: 12px; }
 .cancel-box h3, .cancel-box p { margin: 0; }
@@ -300,7 +305,7 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; }
 .policy-list { display: grid; gap: .6rem; padding-left: 1.2rem; margin: .5rem 0 0; }
 .policy-list li { line-height: 1.5; }
 
-/* UC13 notification bell (staff topbar and customer header) */
+/* Chuông thông báo dùng chung cho khách và nhân viên. */
 .bell { position: relative; }
 .bell-btn { position: relative; display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; background: none; color: inherit; cursor: pointer; }
 .bell-btn:hover { background: #0000000d; }
@@ -318,10 +323,10 @@ a.btn { display: inline-flex; align-items: center; justify-content: center; }
 .bell-pop small { font-size: .75rem; color: #7c8684; }
 .bell-empty { padding: 18px 14px; margin: 0; color: #6b7472; font-size: .88rem; }
 .perm-list { list-style: none; margin: 0 0 1rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 18px; }
-/* the resort header styles its lists as a row; the notification list stays a column */
+/* Giữ danh sách thông báo theo cột trong thanh điều hướng ngang. */
 .cx .bell-pop ul, .bell-pop ul { display: block; }
 .cx .bell-pop li, .bell-pop li { display: block; width: 100%; }
-/* Collapsible filters (<details>): the summary is a full-width 44px target with an open/closed arrow. */
+/* Bộ lọc thu gọn có vùng bấm đủ lớn và mũi tên trạng thái. */
 details.filters > summary { display: flex; align-items: center; justify-content: space-between; min-height: 44px; cursor: pointer; list-style: none; }
 details.filters > summary::-webkit-details-marker { display: none; }
 details.filters > summary::after { content: "▾"; font-size: 1rem; color: var(--muted); transition: transform .2s; }
@@ -330,7 +335,7 @@ details.filters > label { display: block; margin-top: 1rem; }
 @media (prefers-reduced-motion: reduce) { details.filters > summary::after { transition: none; } }
 .check .consent-text { margin-left: 0; color: var(--text); font-size: .95rem; line-height: 1.4; }
 
-/* ---- Task screens (ui.jsx Modal): a task replaces the page content instead of floating over it ---- */
+/* Màn hình thao tác thay nội dung trang, không phủ lên trang cũ. */
 #main.has-screen > :not(.screen) { display: none !important; }
 .screen { width: 100%; max-width: 920px; margin: 0 auto; padding-bottom: 2.5rem; }
 .screen-head { display: grid; justify-items: start; gap: .75rem; margin-bottom: 1.25rem; }
@@ -340,17 +345,16 @@ details.filters > label { display: block; margin-top: 1rem; }
 .screen-body { background: var(--card, #fff); border: 1px solid var(--line); border-radius: 14px; padding: clamp(1rem, 2.5vw, 1.75rem); }
 .screen .form, .screen .form-grid { max-width: none; }
 .screen-body > p:first-child { margin-top: 0; }
-/* One place for the form buttons: bottom right, secondary first, primary last (the action that saves). */
+/* Gom nút biểu mẫu ở góc phải dưới, đặt nút lưu sau nút phụ. */
 .modal-actions { display: flex; justify-content: flex-end; align-items: center; gap: .75rem; flex-wrap: wrap; margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line); }
 .modal-actions .btn { min-width: 120px; }
 @media (max-width: 600px) { .modal-actions { flex-direction: column-reverse; align-items: stretch; } .modal-actions .btn { width: 100%; } }
 .cx .screen { max-width: 960px; padding: 2.5rem 1rem 4rem; }
 .cx .screen-body { border-radius: 2px; background: var(--card); }
 
-/* ---- Production polish (UI review) ---- */
-/* `font: 1rem inherit` is invalid, so controls fell back to the browser's 13px: inherit the app font at 16px. */
+/* Cho điều khiển kế thừa phông ứng dụng và cỡ chữ 16px hợp lệ. */
 input, select, textarea { font: inherit; font-size: 1rem; }
-/* The page action stays top right however long the subtitle is; it moves under the title only on small screens. */
+/* Giữ nút chính ở góc phải; chuyển xuống dưới tiêu đề trên màn hình nhỏ. */
 .page-head { flex-wrap: nowrap; align-items: flex-start; }
 .page-head > div:first-child { flex: 1; min-width: 0; }
 .page-head .head-actions { flex-shrink: 0; }
@@ -360,7 +364,7 @@ input, select, textarea { font: inherit; font-size: 1rem; }
 .nw { white-space: nowrap; }
 .pay-row { display: flex; justify-content: flex-end; }
 
-/* Printing an invoice (or any task screen) prints only the screen content, not the app shell. */
+/* Chỉ in nội dung màn hình thao tác, ẩn phần khung ứng dụng. */
 @media print {
   .side, .atop, .topbar, .site-foot, .skip, .scrim, .screen-head .btn.back, .modal-actions, .pay-row { display: none !important; }
   body, .adm, .amain, .acontent, #main, .screen, .screen-body { background: #fff !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; max-width: none !important; }
@@ -387,7 +391,7 @@ body.dlg-open { overflow: hidden; }
 .notif-list li.unread button { border-left: 4px solid var(--gold, #c39a5a); background: #fffdf8; }
 .notif-list li small { color: var(--muted); }
 
-/* account pages: one container width, one heading style, forms that use the width */
+/* Thống nhất khung và tiêu đề các trang tài khoản. */
 .cx .c-section.acct { max-width: 960px; padding-top: clamp(2rem, 4vw, 3rem); }
 .cx .page-head h1 { font-size: clamp(2rem, 4.4vw, 2.8rem); font-weight: 500; line-height: 1.1; }
 .cx .page-head p { margin-top: .4rem; }
@@ -403,17 +407,18 @@ body.dlg-open { overflow: hidden; }
 
 @media (max-width: 640px) { .page-head > div:first-child { flex: 1 1 100%; } .page-head .head-actions { width: 100%; } .page-head .head-actions .btn { width: 100%; } }
 
-/* Bookings filters: two labelled groups and a search box that shows its whole placeholder */
+/* Tách rõ nhóm bộ lọc booking và ô tìm kiếm. */
 .filter-groups { display: grid; gap: .25rem; margin-bottom: .5rem; }
 .filter-title { margin: 0 0 .35rem; font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .list-search { width: min(100%, 460px); min-height: 44px; padding: .5rem .9rem; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 1rem; font: inherit; }
 .chip { text-transform: capitalize; }
 
-/* Tables become cards on a phone, so no column or action button sits off-screen */
+/* Chuyển bảng thành thẻ trên điện thoại để tránh tràn ngang. */
 @media (max-width: 720px) {
   .table-wrap table.cards { min-width: 0; }
   .table-wrap table.cards, .table-wrap table.cards tbody, .table-wrap table.cards tr, .table-wrap table.cards td { display: block; }
-  .table-wrap table.cards thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); } /* the labels live on the cells */
+  /* Nhãn cột đã được hiển thị tại từng ô. */
+  .table-wrap table.cards thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
   .table-wrap table.cards tr { padding: .6rem .9rem; border-bottom: 1px solid var(--line); }
   .table-wrap table.cards tr:last-child { border-bottom: 0; }
   .table-wrap table.cards td { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: .3rem 0; border: 0; white-space: normal; text-align: right; }
@@ -424,11 +429,11 @@ body.dlg-open { overflow: hidden; }
 }
 [tabindex="-1"]:focus, [tabindex="-1"]:focus-visible { outline: none; }
 .pay-row { margin-bottom: .75rem; }
-/* A select never grows past its container: long options (Change room) made the phone page scroll sideways */
+/* Giới hạn ô chọn trong khung để lựa chọn dài không gây tràn ngang. */
 select { max-width: 100%; }
-/* Selects sized by their content leave room for the arrow, so "All statuses" or "Full deposit (100%)" is not cut */
+/* Chừa chỗ cho mũi tên để không cắt nhãn ô chọn. */
 select { padding-right: 2.25rem; }
-/* A form cell never grows wider than its column (a select with long options stretched the Change room form past a phone screen) */
+/* Giới hạn ô biểu mẫu theo chiều rộng cột. */
 .form > *, .form-grid > * { min-width: 0; }
 .form select, .form input, .form-grid select, .form-grid input { min-width: 0; max-width: 100%; }
 .form label, .form-grid label, .field { min-width: 0; }

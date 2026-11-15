@@ -2,10 +2,12 @@ import { useEffect, useState } from 'react';
 import { api, dateLabel, money } from './api/client.js';
 import { DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useEditPage, useScreen } from './ui.jsx';
 
-/* UC34: catalogs of additional services and compensation items. Entries are deactivated, never deleted (BR-43). */
+// Quản lý dịch vụ và vật phẩm bồi thường; chỉ vô hiệu hóa để giữ lịch sử.
 export function Catalog() {
-  const tab = new URLSearchParams(location.hash.split('?')[1] || '').get('tab') || 'services'; // in the URL so a refresh keeps the tab
-  return <CatalogTab key={tab} tab={tab} />; // a new tab is a new mount: the list is loaded for it (the list used to stay on the first tab)
+  // Lưu tab trong URL để giữ lựa chọn khi tải lại trang.
+  const tab = new URLSearchParams(location.hash.split('?')[1] || '').get('tab') || 'services';
+  // Đổi tab sẽ tạo lại danh sách để tải đúng dữ liệu.
+  return <CatalogTab key={tab} tab={tab} />;
 }
 function CatalogTab({ tab }) {
   const setTab = (k) => { location.hash = `#/admin/catalog?tab=${k}`; };
@@ -61,14 +63,14 @@ function CatalogEntry({ tab, label, entry, onClose, onSaved }) {
   );
 }
 
-/* UC33: the manager ticks the functions of the Receptionist and Housekeeping roles. Active sessions of those users end. */
+// Cập nhật quyền lễ tân và housekeeping, đồng thời kết thúc các phiên cũ.
 export function StaffPermissions() {
   const list = useApi('/staff/roles');
   const [key, setKey] = useState('receptionist');
   const [picked, setPicked] = useState(null);
   const [msg, setMsg] = useState(null); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
   const role = list.data?.find((r) => r.key === key);
-  // UC33: any business function of 2.4.3 can be granted to either role; the role's default column is listed first.
+  // Liệt kê quyền mặc định của vai trò trước các quyền có thể cấp thêm.
   const catalog = [...(list.meta?.permissions || [])].sort((a, b) => b.defaultRoles.includes(key) - a.defaultRoles.includes(key));
   const current = picked ?? role?.permissions ?? [];
   const flip = (k) => setPicked(current.includes(k) ? current.filter((p) => p !== k) : [...current, k]);
@@ -100,12 +102,12 @@ export function StaffPermissions() {
   );
 }
 
-/* UC12 / BR-23: the manager hides a review that breaks the rules (with a reason) or shows it again. */
+// Ẩn đánh giá vi phạm kèm lý do hoặc khôi phục hiển thị.
 export function Reviews() {
   const types = useApi('/room-types?limit=100');
   const typeId = new URLSearchParams(location.hash.split('?')[1] || '').get('type') || '';
   const setTypeId = (v) => { location.hash = `#/admin/reviews?type=${v}`; };
-  // With no room type chosen, open the first one that has reviews (the first in the list is often empty).
+  // Mặc định chọn loại phòng đầu tiên có đánh giá.
   const [auto, setAuto] = useState('');
   useEffect(() => {
     if (typeId || !types.data?.length) return undefined;
@@ -159,8 +161,8 @@ function HideReview({ review, onClose, onDone }) {
   );
 }
 
-/* UC32 step 5: the Admin reads the audit log (read-only), filtered by actor, action, target and date. */
-// "key: value" instead of raw JSON; long ids are shortened.
+// Cho Admin lọc và xem nhật ký thao tác ở chế độ chỉ đọc.
+// Hiển thị từng cặp khóa và giá trị, rút gọn mã định danh dài.
 const detailText = (d) => !d ? '' : Object.entries(d).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : /^[0-9a-f]{24}$/.test(String(v)) ? `…${String(v).slice(-6)}` : v}`).join(' · ');
 export function AuditLog() {
   const [q, setQ] = useState({});

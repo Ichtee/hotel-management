@@ -12,7 +12,7 @@ const { reconcileTasks } = require("../services/housekeepingTasks");
 const { deliver } = require("../services/operationNotifications");
 const { logChange } = require("../services/audit");
 
-// Kiểm tra bộ trường của kế hoạch theo ca và khoảng ngày bao gồm hai đầu.
+// Kiểm tra kế hoạch theo ca và khoảng ngày, tính cả hai ngày đầu cuối.
 function validate(body, creating = false) {
   fields.body(body, ["staffId", "shift", "roomIds", "floors", "effectiveFrom", "effectiveTo"]);
   const data = {};
@@ -28,7 +28,7 @@ function validate(body, creating = false) {
   return data;
 }
 
-// Chỉ nhận nhân viên Housekeeping đang hoạt động và phòng/tầng hợp lệ.
+// Chỉ nhận nhân viên housekeeping đang hoạt động và phòng hoặc tầng hợp lệ.
 async function validateTargets(plan, session) {
   const role = await Role.findOne({ key: "housekeeping", isActive: true }).session(session);
   if (!role || !await User.exists({ _id: plan.staffId, roleId: role._id, status: "active" }).session(session))
@@ -54,7 +54,7 @@ async function affectedRooms(before, after, session, now) {
   return [...new Set(result)];
 }
 
-// Lưu kế hoạch, kiểm tra trùng và chuyển task liên quan trong cùng transaction.
+// Lưu kế hoạch, kiểm tra trùng và chuyển nhiệm vụ trong cùng giao dịch.
 async function savePlan(req, creating) {
   const input = validate(req.body, creating);
   const id = creating ? undefined : v.id(req.params.id);
@@ -80,13 +80,13 @@ async function savePlan(req, creating) {
   return { data: result.data, meta: { notificationStored: await deliver(result.events) } };
 }
 
-// Tạo kế hoạch trách nhiệm, không giao task riêng lẻ từ Manager.
+// Tạo kế hoạch phụ trách, không giao từng nhiệm vụ từ trang quản lý.
 async function create(req, res) { res.status(201).json(await savePlan(req, true)); }
 
-// Cập nhật kế hoạch và giữ bản trước đó trong audit log.
+// Cập nhật kế hoạch và lưu phiên bản trước vào nhật ký.
 async function update(req, res) { res.json(await savePlan(req, false)); }
 
-// Hủy mềm kế hoạch và đưa task về người phụ trách mới hoặc Pending.
+// Hủy mềm kế hoạch, chuyển nhiệm vụ sang người mới hoặc về trạng thái chờ.
 async function remove(req, res) {
   const id = v.id(req.params.id);
   v.keys(req.body, []);

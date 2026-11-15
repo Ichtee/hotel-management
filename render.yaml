@@ -1,4 +1,4 @@
-# Render Blueprint: the API (server/). Render asks for every `sync: false` value when the Blueprint is created.
+# Cấu hình API trên Render; các giá trị sync: false được nhập khi tạo Blueprint.
 services:
   - type: web
     name: grandstay-api
@@ -14,10 +14,10 @@ services:
         value: production
       - key: NODE_VERSION
         value: "22"
-      # Vercel proxies /api to Render, so two proxies sit in front of the app.
+      # Có hai lớp proxy khi Vercel chuyển tiếp /api đến Render.
       - key: TRUST_PROXY
         value: "2"
-      # Generated once by Render; keep them stable.
+      # Render tạo khóa một lần; giữ ổn định để dữ liệu và phiên cũ còn hợp lệ.
       - key: JWT_SECRET
         generateValue: true
       - key: GATEWAY_SECRET
@@ -26,29 +26,38 @@ services:
         generateValue: true
       - key: JOB_SECRET
         generateValue: true
-      # --- Paste these ---
-      - key: MONGO_URI # MongoDB Atlas connection string, e.g. mongodb+srv://user:pass@cluster0.xxx.mongodb.net/grandstay
+      # Các giá trị cần nhập khi triển khai.
+      # Chuỗi kết nối MongoDB Atlas.
+      - key: MONGO_URI
         sync: false
-      - key: CLIENT_ORIGIN # the Vercel site, e.g. https://grandstay.vercel.app (no trailing slash)
+      # Địa chỉ frontend trên Vercel, không có dấu gạch chéo cuối.
+      - key: CLIENT_ORIGIN
         sync: false
-      - key: PUBLIC_URL # same as CLIENT_ORIGIN
+      # Dùng cùng địa chỉ với CLIENT_ORIGIN.
+      - key: PUBLIC_URL
         sync: false
-      - key: CLIENT_URL # same as CLIENT_ORIGIN (links in e-mails)
+      # Dùng CLIENT_ORIGIN để tạo liên kết trong email.
+      - key: CLIENT_URL
         sync: false
-      - key: RESEND_API_KEY # https://resend.com/api-keys : verification, password reset and notification e-mails
+      # Khóa Resend cho email xác minh, đặt lại mật khẩu và thông báo.
+      - key: RESEND_API_KEY
         sync: false
-      - key: RESEND_FROM_EMAIL # "GrandStay <onboarding@resend.dev>" until you verify a domain on Resend
+      # Dùng địa chỉ thử nghiệm của Resend đến khi xác minh tên miền gửi.
+      - key: RESEND_FROM_EMAIL
         sync: false
-      - key: RECAPTCHA_SITE_KEY # https://www.google.com/recaptcha/admin (v2 checkbox, add your vercel.app domain)
+      # Khóa reCAPTCHA v2 dạng ô chọn; đăng ký tên miền Vercel tại Google.
+      - key: RECAPTCHA_SITE_KEY
         sync: false
       - key: RECAPTCHA_SECRET_KEY
         sync: false
-      - key: SEPAY_MERCHANT_ID # SePay payment gateway; SePay is used as soon as both keys are filled in
+      # Tự dùng SePay khi đã nhập đủ mã đơn vị và khóa bí mật.
+      - key: SEPAY_MERCHANT_ID
         sync: false
       - key: SEPAY_SECRET_KEY
         sync: false
-      - key: SEPAY_ENV # sandbox while testing, production for real money
+      # Dùng sandbox khi thử nghiệm, production khi thanh toán thật.
+      - key: SEPAY_ENV
         value: sandbox
-      # Without SePay keys: "true" lets a class demo pay through the built-in test gateway (no real money).
+      # Khi chưa có khóa SePay, bật true để dùng cổng demo không chuyển tiền thật.
       - key: ENABLE_SANDBOX_GATEWAY
         value: "true"

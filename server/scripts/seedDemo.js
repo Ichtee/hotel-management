@@ -21,7 +21,7 @@ async function seedDemo({ anyDatabase = false } = {}) {
   if (!anyDatabase && mongoose.connection.name !== "hotel_member1_demo")
     throw new Error("Demo seed is restricted to hotel_member1_demo.");
   await seedRoles();
-  // UC34 catalogs the front desk picks from (UC19 services, UC38 compensation items).
+  // Tạo danh mục dịch vụ và vật phẩm bồi thường dùng tại quầy.
   await Service.insertMany([["Airport transfer", "Transport", 450000], ["Breakfast buffet", "Food & drink", 250000], ["Spa massage 60 min", "Wellness", 800000], ["Laundry (per bag)", "Housekeeping", 120000], ["Minibar refill", "Food & drink", 180000]]
     .map(([name, category, unitPrice]) => ({ name, category, unitPrice })));
   await CompensationItem.insertMany([["Bath towel", 150000], ["Bathrobe", 400000], ["Slippers", 50000], ["Key card", 100000], ["TV remote", 300000], ["Drinking glass", 80000], ["Hair dryer", 500000], ["Bed linen", 600000]]
@@ -65,8 +65,7 @@ async function seedDemo({ anyDatabase = false } = {}) {
     description: "A quiet suite facing the inner garden, with a sofa corner and a rain shower.",
     amenities: ["Free WiFi", "Garden view", "Air conditioning", "Rain shower"], images: [photo("photo-1611892440504-42a792e24d32")],
   });
-  // Customer-facing room cards use these room types; their presence also makes
-  // the online Create Booking flow usable immediately in the demo database.
+  // Tạo loại phòng mẫu để giao diện khách và luồng đặt phòng dùng được ngay.
   const customerRoomTypes = await RoomType.create([
     { name: "Deluxe Double", basePrice: 2100000, maxOccupancy: 2, bedType: "King bed", roomSizeSqm: 32, images: [photo("photo-1631049307264-da0ec9d70304")], amenities: ["Free WiFi", "Breakfast included", "Air conditioning", "Smart TV"], description: "A calm, light-filled room with a king bed and a work desk, ideal for couples and business travellers." },
     { name: "Superior Twin", basePrice: 1750000, maxOccupancy: 2, bedType: "2 single beds", roomSizeSqm: 28, images: [photo("photo-1590490360182-c33d57733427")], amenities: ["Free WiFi", "City view", "Air conditioning"], description: "Two comfortable single beds with a city view. A smart pick for friends or colleagues." },
@@ -113,7 +112,7 @@ async function seedDemo({ anyDatabase = false } = {}) {
         reason: "Demo adjustment",
       });
   }
-  // Customer-facing M3 samples: upcoming, awaiting deposit and cancelled-with-refund bookings.
+  // Tạo booking mẫu: sắp đến, chờ cọc và đã hủy chờ hoàn tiền.
   const day = 86400000;
   const sample = (offset, nights, amount, status, extra = {}) =>
     Booking.create({
@@ -134,7 +133,7 @@ async function seedDemo({ anyDatabase = false } = {}) {
   await Payment.create([
     { bookingId: upcoming.id, kind: "deposit", amount: 1440000, method: "e_wallet", status: "success", paidAt: now },
   ]);
-  // An approved cancellation waiting for the Receptionist to refund the deposit by bank transfer (UC21).
+  // Tạo yêu cầu đã duyệt, chờ lễ tân chuyển khoản hoàn cọc.
   const paidDeposit = await Payment.create({ bookingId: cancelled.id, kind: "deposit", amount: 900000, method: "e_wallet", status: "success", paidAt: new Date(+now - 2 * day) });
   await Booking.updateOne({ _id: cancelled._id }, { cancellationReason: "Cancelled by customer", cancellation: { requestedAt: now, requestedBy: users.customer._id, channel: "online", verifyMethod: "login", reason: "Cancelled by customer", refundableAmount: 900000, approvedAt: now, approvedBy: users.receptionist._id } });
   await Refund.create({ bookingId: cancelled.id, paymentId: paidDeposit.id, amount: 900000, status: "requested", requestedBy: users.customer._id, reason: "Approved cancellation" });
@@ -182,8 +181,7 @@ async function seedDemo({ anyDatabase = false } = {}) {
   ]);
 }
 
-// A small hotel in operation today: 3 floors of rooms, guests arriving, staying and leaving today,
-// a cancellation waiting for review and a few published reviews, so every staff screen has something to show.
+// Tạo dữ liệu vận hành trong ngày cho ba tầng phòng, khách lưu trú, yêu cầu hủy và đánh giá.
 async function seedOperations({ users, roomTypes, day }) {
   const vnToday = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Ho_Chi_Minh" }).format(new Date());
   const at = (offset, time) => new Date(+new Date(`${vnToday}T${time}:00+07:00`) + offset * day);
@@ -212,29 +210,29 @@ async function seedOperations({ users, roomTypes, day }) {
     if (status === "checked_in") await Room.updateOne({ _id: room._id }, { status: "occupied" });
     return booking;
   };
-  // In-house: two leave today, two stay on
+  // Tạo bốn khách đang lưu trú, trong đó hai khách trả phòng hôm nay.
   await stay(guests[0], rooms[0], -2, 2, "checked_in");
   await stay(guests[1], rooms[1], -1, 1, "checked_in");
   await stay(guests[2], rooms[5], -1, 3, "checked_in");
   await stay(guests[3], rooms[10], 0, 2, "checked_in");
-  // Arriving today, and later this week
+  // Tạo booking đến hôm nay và trong tuần.
   await stay(guests[4], rooms[2], 0, 2, "confirmed");
   await stay(guests[5], rooms[6], 0, 1, "confirmed");
   await stay(guests[6], rooms[11], 0, 3, "confirmed");
   await stay(guests[7], rooms[3], 3, 2, "confirmed");
   await Room.updateMany({ _id: { $in: [rooms[7]._id, rooms[12]._id] } }, { status: "cleaning" });
   await Room.updateOne({ _id: rooms[14]._id }, { status: "maintenance" });
-  // UC36: Linh Pham covers floors 2-4 on every shift, so turnover tasks (UC30) reach her task list.
+  // Phân công Linh Pham phụ trách tầng 2 đến 4 ở mọi ca để nhận nhiệm vụ dọn phòng.
   for (const shift of ["morning", "afternoon", "night"])
     await HousekeepingAssignment.create({ staffId: users.housekeeping._id, shift, floors: [2, 3, 4], effectiveFrom: at(-30, "00:00"), effectiveTo: at(365, "00:00"), assignedBy: users.manager._id });
   for (const room of [rooms[7], rooms[12]]) await createCleaningTask({ roomId: String(room._id), type: "turnover" });
-  // A customer cancellation waiting for the Receptionist (UC35)
+  // Tạo yêu cầu hủy đang chờ lễ tân duyệt.
   const pending = await stay(["Jamie Nguyen", "0912345678"], rooms[8], 5, 2, "confirmed");
   await Booking.updateOne({ _id: pending._id }, {
     customerId: users.customer._id, status: "cancellation_requested",
     cancellation: { requestedAt: new Date(), requestedBy: users.customer._id, channel: "online", verifyMethod: "login", reason: "Change of travel plans", refundableAmount: pending.depositRequired },
   });
-  // Published reviews for the room-type pages (one review per stayed booking)
+  // Tạo một đánh giá công khai cho mỗi booking đã lưu trú.
   const past = await Booking.find({ status: "checked_out" }).limit(3);
   const words = [[5, "Spotless room and very friendly front desk."], [4, "Quiet, comfortable and close to the beach."], [5, "Breakfast was great, will stay again."]];
   for (const [i, b] of past.entries())

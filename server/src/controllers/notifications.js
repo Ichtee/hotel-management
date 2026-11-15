@@ -1,7 +1,7 @@
 const Notification = require("../models/Notification");
 const v = require("../utils/validation");
 
-// UC13: every user reads only their own notifications, newest first (BR-28).
+// Chỉ trả thông báo của người đang đăng nhập, mới nhất trước.
 async function listing(req, res) {
   const [data, unread] = await Promise.all([
     Notification.find({ accountId: req.user._id }).sort({ createdAt: -1 }).limit(50).lean(),
@@ -9,7 +9,7 @@ async function listing(req, res) {
   ]);
   res.json({ data, meta: { unread } });
 }
-// UC13 step 3: opening a notification marks it read; no id marks them all read.
+// Mở thông báo thì đánh dấu đã đọc; không gửi mã thì đánh dấu tất cả.
 async function markRead(req, res) {
   v.keys(req.body || {}, ["id"]);
   const filter = { accountId: req.user._id, isRead: false };

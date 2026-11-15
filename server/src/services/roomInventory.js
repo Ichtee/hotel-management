@@ -7,15 +7,14 @@ function hotelDay(now = new Date()) {
   return new Date(now.getTime() + 7 * 3600000).toISOString().slice(0, 10);
 }
 
-// Chỉ tính booking còn giữ phòng, loại hold có thời hạn đã hết.
+// Chỉ tính booking còn giữ phòng, loại thời gian giữ đã hết hạn.
 function holdingFilter(now = new Date()) {
   return { $or: [
     { status: { $in: ["confirmed", "cancellation_requested", "checked_in"] } },
     { status: "pending", $or: [{ holdExpiresAt: { $gt: now } }, { holdExpiresAt: null }] },
   ] };
 }
-// BR-29 for selling a room: an unpaid hold stops counting 15 minutes after it ended, without waiting for the expiry job.
-// ponytail: the 15 extra minutes cover a deposit still at the gateway for every hold; check the pending payment per booking if that is too long.
+// Giữ thêm 15 phút sau hạn cho thanh toán đến muộn; hiện áp dụng cho mọi booking chờ cọc.
 const sellingFilter = (now = new Date()) => holdingFilter(new Date(now.getTime() - 15 * 60000));
 
 // Quét các mốc đổi số lượng để phát hiện thiếu phòng mà không duyệt từng ngày.
@@ -50,7 +49,7 @@ async function capacityImpact(typeId, excludedRoomId, session, now = new Date())
   return { capacity, shortages, affectedBookings: affected };
 }
 
-// Chặn giảm tồn phòng nếu bất kỳ đêm sắp tới nào không đủ sức chứa.
+// Chặn giảm số phòng bán được nếu đêm sắp tới không đủ phòng.
 async function assertCapacity(typeId, excludedRoomId, session, now = new Date()) {
   const impact = await capacityImpact(typeId, excludedRoomId, session, now);
   if (impact.shortages.length) {

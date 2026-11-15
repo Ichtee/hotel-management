@@ -32,14 +32,14 @@ const definitions = [
   ["damages.report", "Report Damage", housekeeping],
 ];
 
-// Ánh xạ quyền nghiệp vụ từ bảng 2.4.3; quyền tài khoản cá nhân luôn giữ.
+// Ánh xạ quyền nghiệp vụ theo bảng phân quyền; luôn giữ quyền tài khoản cá nhân.
 function permissionEntry([key, name, defaultRoles]) {
   return { key, name, scope: "hotel", defaultRoles };
 }
 const staffPermissionCatalog = definitions.map(permissionEntry);
 const allowedStaffPermissions = new Set(staffPermissionCatalog.map((p) => p.key));
 
-// Lấy quyền mặc định theo cột vai trò; UC33 cho cấu hình trong hợp hai cột.
+// Lấy quyền mặc định theo vai trò; quản lý có thể cấp quyền trong phạm vi hai vai trò nhân viên.
 function defaultStaffPermissions(roleKey) {
   return staffPermissionCatalog.filter((p) => p.defaultRoles.includes(roleKey)).map((p) => p.key);
 }

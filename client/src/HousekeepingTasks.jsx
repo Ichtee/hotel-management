@@ -11,7 +11,7 @@ export default function HousekeepingTasks() {
   const [reporting, setReporting] = useState(null);
 
   const changeStatus = async (task, status) => {
-    // UC30 3b: a skip needs the reason (guest declined, Do not disturb).
+    // Bắt buộc nhập lý do khi bỏ qua nhiệm vụ dọn phòng.
     const reason = status === 'skipped' ? window.prompt('Reason for skipping (e.g. guest declined, Do not disturb):') : undefined;
     if (status === 'skipped' && !reason) return;
     try {

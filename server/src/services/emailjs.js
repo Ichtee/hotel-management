@@ -1,7 +1,5 @@
-// EmailJS REST adapter: https://www.emailjs.com/docs/rest-api/send/
-// Env: EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, EMAILJS_PUBLIC_KEY, EMAILJS_PRIVATE_KEY.
-// One generic template serves every e-mail: To = {{to_email}}, Subject = {{subject}}, body = {{{html}}} (triple braces, unescaped).
-// Account > Security must allow API calls from non-browser applications.
+// Gửi email qua REST API của EmailJS với bốn khóa cấu hình.
+// Mẫu dùng To={{to_email}}, Subject={{subject}}, body={{{html}}}; cho phép gọi ngoài trình duyệt.
 const URL = "https://api.emailjs.com/api/v1.0/email/send";
 const enabled = () => ["EMAILJS_SERVICE_ID", "EMAILJS_TEMPLATE_ID", "EMAILJS_PUBLIC_KEY", "EMAILJS_PRIVATE_KEY"].every((k) => process.env[k]);
 const escape = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);

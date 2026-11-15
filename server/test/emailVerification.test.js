@@ -55,23 +55,22 @@ test("Email Verification: Registration, token hashing, rejection before verify, 
     phone: "0912345678",
   };
 
-  // 1. Register user
   const regRes = await send(request(app), "post", "/api/auth/register", userData).expect(201);
   assert.equal(regRes.body.data.email, "verifyuser@example.com");
   assert.equal(regRes.body.data.isVerified, false);
 
-  // 2. Check email sent with token
+  // Kiểm tra email xác minh đã gửi kèm token.
   assert.equal(sentEmails.length, 1);
   assert.equal(sentEmails[0].to, "verifyuser@example.com");
   assert.match(sentEmails[0].subject, /Verify your email/i);
   assert.match(sentEmails[0].html, /Verify Email/i);
 
-  // Extract raw token from email verification URL
+  // Lấy token gốc từ liên kết xác minh trong email.
   const match = sentEmails[0].html.match(/token=([a-f0-9]+)/);
   assert.ok(match, "Raw token should be in email HTML");
   const rawToken = match[1];
 
-  // 3. Database should NOT store raw token - only sha256 hash
+  // Database chỉ lưu mã băm SHA-256, không lưu token gốc.
   const savedUser = await User.findOne({ email: "verifyuser@example.com" }).select(
     "+emailVerification.tokenHash +emailVerification.expiresAt"
   );
@@ -79,7 +78,7 @@ test("Email Verification: Registration, token hashing, rejection before verify, 
   assert.notEqual(savedUser.emailVerification.tokenHash, rawToken);
   assert.ok(savedUser.emailVerification.expiresAt > new Date());
 
-  // 4. Login attempt before verification MUST be rejected with 403
+  // Từ chối đăng nhập trước khi xác minh email.
   const loginBeforeRes = await send(request(app), "post", "/api/auth/login", {
     email: userData.email,
     password: userData.password,
@@ -87,33 +86,34 @@ test("Email Verification: Registration, token hashing, rejection before verify, 
   assert.equal(loginBeforeRes.body.error.code, "EMAIL_NOT_VERIFIED");
   assert.match(loginBeforeRes.body.error.message, /not been verified/i);
 
-  // 5. Verification with invalid token fails with 400
+  // Từ chối token xác minh không hợp lệ.
   await send(request(app), "post", "/api/auth/verify-email", {
     email: userData.email,
     token: "wrongtoken1234567890",
   }).expect(400);
 
-  // 6. Verification with valid token succeeds
+  // Xác minh thành công bằng token hợp lệ.
   const verifyRes = await send(request(app), "post", "/api/auth/verify-email", {
     email: userData.email,
     token: rawToken,
   }).expect(200);
   assert.match(verifyRes.body.data.message, /Email verified successfully/i);
 
-  // 7. User in DB is now verified and token is cleared
+  // Đánh dấu đã xác minh và xóa token đã dùng.
   const updatedUser = await User.findOne({ email: userData.email }).select(
     "+emailVerification.tokenHash +emailVerification.expiresAt"
   );
   assert.equal(updatedUser.isVerified, true);
   assert.equal(updatedUser.emailVerification?.tokenHash, undefined);
 
-  // 8. Re-using the same token fails
+  // Gửi lại token đã dùng không thực hiện xác minh lần nữa.
   await send(request(app), "post", "/api/auth/verify-email", {
     email: userData.email,
     token: rawToken,
-  }).expect(200); // returns already verified message
+  // Trả thông báo tài khoản đã được xác minh.
+  }).expect(200);
 
-  // 9. Login now succeeds with 200 and session is established
+  // Cho đăng nhập và tạo phiên sau khi xác minh.
   const agent = request.agent(app);
   const loginAfterRes = await send(agent, "post", "/api/auth/login", {
     email: userData.email,
@@ -121,7 +121,7 @@ test("Email Verification: Registration, token hashing, rejection before verify, 
   }).expect(200);
   assert.equal(loginAfterRes.body.data.email, "verifyuser@example.com");
 
-  // Verify session works
+  // Kiểm tra phiên đăng nhập vừa cấp.
   const meRes = await agent.get("/api/auth/me").expect(200);
   assert.equal(meRes.body.data.email, "verifyuser@example.com");
 });
@@ -150,55 +150,55 @@ test("Email Verification: Token expiration and resend cooldown", async () => {
   await send(request(app), "post", "/api/auth/register", userData).expect(201);
   const firstToken = sentEmails[0].html.match(/token=([a-f0-9]+)/)[1];
 
-  // Manually expire the token in database
+  // Giả lập token đã hết hạn trong database.
   await User.updateOne(
     { email: "expireuser@example.com" },
     { $set: { "emailVerification.expiresAt": new Date(Date.now() - 1000) } }
   );
 
-  // Verification with expired token fails with 400 and TOKEN_EXPIRED
+  // Token hết hạn trả lỗi TOKEN_EXPIRED.
   const expiredRes = await send(request(app), "post", "/api/auth/verify-email", {
     email: "expireuser@example.com",
     token: firstToken,
   }).expect(400);
   assert.equal(expiredRes.body.error.code, "TOKEN_EXPIRED");
 
-  // Resend verification email within 60s cooldown fails with 429
+  // Chặn gửi lại trong thời gian chờ 60 giây.
   const cooldownRes = await send(request(app), "post", "/api/auth/resend-verification", {
     email: "expireuser@example.com",
   }).expect(429);
   assert.match(cooldownRes.body.error.message, /Please wait/i);
 
-  // Fast forward cooldown (set lastSentAt to 2 minutes ago)
+  // Lùi thời điểm gửi trước hai phút để bỏ thời gian chờ trong test.
   await User.updateOne(
     { email: "expireuser@example.com" },
     { $set: { "emailVerification.lastSentAt": new Date(Date.now() - 2 * 60 * 1000) } }
   );
 
-  // Resend now succeeds
+  // Cho gửi lại khi đã hết thời gian chờ.
   const resendRes = await send(request(app), "post", "/api/auth/resend-verification", {
     email: "expireuser@example.com",
   }).expect(200);
   assert.match(resendRes.body.data.message, /verification email sent/i);
 
-  // New email was sent with a fresh token
+  // Email gửi lại phải chứa token mới.
   assert.equal(sentEmails.length, 2);
   const secondToken = sentEmails[1].html.match(/token=([a-f0-9]+)/)[1];
   assert.notEqual(firstToken, secondToken);
 
-  // Old expired token cannot be used
+  // Không chấp nhận token cũ đã hết hạn.
   await send(request(app), "post", "/api/auth/verify-email", {
     email: "expireuser@example.com",
     token: firstToken,
   }).expect(400);
 
-  // New token verifies successfully
+  // Token mới xác minh thành công.
   await send(request(app), "post", "/api/auth/verify-email", {
     email: "expireuser@example.com",
     token: secondToken,
   }).expect(200);
 
-  // Now user is verified
+  // Kiểm tra tài khoản đã được xác minh.
   const user = await User.findOne({ email: "expireuser@example.com" });
   assert.equal(user.isVerified, true);
 });

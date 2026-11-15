@@ -1,4 +1,4 @@
-// Booking, pricing, room, staff, profile, reset and review values checked against SRS v2.5 (BR-03..BR-24, CR-04, CR-12, CR-21).
+// Kiểm tra đầu vào của booking, giá, phòng, nhân viên, hồ sơ, mật khẩu và đánh giá.
 const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const mongoose = require("mongoose");
@@ -91,6 +91,12 @@ test("pricing rates: BR-06 dates and price, BR-07 no overlap, CR-20 whole VND", 
     ["price string", { seasonalPricing: [rate({ price: "1500000" })] }, 400],
     ["price with decimals", { seasonalPricing: [rate({ price: 1500000.5 })] }, 400],
     ["invalid date 2031-02-30", { seasonalPricing: [rate({ startDate: "2031-02-30" })] }, 400],
+    // before: 30 Feb was read as 2 March and only refused because it fell after the end date
+    ["invalid date inside a valid range", { seasonalPricing: [rate({ startDate: "2031-02-30", endDate: "2031-03-10" })] }, 400],
+    ["loose date text", { seasonalPricing: [rate({ startDate: "hello 2031", endDate: "2031-03-10" })] }, 400],
+    ["stored rate sent back as ISO timestamp", { seasonalPricing: [rate({ startDate: "2031-01-01T00:00:00.000Z", endDate: "2031-01-10T00:00:00.000Z" })] }, 200],
+    ["description too long", { seasonalPricing: [rate({ description: "x".repeat(101) })] }, 400],
+    ["unknown field in a rate", { seasonalPricing: [rate({ discount: 5 })] }, 400],
     ["date not a date", { seasonalPricing: [rate({ startDate: "tomorrow" })] }, 400],
     ["overlapping rates", { seasonalPricing: [rate({}), rate({ startDate: "2031-01-05", endDate: "2031-01-15" })] }, 409],
     ["rates sharing a day overlap", { seasonalPricing: [rate({}), rate({ startDate: "2031-01-10", endDate: "2031-01-15" })] }, 409],
@@ -144,7 +150,8 @@ test("coupons on a booking: fixed amount, percentage, minimum spend, usage limit
   const out = {};
   let from = 40;
   for (const code of ["FIXED300", "FIXEDHUGE", "PCT10", "MINSPEND", "FUTURE", "EXPIRED", "OFF"]) {
-    await require("../src/models/Booking").updateMany({ status: "pending" }, { status: "expired" }); // BR-29 allows 3 unpaid bookings at a time
+    // Mỗi khách được có tối đa ba booking chưa thanh toán.
+    await require("../src/models/Booking").updateMany({ status: "pending" }, { status: "expired" });
     const r = await send(customer, "post", "/api/bookings", { roomTypeId: rt._id, checkInDate: day(from), checkOutDate: day(from + 2), guestCount: 2, couponCode: code, consent: true, captchaToken: "valid_test_token" });
     out[code] = [r.status, r.body.data?.discountAmount ?? r.body.message];
     from += 5;
@@ -222,6 +229,54 @@ test("review: BR-23 rating is an integer from 1 to 5, one review per completed s
   await send(customer, "post", "/api/bookings/64b000000000000000000000/reviews", { rating: 5, title: "t", comment: "c" }).expect(404);
 });
 
+test("review form (POST /api/reviews): the same limits as the booking review route", async () => {
+  const Booking = require("../src/models/Booking");
+  const Review = require("../src/models/Review");
+  const User = require("../src/models/User");
+  const me = await User.findOne({ email: "customer@example.com" });
+  const reviewed = await Review.distinct("bookingId");
+  const done = await Booking.findOneAndUpdate({ customerId: me._id, _id: { $nin: reviewed } }, { status: "checked_out" }, { new: true });
+  assert.ok(done, "a stay of this customer to review");
+  const r = (o) => ({ bookingId: String(done._id), rating: 4, title: "Nice", comment: "Clean room", ...o });
+  await check("review form", [
+    ["booking id malformed", r({ bookingId: "abc" }), 400],
+    ["title 121 chars", r({ title: "t".repeat(121) }), 400],
+    ["comment 2001 chars", r({ comment: "c".repeat(2001) }), 400],
+    ["comment is an object", r({ comment: { $gt: "" } }), 400],
+    ["unknown field", r({ status: "hidden" }), 400],
+    ["valid", r({}), 201],
+  ], (b) => send(customer, "post", "/api/reviews", b));
+});
+
+test("front desk edits a customer: BR-24 name, CR-04 phone and dates", async () => {
+  const User = require("../src/models/User");
+  const id = (await User.findOne({ email: "customer@example.com" }))._id;
+  await check("front-desk customer", [
+    ["valid", { fullName: "Jamie Tran", phone: "0912345678", address: "1 Le Loi", dateOfBirth: "1990-05-20", idDocumentNo: "079123456789" }, 200],
+    ["name blank (would erase the name)", { fullName: "" }, 400],
+    ["name 51 chars", { fullName: "a".repeat(51) }, 400],
+    ["phone with letters", { phone: "abc" }, 400],
+    ["phone blank", { phone: "" }, 400],
+    ["address 301 chars", { address: "a".repeat(301) }, 400],
+    ["ID number 2 chars", { idDocumentNo: "12" }, 400],
+    ["date of birth 30 February", { dateOfBirth: "1990-02-30" }, 400],
+    ["date of birth in the future", { dateOfBirth: "2999-01-01" }, 400],
+    ["optional fields clear with an empty value", { address: "", idDocumentNo: "" }, 200],
+    ["unknown field", { status: "suspended" }, 400],
+  ], (b) => send(reception, "patch", `/api/front-desk/customers/${id}`, b));
+  assert.equal((await User.findById(id)).customerProfile.fullName, "Jamie Tran");
+});
+
+test("ad-hoc cleaning request: the preferred time must be a real timestamp (CR-04)", async () => {
+  const roomId = "64b000000000000000000000"; // the time is checked before the room is looked up
+  await check("ad-hoc time", [
+    ["loose text", { preferredTime: "tomorrow 9" }, 400],
+    ["no offset", { preferredTime: "2031-01-01T09:00:00" }, 400],
+    ["30 February", { preferredTime: "2031-02-30T09:00:00+07:00" }, 400],
+    ["hour 25", { preferredTime: "2031-01-01T25:00:00+07:00" }, 400],
+  ], (b) => send(reception, "post", "/api/housekeeping/tasks/ad-hoc", { roomId, requestContent: "Extra towels", ...b }));
+});
+
 test("walk-in booking: UC14 / BR-12 today only, name, phone, ID document, guests", async () => {
   const rt = await bookableType();
   const wi = (o) => ({ roomTypeId: rt._id, checkInDate: day(0), checkOutDate: day(1), guestCount: 2, fullName: "Tran Van C", phone: "0912345678", idDocumentNo: "079123456789", ...o });
@@ -246,7 +301,8 @@ test("verification e-mail can be requested at most 3 times per hour (BR-42, MSG-
   const user = await User.create({ username: "pending1", email: "pending1@example.com", passwordHash: await hashPassword(password), roleId: (await Role.findOne({ key: "customer" }))._id, phone: "0912345678", customerProfile: { fullName: "Pending One" }, isVerified: false });
   const statuses = [];
   for (let i = 0; i < 5; i++) {
-    await User.updateOne({ _id: user._id }, { $set: { "emailVerification.lastSentAt": new Date(Date.now() - 120000) } }); // skip the short cooldown
+    // Bỏ thời gian chờ ngắn trong test.
+    await User.updateOne({ _id: user._id }, { $set: { "emailVerification.lastSentAt": new Date(Date.now() - 120000) } });
     statuses.push((await send(request(app), "post", "/api/auth/resend-verification", { email: "pending1@example.com" })).status);
   }
   assert.ok(statuses.slice(0, 3).every((c) => c === 200), `first three allowed: ${statuses}`);

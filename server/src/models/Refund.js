@@ -19,7 +19,7 @@ const schema = new Schema({
   idempotencyKey: { type: String, unique: true, sparse: true },
   failureReason: String,
   processedAt: Date,
-  // UC21: obtained by the Receptionist from the customer; accountNumber is encrypted at rest.
+  // Lưu tài khoản do lễ tân thu thập, mã hóa số tài khoản trước khi ghi.
   bankAccount: {
     bank: String, accountNumber: String, holderName: String,
     enteredBy: { type: Schema.Types.ObjectId, ref: 'User' }, enteredAt: Date

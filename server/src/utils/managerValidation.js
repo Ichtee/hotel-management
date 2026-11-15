@@ -6,7 +6,7 @@ function strings(value, field, maxItems = 30, maxLength = 200) {
   return [...new Set(value.map((item) => v.text(item, field, 1, maxLength)))];
 }
 
-// Chỉ nhận URL ảnh HTTP hoặc HTTPS, không tải ảnh từ backend.
+// Chỉ nhận URL ảnh HTTP hoặc HTTPS; máy chủ không tải nội dung ảnh.
 function images(value) {
   const result = strings(value, "images", 20, 2048);
   for (const item of result) {

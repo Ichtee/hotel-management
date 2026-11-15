@@ -8,7 +8,7 @@ const schema = new Schema({
   seasonalPricing: [{ startDate: { type: Date, required: true }, endDate: { type: Date, required: true }, price: { type: Number, required: true, min: 0.01 }, description: String }],
   isActive: { type: Boolean, default: true }
 }, { timestamps: true });
-// BR-06: end >= start. BR-07: rates of one room type must not overlap.
+// Ngày kết thúc không trước ngày bắt đầu; các khoảng giá cùng loại phòng không chồng lấn.
 schema.path('seasonalPricing').validate(items => items.every(i => i.endDate >= i.startDate), 'Seasonal price endDate must not be before startDate');
 schema.path('seasonalPricing').validate(items => items.every((a, i) => items.every((b, j) => i === j || a.endDate < b.startDate || b.endDate < a.startDate)), 'Seasonal price periods must not overlap');
 module.exports = mongoose.model('RoomType', schema);

@@ -140,8 +140,12 @@ async function visibility(req, res) {
 }
 // Gửi đánh giá cho booking đã hoàn tất lưu trú.
 async function submitReview(req, res) {
-  const { bookingId, rating, title, comment } = req.body;
-  if (!bookingId) throw new v.HttpError(400, "Booking ID is required.");
+  v.keys(req.body, ["bookingId", "rating", "title", "comment"]);
+  const { rating } = req.body;
+  const bookingId = v.id(req.body.bookingId, "bookingId");
+  // Same limits as POST /api/bookings/:id/reviews.
+  const title = v.text(req.body.title || "", "title", 0, 120);
+  const comment = v.text(req.body.comment || "", "comment", 0, 2000);
   const numRating = Number(rating);
   if (!Number.isInteger(numRating) || numRating < 1 || numRating > 5) {
     throw new v.HttpError(400, "Rating must be an integer between 1 and 5.");
@@ -174,8 +178,8 @@ async function submitReview(req, res) {
     bookingId: booking._id,
     roomTypeId,
     rating: numRating,
-    title: title ? String(title).trim() : undefined,
-    comment: comment ? String(comment).trim() : undefined,
+    title: title || undefined,
+    comment: comment || undefined,
     status: "visible"
   });
 

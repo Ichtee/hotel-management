@@ -30,7 +30,10 @@ async function createAdHoc(req, res) {
   if (typeof b.requestContent !== "string" || !b.requestContent.trim()) v.fail("Request content is required.", "requestContent");
   let preferredTime;
   if (b.preferredTime) {
-    if (!Number.isFinite(Date.parse(b.preferredTime))) v.fail("Preferred time is invalid.", "preferredTime");
+    // CR-04: a full ISO timestamp with its offset (the form sends hotel time, +07:00); loose strings such as "tomorrow 9" are refused.
+    if (typeof b.preferredTime !== "string" || !/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d(:[0-5]\d(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/.test(b.preferredTime))
+      v.fail("Preferred time is invalid.", "preferredTime");
+    v.date(b.preferredTime.slice(0, 10), "preferredTime"); // no 30 February
     preferredTime = new Date(b.preferredTime);
   }
   const result = await createCleaningTask({

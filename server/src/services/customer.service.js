@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const Role = require('../models/Role');
 const { appError } = require('../utils/http');
+const v = require('../utils/validation');
 
 const isId = value => mongoose.isObjectIdOrHexString(value);
 const CUSTOMER_FIELDS = 'username email phone status customerProfile.fullName customerProfile.address customerProfile.dateOfBirth customerProfile.loyaltyPoints createdAt updatedAt';
@@ -51,11 +52,21 @@ exports.updateCustomer = async (customerId, payload) => {
   const unknown = Object.keys(payload).filter(key => !EDITABLE_FIELDS.has(key));
   if (unknown.length) throw appError(`These fields cannot be updated here: ${unknown.join(', ')}`);
   if (!Object.keys(payload).length) throw appError('At least one customer field is required');
-  if (payload.dateOfBirth !== undefined && (Number.isNaN(new Date(payload.dateOfBirth).valueOf()) || new Date(payload.dateOfBirth) > new Date())) throw appError('dateOfBirth must be a valid date in the past');
-  if (payload.phone !== undefined && typeof payload.phone !== 'string') throw appError('phone must be a string');
+  // Same rules as the customer's own profile (UC03): BR-24 name 2-50, CR-04 phone and dates. Optional fields clear with "".
   const changes = {};
-  for (const field of ['fullName', 'address', 'dateOfBirth', 'idDocumentNo']) if (payload[field] !== undefined) changes[`customerProfile.${field}`] = payload[field] || undefined;
-  if (payload.phone !== undefined) changes.phone = payload.phone.trim() || undefined;
+  const optional = (field, check) => {
+    if (payload[field] === undefined) return;
+    changes[`customerProfile.${field}`] = payload[field] === '' || payload[field] === null ? undefined : check(payload[field]);
+  };
+  if (payload.fullName !== undefined) changes['customerProfile.fullName'] = v.text(payload.fullName, 'fullName', 2, 50);
+  if (payload.phone !== undefined) changes.phone = v.phone(payload.phone, true);
+  optional('address', (x) => v.text(x, 'address', 1, 300));
+  optional('idDocumentNo', (x) => v.text(x, 'idDocumentNo', 3, 40));
+  optional('dateOfBirth', (x) => {
+    const d = new Date(v.date(x, 'dateOfBirth'));
+    if (d > new Date()) v.fail('Date of birth must be in the past.', 'dateOfBirth');
+    return d;
+  });
   const customer = await User.findOneAndUpdate(
     { _id: customerId, roleId: await customerRoleId() }, { $set: changes }, { new: true, runValidators: true }
   ).select(`${CUSTOMER_FIELDS} +customerProfile.idDocumentNo`).lean();

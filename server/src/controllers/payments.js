@@ -1,3 +1,4 @@
+const { transactional } = require("../services/hotelOperations");
 const { randomBytes } = require("node:crypto");
 const mongoose = require("mongoose");
 const Booking = require("../models/Booking");
@@ -17,8 +18,9 @@ const ONLINE = ["bank_transfer", "credit_card"];
 const useSepay = () => sepay.enabled();
 const onlineMethods = () => (useSepay() ? sepay.methods() : ONLINE);
 const isStaff = (req) => req.role.permissions.includes("payments.settle");
-// Khách chỉ trả tiền booking của mình; nhân viên có quyền được thu thay khách.
-const scope = (req, bookingId) => ({ _id: bookingId, ...(isStaff(req) ? {} : { customerId: req.user._id }) });
+const canReadPayments = (req) => req.role.permissions.some((p) => ["payments.status.read", "revenue.read"].includes(p));
+// Quyền xem thanh toán độc lập với quyền thu tiền; khách chỉ xem booking của mình.
+const scope = (req, bookingId) => ({ _id: bookingId, ...(canReadPayments(req) ? {} : { customerId: req.user._id }) });
 async function findBooking(req, staffAllowed) {
   const filter = { _id: v.id(req.params.id) };
   if (!(staffAllowed && isStaff(req))) filter.customerId = req.user._id;
@@ -33,7 +35,7 @@ async function openOrder(booking, kind, amount, method) {
     await Payment.updateMany({ bookingId: booking._id, kind, status: "pending", gateway: "sepay" }, { status: "cancelled", failureReason: "Replaced by a newer payment attempt" });
     return Payment.create({ ...fresh, gateway: "sepay" });
   }
-  // Dùng lại đơn giả lập đang mở khi thử lại; yêu cầu đồng thời vẫn có thể tạo trùng vì chưa có chỉ mục chặn.
+  // Giao dịch đã khóa booking; dùng lại đơn giả lập còn mở khi khách thử lại.
   const open = await Payment.findOne({ bookingId: booking._id, kind, status: "pending", gateway: "sandbox", gatewayOrderId: { $exists: true } });
   if (open) {
     Object.assign(open, { amount, method });
@@ -51,7 +53,7 @@ function order(p, booking, extra) {
 const methods = (req, res) => res.json({ data: { provider: useSepay() ? "sepay" : "sandbox", methods: onlineMethods() } });
 
 // Thu cọc trực tuyến để xác nhận booking đang chờ.
-async function deposit(req, res) {
+async function deposit(req) {
   v.keys(req.body, ["method"]);
   const method = v.choice(req.body.method, "method", onlineMethods());
   const booking = await findBooking(req, false);
@@ -61,7 +63,7 @@ async function deposit(req, res) {
   if (!(booking.depositRequired >= 1)) throw new v.HttpError(409, "No deposit is required for this booking.");
   if (await Payment.exists({ bookingId: booking._id, kind: "deposit", status: "success" })) throw new v.HttpError(409, "The deposit is already paid.");
   const payment = await openOrder(booking, "deposit", booking.depositRequired, method);
-  res.status(201).json({ data: order(payment, booking, { holdExpiresAt: booking.holdExpiresAt }) });
+  return { data: order(payment, booking, { holdExpiresAt: booking.holdExpiresAt }) };
 }
 
 // Chụp dòng thanh toán vào hóa đơn để thay đổi sau này không ảnh hưởng lịch sử.
@@ -81,16 +83,25 @@ async function supplementaryInvoice(booking, issuedBy) {
 // Ghi nhận ngay khoản lễ tân đã thu tại quầy.
 const DESK = ["cash", "pos", "bank_transfer"];
 // Thu phần còn lại tại quầy, có thể chia nhiều lần đến khi đủ; không thu qua cổng trực tuyến.
-async function finalPayment(req, res) {
-  v.keys(req.body, ["method", "amount", "transactionRef"]);
+async function finalPayment(req) {
+  v.keys(req.body, ["method", "amount", "transactionRef", "idempotencyKey"]);
   const method = v.choice(req.body.method, "method", DESK);
   const booking = await findBooking(req, true);
   if (!["confirmed", "checked_in", "checked_out"].includes(booking.status)) throw new v.HttpError(409, "This booking cannot be paid yet.");
+  const key = req.body.idempotencyKey === undefined ? undefined :
+    `desk:${booking._id}:${v.code(req.body.idempotencyKey, "idempotencyKey", /^[A-Za-z0-9_-]{16,100}$/, "Invalid payment retry key.")}`;
+  const transactionRef = method === "cash" ? undefined : v.code(req.body.transactionRef, "transactionRef", /^[A-Za-z0-9._\/-]{1,100}$/, "Transaction reference: letters, digits or . _ / -, no spaces.");
+  const previous = key && await Payment.findOne({ idempotencyKey: key });
   const due = booking.totalAmount - (await paidAmount(booking._id));
+  if (previous) {
+    if (previous.method !== method || (req.body.amount !== undefined && previous.amount !== req.body.amount) ||
+        (method !== "cash" && previous.transactionRef !== transactionRef))
+      throw new v.HttpError(409, "This payment key was already used with different details.");
+    return { data: { paymentId: previous.id, status: previous.status, amount: previous.amount, remaining: Math.max(0, due), duplicate: true } };
+  }
   if (due < 1) throw new v.HttpError(409, "Nothing is left to pay.");
   const amount = req.body.amount === undefined ? due : v.number(req.body.amount, "amount", 1, due);
-  const transactionRef = method === "cash" ? undefined : v.text(req.body.transactionRef, "transactionRef", 1, 100);
-  const payment = await Payment.create({ bookingId: booking._id, kind: "final", amount, method, transactionRef, status: "success", paidAt: new Date(), recordedBy: req.user._id });
+  const payment = await Payment.create({ bookingId: booking._id, kind: "final", amount, method, transactionRef, idempotencyKey: key, deskReference: transactionRef ? `${method}:${transactionRef}` : undefined, status: "success", paidAt: new Date(), recordedBy: req.user._id });
   await announce(payment, true);
   if (amount === due) {
     // Khoản bồi thường trả sau khi rời khách sạn có hóa đơn bổ sung riêng.
@@ -98,7 +109,7 @@ async function finalPayment(req, res) {
     await settlePaid(booking._id);
   }
   await audit(req.user._id, "payment.recorded", "payment", payment._id, { bookingId: booking._id, amount, method });
-  res.status(201).json({ data: { paymentId: payment.id, status: "success", amount, remaining: due - amount } });
+  return { data: { paymentId: payment.id, status: "success", amount, remaining: due - amount } };
 }
 
 // Chỉ nhận kết quả giả lập khi chữ ký, đơn hàng và số tiền đều khớp.
@@ -106,7 +117,7 @@ async function callback(req, res) {
   v.keys(req.body, ["orderId", "transactionRef", "status", "amount", "signature"]);
   const p = {
     orderId: v.text(req.body.orderId, "orderId", 1, 64),
-    transactionRef: v.text(req.body.transactionRef, "transactionRef", 1, 100),
+    transactionRef: v.code(req.body.transactionRef, "transactionRef", /^[A-Za-z0-9._\/-]{1,100}$/, "Transaction reference: letters, digits or . _ / -, no spaces."),
     status: v.choice(req.body.status, "status", ["success", "failed"]),
     amount: v.number(req.body.amount, "amount", 1),
   };
@@ -115,7 +126,7 @@ async function callback(req, res) {
   if (!payment) throw new v.HttpError(404, "Unknown transaction.");
   if (payment.amount !== p.amount) throw new v.HttpError(400, "Amount does not match the transaction.");
   const result = await settle(payment, p);
-  res.json({ data: { status: result.duplicate ? payment.status : result.payment.status, duplicate: Boolean(result.duplicate) } });
+  res.json({ data: { status: result.payment.status, duplicate: Boolean(result.duplicate) } });
 }
 
 // Nhận thông báo SePay; phản hồi HTTP 200 với success: true để cổng không gửi lại.
@@ -149,7 +160,7 @@ async function sandbox(req, res) {
   v.keys(req.body, ["result"]);
   const result = v.choice(req.body.result, "result", ["success", "failed"]);
   const payment = await Payment.findOne({ gateway: "sandbox", gatewayOrderId: v.text(req.params.orderId, "orderId", 1, 64) });
-  const booking = payment && (await Booking.findOne(scope(req, payment.bookingId)));
+  const booking = payment && (await Booking.findOne({ _id: payment.bookingId, ...(isStaff(req) ? {} : { customerId: req.user._id }) }));
   if (!booking) throw new v.HttpError(404, "Order not found.");
   const p = { orderId: payment.gatewayOrderId, transactionRef: `SBX-${randomBytes(6).toString("hex").toUpperCase()}`, status: result, amount: payment.amount };
   req.body = { ...p, signature: gateway.sign(p) };
@@ -180,15 +191,12 @@ async function show(req, res) {
 // Lấy danh sách thanh toán và hóa đơn ở chế độ chỉ đọc, mới nhất trước.
 const BOOKING = { path: "bookingId", select: "bookingReference guestName status" };
 async function listing(req, res) {
-  v.keys(req.query, ["status", "kind", "limit"]);
+  v.keys(req.query, ["status", "kind", "page", "limit"]);
   const filter = {};
   if (req.query.status) filter.status = v.choice(req.query.status, "status", Payment.schema.path("status").enumValues);
   if (req.query.kind) filter.kind = v.choice(req.query.kind, "kind", Payment.schema.path("kind").enumValues);
-  const limit = req.query.limit ? v.number(Number(req.query.limit), "limit", 1, 200) : 100;
-  res.json({ data: await Payment.find(filter).populate(BOOKING).sort({ createdAt: -1 }).limit(limit).lean() });
+  const result = await v.list(Payment, filter, req.query);
+  await Payment.populate(result.data, BOOKING);
+  res.json(result);
 }
-async function invoices(req, res) {
-  v.keys(req.query, []);
-  res.json({ data: await Invoice.find().populate(BOOKING).populate("issuedBy", "username customerProfile.fullName").sort({ createdAt: -1 }).limit(200).lean() });
-}
-module.exports = { listing, invoices, deposit, finalPayment, callback, sepayIpn, sandbox, back, methods, show };
+module.exports = { listing, deposit: transactional(deposit, 201), finalPayment: transactional(finalPayment, 201), callback, sepayIpn, sandbox, back, methods, show };

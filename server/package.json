@@ -12,7 +12,7 @@
     "db:watch": "node scripts/watchDatabase.js",
     "db:delete-users": "node scripts/deleteUsers.js",
     "test:email": "node scripts/testEmail.js",
-    "test": "node test/models.test.js && node --test test/api.test.js test/staff.test.js test/managerOperations.test.js test/emailVerification.test.js test/loginSecurity.test.js test/validation.test.js test/validationFlows.test.js",
+    "test": "node test/models.test.js && node --test --test-concurrency=1 test/api.test.js test/staff.test.js test/managerOperations.test.js test/emailVerification.test.js test/loginSecurity.test.js test/validation.test.js test/validationFlows.test.js test/member2.test.js test/consistency.test.js",
     "test:member2": "node test/member2.test.js"
   },
   "dependencies": {

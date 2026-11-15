@@ -1,6 +1,7 @@
+import { useAuth } from './context/Auth.jsx';
 import { useEffect, useState } from 'react';
 import { api, dateLabel, money } from './api/client.js';
-import { DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useEditPage, useScreen } from './ui.jsx';
+import { DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useEditPage, useScreen, usePagedApi, Pagination, useAllApi } from './ui.jsx';
 
 // Quản lý dịch vụ và vật phẩm bồi thường; chỉ vô hiệu hóa để giữ lịch sử.
 export function Catalog() {
@@ -104,7 +105,9 @@ export function StaffPermissions() {
 
 // Ẩn đánh giá vi phạm kèm lý do hoặc khôi phục hiển thị.
 export function Reviews() {
-  const types = useApi('/room-types?limit=100');
+  const { user } = useAuth();
+  const canModerate = user.role === 'manager';
+  const types = useAllApi(canModerate ? '/room-types?limit=100' : '/public/room-types');
   const typeId = new URLSearchParams(location.hash.split('?')[1] || '').get('type') || '';
   const setTypeId = (v) => { location.hash = `#/admin/reviews?type=${v}`; };
   // Mặc định chọn loại phòng đầu tiên có đánh giá.
@@ -117,27 +120,27 @@ export function Reviews() {
     return () => { live = false; };
   }, [typeId, types.data]);
   const id = typeId || auto || types.data?.[0]?._id;
-  const list = useApi(id ? `/room-types/${id}/reviews?limit=50` : null, Boolean(id));
+  const list = usePagedApi(id ? `/room-types/${id}/reviews?limit=50` : null, Boolean(id));
   const sc = useScreen(); const [msg, setMsg] = useState(null);
   const show = async (r) => { try { await api(`/reviews/${r._id}/visibility`, { method: 'PATCH', body: { hidden: false } }); setMsg('Review is visible again.'); list.reload(); } catch (x) { alert(x.message); } };
   const s = list.meta?.summary;
-  if (sc.name === 'hide') {
+  if (sc.name === 'hide' && canModerate) {
     const r = (list.data || []).find((x) => x._id === sc.id);
     return r ? <HideReview review={r} onClose={sc.close} onDone={() => { setMsg('Review hidden.'); list.reload(); sc.close(); }} /> : <WaitScreen loading={list.loading} onClose={sc.close} />;
   }
   return (
     <>
-      <PageHead title="Guest reviews" sub="Hide a review with offensive language, personal data or spam; guests then no longer see it" />
+      <PageHead title="Guest reviews" sub={canModerate ? "Hide or show guest reviews" : "Read guest reviews"} />
       <div className="form" style={{ maxWidth: 420, marginBottom: '1rem' }}>
         <Field label="Room type"><select value={id || ''} onChange={(e) => { setTypeId(e.target.value); setMsg(null); }}>{(types.data || []).map((t) => <option key={t._id} value={t._id}>{t.name}</option>)}</select></Field>
       </div>
       {s && <p className="muted">{s.count} visible reviews{s.averageRating ? ` · average ${s.averageRating.toFixed(1)} / 5` : ''}</p>}
-      <Notice error={types.error || list.error} ok={msg} />
+      <Notice error={types.error || list.error} ok={msg} /><Pagination list={list} />
       {list.loading ? <p className="muted">Loading…</p> : !list.data?.length ? <p className="empty">No reviews for this room type yet.</p> : (
         <DataTable cols={['Date', 'Rating', 'Review', 'Status', '']} rows={list.data.map((r) => [
           dateLabel(r.createdAt), '★'.repeat(r.rating), <span key="t"><b>{r.title}</b>{r.title && r.comment ? ' — ' : ''}{r.comment}{r.hiddenReason && <small className="muted"><br />Hidden: {r.hiddenReason}</small>}</span>,
           r.status === 'hidden' ? 'hidden' : 'visible',
-          r.status === 'hidden' ? <button key="s" className="btn sm" onClick={() => show(r)}>Show</button> : <button key="h" className="btn sm" onClick={() => sc.go('hide', r._id)}>Hide</button>,
+          !canModerate ? '' : r.status === 'hidden' ? <button key="s" className="btn sm" onClick={() => show(r)}>Show</button> : <button key="h" className="btn sm" onClick={() => sc.go('hide', r._id)}>Hide</button>,
         ])} />
       )}
     </>

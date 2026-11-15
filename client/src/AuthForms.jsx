@@ -48,6 +48,8 @@ export function AuthTabs({ mode, onChange }) {
 
 function PasswordField({ label, name, error, autoComplete, onChange, minLength, maxLength, children }) {
   const [show, setShow] = useState(false);
+  // Mật khẩu mới không được có dấu cách (giống server).
+  const newPassword = autoComplete === 'new-password';
   return (
     <Field label={label} error={error}>
       <span className="pw">
@@ -58,6 +60,8 @@ function PasswordField({ label, name, error, autoComplete, onChange, minLength, 
           onChange={onChange}
           minLength={minLength}
           maxLength={maxLength}
+          pattern={newPassword ? '\\S+' : undefined}
+          title={newPassword ? 'No spaces.' : undefined}
           required
         />
         <button type="button" aria-label={show ? 'Hide password' : 'Show password'} aria-pressed={show} onClick={() => setShow(!show)}><Icon d={show ? EYE_OFF : EYE} /></button>
@@ -94,9 +98,9 @@ export function SignIn({ onDone, hint, onForgot }) {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
     setBusy(true); setResent(null);
-    try { await signIn({ email: f.email, password: f.password, captchaToken: token || undefined }); setErr(null); onDone(); }
-    // Mỗi token CAPTCHA chỉ dùng một lần.
-    catch (x) { setErr(x); setUnverified(x.code === 'EMAIL_NOT_VERIFIED' ? f.email : null); setBusy(false); setTries((t) => t + 1); }
+    try { await signIn({ login: f.login, password: f.password, captchaToken: token || undefined }); setErr(null); onDone(); }
+    // Mỗi token CAPTCHA chỉ dùng một lần; gửi lại xác minh luôn dùng email của tài khoản.
+    catch (x) { setErr(x); setUnverified(x.code === 'EMAIL_NOT_VERIFIED' ? x.details?.email || f.login : null); setBusy(false); setTries((t) => t + 1); }
   };
   const resend = async () => {
     try { setResent({ ok: (await api('/auth/resend-verification', { method: 'POST', body: { email: unverified } })).data.message }); }
@@ -104,7 +108,7 @@ export function SignIn({ onDone, hint, onForgot }) {
   };
   return (
     <form className="form one" onSubmit={submit}>
-      <Field label="Email" error={err?.fields?.email}><input name="email" type="email" autoComplete="email" placeholder="you@example.com" autoFocus required /></Field>
+      <Field label="Email or username" error={err?.fields?.login || err?.fields?.email || err?.fields?.username}><input name="login" pattern="\S+" title="No spaces." autoComplete="username" placeholder="you@example.com or username" autoCapitalize="none" spellCheck="false" autoFocus required /></Field>
       <PasswordField label="Password" name="password" autoComplete="current-password" error={err?.fields?.password} />
       {onForgot && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-0.35rem', marginBottom: '0.25rem' }}>
@@ -144,7 +148,7 @@ export function ForgotPassword({ onDone, onCancel, link }) {
     setErr(null);
     setOk(null);
     const f = Object.fromEntries(new FormData(e.target));
-    const em = (f.email || '').trim();
+    const em = f.email || ''; // không tự cắt: server từ chối email có dấu cách
     if (!em) return;
     setBusy(true);
     try {
@@ -281,6 +285,10 @@ export function Register({ onDone, hint }) {
     }
 
     const username = (f.username || '').trim().toLowerCase();
+    if (/\s/.test(username)) {
+      setErr({ message: 'Username cannot contain spaces.', fields: { username: 'Username cannot contain spaces.' } });
+      return;
+    }
     if (username.length < 3 || username.length > 40) {
       setErr({
         message: 'Username must be 3–40 characters.',
@@ -297,6 +305,10 @@ export function Register({ onDone, hint }) {
     }
 
     const targetEmail = (f.email || '').trim().toLowerCase();
+    if (/\s/.test(targetEmail)) {
+      setErr({ message: 'Email cannot contain spaces.', fields: { email: 'Email cannot contain spaces.' } });
+      return;
+    }
     if (targetEmail.length < 3 || targetEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail)) {
       setErr({
         message: 'Please enter a valid email address.',
@@ -314,6 +326,10 @@ export function Register({ onDone, hint }) {
       return;
     }
 
+    if (/\s/.test(f.password || '')) {
+      setErr({ message: 'Password cannot contain spaces.', fields: { password: 'Password cannot contain spaces.' } });
+      return;
+    }
     if (!RULES.every(([, ok]) => ok(f.password || ''))) {
       setErr({ message: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.', fields: { password: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.' } });
       return;
@@ -364,6 +380,8 @@ export function Register({ onDone, hint }) {
         <input
           name="username"
           autoComplete="username"
+          pattern="\S+"
+          title="No spaces."
           minLength={3}
           maxLength={40}
           placeholder="e.g. johndoe"

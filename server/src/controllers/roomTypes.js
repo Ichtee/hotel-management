@@ -1,3 +1,5 @@
+const { createReview } = require("../services/reviews");
+const { sellingFilter } = require("../services/roomInventory");
 const mongoose = require("mongoose");
 const RoomType = require("../models/RoomType");
 const Room = require("../models/Room");
@@ -75,6 +77,10 @@ async function update(req, res) {
     const type = await RoomType.findById(id).session(session);
     if (!type) throw new v.HttpError(404, "Room type not found.");
     const before = type.toObject();
+    // Không giảm sức chứa thấp hơn số khách của booking còn hiệu lực.
+    if (input.maxOccupancy !== undefined && input.maxOccupancy < type.maxOccupancy &&
+        await Booking.exists({ ...sellingFilter(), rooms: { $elemMatch: { roomTypeId: type._id, guestCount: { $gt: input.maxOccupancy } } } }).session(session))
+      throw new v.HttpError(409, "Upcoming or in-house bookings exceed the proposed capacity.", { maxOccupancy: "Resolve the affected bookings before reducing capacity." });
     Object.assign(type, input);
     await type.save({ session });
     await logChange(req, "room_type.updated", "RoomType", type._id, { before, after: type.toObject() }, session);
@@ -106,7 +112,7 @@ async function remove(req, res) {
 // Quản lý xem được đánh giá ẩn; khách chỉ xem đánh giá công khai.
 async function reviews(req, res) {
   const id = v.id(req.params.id);
-  const publicView = req.path.startsWith("/api/public/");
+  const publicView = req.path.startsWith("/api/public/") || req.role?.key !== "manager";
   v.keys(req.query, publicView ? ["page", "limit"] : ["page", "limit", "status"]);
   if (!await RoomType.exists({ _id: id, ...(publicView ? { isActive: true } : {}) }))
     throw new v.HttpError(404, "Room type not found.");
@@ -141,52 +147,7 @@ async function visibility(req, res) {
 // Gửi đánh giá cho booking đã hoàn tất lưu trú.
 async function submitReview(req, res) {
   v.keys(req.body, ["bookingId", "rating", "title", "comment"]);
-  const { rating } = req.body;
-  const bookingId = v.id(req.body.bookingId, "bookingId");
-  // Same limits as POST /api/bookings/:id/reviews.
-  const title = v.text(req.body.title || "", "title", 0, 120);
-  const comment = v.text(req.body.comment || "", "comment", 0, 2000);
-  const numRating = Number(rating);
-  if (!Number.isInteger(numRating) || numRating < 1 || numRating > 5) {
-    throw new v.HttpError(400, "Rating must be an integer between 1 and 5.");
-  }
-
-  const booking = await Booking.findById(bookingId);
-  if (!booking) throw new v.HttpError(404, "Booking not found.");
-
-  const userId = req.user?._id;
-  if (!userId || (booking.customerId && String(booking.customerId) !== String(userId))) {
-    throw new v.HttpError(403, "You can only review your own booking.");
-  }
-
-  if (booking.status !== "checked_out") {
-    throw new v.HttpError(400, "You can only review a booking after checkout (BR-23).");
-  }
-
-  const existing = await Review.findOne({ bookingId: booking._id });
-  if (existing) {
-    throw new v.HttpError(409, "A review has already been submitted for this booking.");
-  }
-
-  const roomTypeId = booking.rooms?.[0]?.roomTypeId || booking.roomTypeId;
-  if (!roomTypeId) {
-    throw new v.HttpError(400, "Room type not found on booking.");
-  }
-
-  const review = await Review.create({
-    customerId: userId,
-    bookingId: booking._id,
-    roomTypeId,
-    rating: numRating,
-    title: title || undefined,
-    comment: comment || undefined,
-    status: "visible"
-  });
-
-  res.status(201).json({
-    data: review,
-    message: "Review submitted successfully"
-  });
+  res.status(201).json({ data: await createReview(req.user._id, req.body.bookingId, req.body), message: "Review submitted successfully" });
 }
 
 // Lấy đánh giá của khách đang đăng nhập.
@@ -199,4 +160,9 @@ async function customerReviews(req, res) {
 
 // UC24: signed parameters for one direct upload of a room photo to Cloudinary (the manager picks the file from the computer).
 const imageUploadParams = (req, res) => res.json({ data: uploadParams(req.user._id, "room") });
-module.exports = { imageUploadParams, listing, detail, create, update, remove, reviews, visibility, submitReview, customerReviews };
+async function updatePricing(req) {
+  const data = await require('../services/roomPricing').updatePricing(req.params.id, req.body);
+  await require('../services/audit').audit(req.user._id, 'room_type.pricing_updated', 'RoomType', data._id, { seasonalPricing: data.seasonalPricing, basePrice: data.basePrice });
+  return { data, message: 'Room pricing updated successfully' };
+}
+module.exports = { updatePricing: require('../services/hotelOperations').transactional(updatePricing), imageUploadParams, listing, detail, create, update, remove, reviews, visibility, submitReview, customerReviews };

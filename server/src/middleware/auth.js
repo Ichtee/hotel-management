@@ -59,6 +59,11 @@ const permit = (permission) => (req, res, next) => {
     throw new HttpError(403, "You do not have permission to use this feature.");
   next();
 };
+// Cho phép một trong các quyền đọc độc lập, không cấp thêm quyền ghi.
+const permitAny = (...permissions) => (req, res, next) => {
+  if (!permissions.some((p) => req.role.permissions.includes(p))) throw new HttpError(403, "You do not have permission to use this feature.");
+  next();
+};
 // Quyền quản lý nhân viên và vai trò chỉ dành cho quản lý khách sạn.
 function requireManager(req, res, next) {
   if (req.role.key !== "manager") throw new HttpError(403, "Only a Hotel Manager can manage staff.");
@@ -75,4 +80,4 @@ function requirePasswordChanged(req, res, next) {
   next();
 }
 
-module.exports = { authenticate, permit, publicUser, requireManager, requirePasswordChanged, issueToken, clearToken, tokenClaims };
+module.exports = { authenticate, permit, permitAny, publicUser, requireManager, requirePasswordChanged, issueToken, clearToken, tokenClaims };

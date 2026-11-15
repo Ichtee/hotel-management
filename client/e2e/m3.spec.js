@@ -6,6 +6,10 @@ async function signIn(page, email, route, landing) {
   await page.goto(route);
   await page.getByRole("textbox", { name: "Email" }).fill(email);
   await page.getByRole("textbox", { name: /^Password/ }).fill(password);
+  // Sign-in needs the CAPTCHA (MSG-81); the demo uses Google's test key, which passes on a click.
+  const captcha = page.frameLocator('iframe[title="reCAPTCHA"]');
+  await captcha.locator(".recaptcha-checkbox-border").click();
+  await captcha.locator(".recaptcha-checkbox-checked").waitFor();
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("heading", { name: landing })).toBeVisible();
 }

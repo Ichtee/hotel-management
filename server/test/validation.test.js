@@ -11,6 +11,8 @@ const User = require("../src/models/User");
 const Role = require("../src/models/Role");
 
 process.env.PAYMENT_PROVIDER = "sandbox";
+// Nor send real e-mail: dotenv keeps a variable that is already set, even empty.
+for (const k of ["EMAILJS_SERVICE_ID", "EMAILJS_TEMPLATE_ID", "EMAILJS_PUBLIC_KEY", "EMAILJS_PRIVATE_KEY", "SMTP_URL", "RESEND_API_KEY"]) process.env[k] = "";
 const origin = "http://localhost:5173";
 const password = "StrongPass123!";
 let db, app, store, manager, customer;
@@ -64,7 +66,7 @@ test("register: CR-12 password, CR-04 email and phone, BR-24 name, CR-21 consent
     ["no lower-case", unique({ password: "ABCDEFG1", confirmPassword: "ABCDEFG1" }), 400],
     ["no digit", unique({ password: "Abcdefgh", confirmPassword: "Abcdefgh" }), 400],
     ["only digits", unique({ password: "12345678", confirmPassword: "12345678" }), 400],
-    ["password with spaces is allowed", unique({ password: "Abc defg 1", confirmPassword: "Abc defg 1" }), 201],
+    ["password with spaces is refused", unique({ password: "Abc defg 1", confirmPassword: "Abc defg 1" }), 400],
     ["password not a string", unique({ password: 12345678, confirmPassword: 12345678 }), 400],
     ["confirm does not match", unique({ confirmPassword: "Abcdefg2" }), 400],
     ["password over 128", unique({ password: "Aa1" + "x".repeat(130), confirmPassword: "Aa1" + "x".repeat(130) }), 400],

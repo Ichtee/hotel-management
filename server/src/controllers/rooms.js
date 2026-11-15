@@ -6,7 +6,7 @@ const Booking = require("../models/Booking");
 const v = require("../utils/validation");
 const fields = require("../utils/managerValidation");
 const { hotelTransaction } = require("../services/hotelOperations");
-const { assertCapacity, holdingFilter } = require("../services/roomInventory");
+const { assertCapacity, sellingFilter } = require("../services/roomInventory");
 const { logChange } = require("../services/audit");
 const { assertNoOverlap, roomPlanEvents } = require("../services/housekeepingPlans");
 const { reconcileTasks } = require("../services/housekeepingTasks");
@@ -16,7 +16,7 @@ const { deliver } = require("../services/operationNotifications");
 function validate(body, creating = false) {
   fields.body(body, ["roomNumber", "roomTypeId", "floor", "viewType", "description", "images", "isActive"]);
   const input = {};
-  if (creating || body.roomNumber !== undefined) input.roomNumber = v.text(body.roomNumber, "roomNumber", 1, 30);
+  if (creating || body.roomNumber !== undefined) input.roomNumber = v.code(body.roomNumber, "roomNumber", /^[A-Za-z0-9-]{1,30}$/, "Room number: letters, digits or -, no spaces.");
   if (creating || body.roomTypeId !== undefined) input.roomTypeId = v.id(body.roomTypeId, "roomTypeId");
   if (body.floor !== undefined) input.floor = v.number(body.floor, "floor", -100, 1000);
   for (const key of ["viewType", "description"])
@@ -90,7 +90,7 @@ async function update(req, res) {
     if (typeChanged) {
       if (!await RoomType.exists({ _id: input.roomTypeId, isActive: true }).session(session))
         v.fail("Choose an active room type.", "roomTypeId");
-      if (await Booking.exists({ ...holdingFilter(now), "rooms.roomId": room._id }).session(session))
+      if (await Booking.exists({ ...sellingFilter(now), "rooms.roomId": room._id }).session(session))
         throw new v.HttpError(409, "A holding booking still references this physical room.");
     }
     Object.assign(room, input);
@@ -163,4 +163,9 @@ async function resolveIssue(req, res) {
   res.json({ data });
 }
 
-module.exports = { listing, detail, create, update, maintenance, issues, resolveIssue };
+async function search(req, res) {
+  if (['guests', 'minPrice', 'maxPrice'].some(k => req.query[k] !== undefined) && !req.role.permissions.includes('rooms.filter'))
+    throw new v.HttpError(403, 'You do not have permission to filter rooms.');
+  res.json({ data: await require('../services/roomSearch').searchAvailableRooms(req.query) });
+}
+module.exports = { search, listing, detail, create, update, maintenance, issues, resolveIssue };

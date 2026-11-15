@@ -1,6 +1,7 @@
 const Notification = require("../models/Notification");
 const User = require("../models/User");
 const Role = require("../models/Role");
+const { afterCommit } = require("./hotelOperations");
 const money = (n) => `${Number(n || 0).toLocaleString("en-US")} VND`;
 // Tạo tiêu đề và nội dung thông báo từ dữ liệu sự kiện.
 const events = {
@@ -120,10 +121,11 @@ async function email(target, title, message, html) {
 }
 // Gắn liên kết booking, phòng hoặc sự cố vào thông báo trong ứng dụng nếu có.
 async function notify(event, accountId, data = {}, refs = {}) {
+  if (!accountId) return null;
   if (!events[event]) throw new Error(`Unknown notification event: ${event}`);
   const [title, message] = events[event](data);
   const doc = await Notification.create({ accountId, type: event, title, message, ...refs });
-  await email(accountId, title, message);
+  await afterCommit(() => email(accountId, title, message));
   return doc;
 }
 // Gửi thông báo đến các nhân viên đang hoạt động thuộc vai trò cần nhận.
@@ -131,6 +133,8 @@ async function notifyRole(event, roleKey, data, refs) {
   const role = await Role.findOne({ key: roleKey });
   if (!role) return [];
   const users = await User.find({ roleId: role._id, status: "active" }).select("_id");
-  return Promise.all(users.map((u) => notify(event, u._id, data, refs)));
+  const results = [];
+  for (const user of users) results.push(await notify(event, user._id, data, refs));
+  return results;
 }
 module.exports = { notify, notifyRole, email, setTransport, getTransport, events };

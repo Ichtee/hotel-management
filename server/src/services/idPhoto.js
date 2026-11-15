@@ -1,5 +1,6 @@
 const cloudinary = require("cloudinary").v2;
 const Request = require("../models/CheckInOutRequest");
+const { afterCommit } = require('./hotelOperations');
 const { HttpError } = require("../utils/validation");
 // Ảnh giấy tờ là riêng tư; ký tải lên trực tiếp và chỉ cấp liên kết xem ngắn hạn cho lễ tân.
 const cfg = () => {
@@ -23,7 +24,7 @@ function downloadUrl(publicId) {
 const destroy = (publicId) => { try { cfg(); } catch { return Promise.resolve(); } return cloudinary.uploader.destroy(publicId, { type: "authenticated", invalidate: true }).catch((e) => console.error("ID photo delete failed:", e.message)); };
 async function dropPhotos(filter) {
   for (const r of await Request.find({ ...filter, hasIdPhoto: true }).select("+idPhoto")) {
-    if (r.idPhoto) await destroy(r.idPhoto);
+    if (r.idPhoto) await afterCommit(() => destroy(r.idPhoto));
     await Request.updateOne({ _id: r._id }, { $set: { hasIdPhoto: false }, $unset: { idPhoto: 1 } });
   }
 }

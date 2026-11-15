@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api, dateLabel, inputDate, money } from './api/client.js';
-import { Badge, DataTable, Field, Notice, Screen, useApi, useScreen } from './ui.jsx';
+import { Badge, DataTable, Field, Notice, Screen, useApi, useScreen, usePagedApi, Pagination } from './ui.jsx';
 
 const PAY_KIND = { deposit: 'Deposit', final: 'Balance paid at the desk', penalty: 'Damage / loss' };
 const PAY_METHOD = { cash: 'Cash', pos: 'Card (POS)', bank_transfer: 'Bank transfer', credit_card: 'Card', e_wallet: 'E-wallet' };
@@ -218,7 +218,7 @@ function ModifyModal({ booking, onClose, onSaved }) {
           checkOutDate: outDate,
           guestCount: Number(guests),
           ...(name.trim() ? { fullName: name.trim() } : {}),
-          ...(phone.trim() ? { phone: phone.trim() } : {}),
+          ...(phone ? { phone } : {}),
         }
       });
       onSaved(`Reservation ${booking.bookingReference || ''} updated successfully.`);
@@ -259,7 +259,7 @@ function ModifyModal({ booking, onClose, onSaved }) {
             Duration: <strong>{nights} night{nights === 1 ? '' : 's'}</strong>
           </p>
         </div>
-        <Field label="Guests"><input type="number" min="1" max="10" value={guests} onChange={(e) => setGuests(e.target.value)} required /></Field>
+        <Field label="Guests"><input type="number" min="1" max={booking.rooms?.[0]?.roomTypeId?.maxOccupancy} value={guests} onChange={(e) => setGuests(e.target.value)} required /></Field>
         <Field label="Guest full name"><input value={name} onChange={(e) => setName(e.target.value)} minLength={2} maxLength={80} /></Field>
         <Field label="Phone"><input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} pattern="([0-9]{10,11}|\+[0-9]{8,15})" /></Field>
         <div className="full">
@@ -410,7 +410,7 @@ function ReviewModal({ booking, onClose, onSaved }) {
             placeholder="e.g. Wonderful stay and friendly staff!"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            maxLength={100}
+            maxLength={120}
           />
         </Field>
 
@@ -420,7 +420,7 @@ function ReviewModal({ booking, onClose, onSaved }) {
             placeholder="Tell us what you liked and how we can improve..."
             value={comment}
             onChange={(e) => setComment(e.target.value)}
-            maxLength={1000}
+            maxLength={2000}
             required
           />
         </Field>
@@ -444,8 +444,10 @@ function ReviewModal({ booking, onClose, onSaved }) {
 
 // Gửi yêu cầu nhận hoặc trả phòng; tự duyệt nếu không nhận sớm hay trả muộn.
 function StayRequestModal({ booking, type, onClose, onSaved }) {
+  const policies = useApi('/public/policies');
   const isIn = type === 'check_in';
   const day = inputDate(isIn ? booking.checkInDate : booking.checkOutDate);
+  const standardTime = isIn ? policies.data?.checkInTime : policies.data?.checkOutTime;
   const [err, setErr] = useState(null); const [saving, setSaving] = useState(false);
   const submit = async (e) => {
     e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); setSaving(true); setErr(null);
@@ -468,15 +470,16 @@ function StayRequestModal({ booking, type, onClose, onSaved }) {
       onSaved(r.data.status === 'approved' ? `${r.message} No early check-in / late check-out was asked, so it is approved.` : r.message);
     } catch (x) { setErr(x); setSaving(false); }
   };
+  if (policies.loading || policies.error) return <Screen title="Stay request" onClose={onClose}>{policies.loading ? <p>Loading policy…</p> : <Notice error={policies.error} />}</Screen>;
   return (
     <Screen title={`${isIn ? 'Check-in' : 'Check-out'} request · ${booking.bookingReference || ''}`} onClose={onClose}>
       <form className="form" onSubmit={submit}>
-        <p className="muted full">{isIn ? 'Tell the front desk when you arrive so the room is ready. Check-in is from 14:00; an earlier time is an early check-in request.' : 'Tell the front desk when you leave so the bill is ready. Check-out is until 12:00; a later time (until 18:00) is a late check-out request.'} A fee applies only if it really takes place.</p>
-        <Field label={`${isIn ? 'Expected arrival' : 'Planned check-out'} time on ${dateLabel(day)}`}><input name="time" type="text" inputMode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:mm" maxLength={5} title="24-hour time, for example 14:00" defaultValue={isIn ? '14:00' : '12:00'} required /></Field>
+        <p className="muted full">{isIn ? `Check-in is from ${standardTime}; an earlier time is an early check-in request.` : `Check-out is until ${standardTime}; a later time (until 18:00) is a late check-out request.`} A fee applies only if it really takes place.</p>
+        <Field label={`${isIn ? 'Expected arrival' : 'Planned check-out'} time on ${dateLabel(day)}`}><input name="time" type="text" inputMode="numeric" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" placeholder="HH:mm" maxLength={5} title="24-hour time, for example 14:00" defaultValue={standardTime} required /></Field>
         {isIn && <>
-          <Field label="Number of guests"><input name="numberOfGuests" type="number" min="1" max="10" defaultValue={booking.rooms?.[0]?.guestCount || 1} required /></Field>
+          <Field label="Number of guests"><input name="numberOfGuests" type="number" min="1" max={booking.rooms?.[0]?.roomTypeId?.maxOccupancy} defaultValue={booking.rooms?.[0]?.guestCount || 1} required /></Field>
           <Field label="Main guest full name"><input name="mainGuestName" defaultValue={booking.guestName || ''} minLength={2} maxLength={80} required /></Field>
-          <Field label="Main guest ID / passport number (optional, can be shown at the front desk)"><input name="mainGuestIdNumber" minLength={3} maxLength={40} /></Field>
+          <Field label="Main guest ID / passport number (optional, can be shown at the front desk)"><input name="mainGuestIdNumber" pattern="[A-Za-z0-9]{6,20}" title="6–20 letters or digits, no spaces." /></Field>
           <Field label="Photo of the ID / passport (optional, JPG or PNG, max 5 MB)"><input name="idFile" type="file" accept="image/jpeg,image/png" /></Field>
           <p className="muted full">The photo is private: only the front desk can open it, and it is deleted when your stay starts or the booking ends. Bring the original document to the front desk anyway.</p>
         </>}
@@ -494,11 +497,12 @@ export function MyBookings() {
   const [notice, setNotice] = useState(null);
   const [msg, setMsg] = useState(null);
   const sc = useScreen();
-  const s = useApi('/bookings?limit=100');
+  const s = usePagedApi(`/bookings?view=${tab}`);
   const done = (m) => { setNotice(m); s.reload(); sc.close(); };
   const all = s.data || [];
   const isUp = (b) => UPCOMING.includes(b.status);
-  const counts = { upcoming: all.filter(isUp).length, past: all.filter((b) => !isUp(b)).length };
+  const counts = s.meta?.counts || {};
+  const fallback = useApi(sc.id ? `/bookings/${sc.id}` : null, Boolean(sc.id) && !all.some((b) => b._id === sc.id));
   const list = all.filter((b) => isUp(b) === (tab === 'upcoming'));
 
   // Rút yêu cầu hủy và khôi phục booking đã xác nhận.
@@ -514,7 +518,7 @@ export function MyBookings() {
   };
 
   if (sc.name) {
-    const target = all.find((x) => x._id === sc.id);
+    const target = all.find((x) => x._id === sc.id) || fallback.data;
     if (sc.name === 'invoice') return <InvoiceScreen id={sc.id} onClose={sc.close} />;
     if (!target) return <Screen title={s.loading ? 'Loading…' : 'Booking not found'} onClose={sc.close}><p className="muted">{s.loading ? 'Loading your booking…' : 'This booking was not found in your account.'}</p></Screen>;
     const ref = target.bookingReference || '';
@@ -537,7 +541,7 @@ export function MyBookings() {
           </button>
         ))}
       </div>
-      <Notice ok={msg} />
+      <Notice ok={msg} /><Pagination list={s} />
       <div aria-busy={s.loading}>
         {s.loading && <Skeleton />}
         {s.error && <Failed s={s} />}

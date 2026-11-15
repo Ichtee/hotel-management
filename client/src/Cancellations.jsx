@@ -1,13 +1,17 @@
+import { useAuth } from './context/Auth.jsx';
 import { useState } from 'react';
 import { api, dateLabel, money } from './api/client.js';
-import { Badge, DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useScreen } from './ui.jsx';
+import { Badge, DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useScreen, usePagedApi, Pagination } from './ui.jsx';
 
 const Booker = ({ p }) => <span>{p.name || '—'}<br /><small className="muted">{p.phone || 'no phone'} · {p.email || 'no e-mail'}</small></span>;
-const Loading = ({ s, empty }) => s.loading ? <p className="muted">Loading…</p> : s.error ? <Notice error={s.error} /> : s.data.length === 0 ? <p className="empty muted">{empty}</p> : null;
+const Loading = ({ s, empty }) => s.loading ? <p className="muted">Loading…</p> : s.error ? <Notice error={s.error} /> : !s.data?.length ? <p className="empty muted">{empty}</p> : null;
 
 // Duyệt yêu cầu hủy; hệ thống tự duyệt sau 24 giờ hoặc khi đến giờ nhận phòng.
 export function Cancellations() {
-  const list = useApi('/frontdesk/cancellations');
+  const { user } = useAuth();
+  const canReview = user.permissions.includes('cancellations.review');
+  const canRecord = user.permissions.includes('bookings.managed.cancel');
+  const list = usePagedApi('/frontdesk/cancellations', canReview);
   const [msg, setMsg] = useState(null);
   const [err, setErr] = useState(null);
   const sc = useScreen();
@@ -20,11 +24,11 @@ export function Cancellations() {
     if (!confirm(`Approve the cancellation of ${b.bookingReference}? Refund: ${money(b.cancellation.refundableAmount)}.`)) return;
     try { setMsg((await api(`/frontdesk/cancellations/${b._id}/approve`, { method: 'POST' })).message); setErr(null); list.reload(); } catch (x) { setErr(x); }
   };
-  if (sc.name === 'record') return <RecordCancellation onClose={sc.close} onDone={(m) => { setMsg(m); setErr(null); list.reload(); sc.close(); }} />;
+  if (sc.name === 'record' && canRecord) return <RecordCancellation onClose={sc.close} onDone={(m) => { setMsg(m); setErr(null); list.reload(); sc.close(); }} />;
   return (
     <>
-      <PageHead title="Cancellations" sub="Requests waiting for review. Undecided ones are approved automatically after 24 hours or at check-in." action="Record cancellation" onAction={() => sc.go('record')} />
-      <Notice error={err} ok={msg} />
+      <PageHead title="Cancellations" sub="Requests waiting for review. Undecided ones are approved automatically after 24 hours or at check-in." action={canRecord ? "Record cancellation" : null} onAction={() => sc.go('record')} />
+      <Notice error={err} ok={msg} /><Pagination list={list} />
       <Loading s={list} empty="No cancellation requests are waiting." />
       {list.data?.length > 0 && (
         <DataTable cols={['Booking', 'Booker', 'Requested', 'Reason', 'Deposit paid', 'Refund', '']} rows={list.data.map((b) => [
@@ -121,7 +125,7 @@ function RecordCancellation({ onClose, onDone }) {
 // Ghi nhận hoàn tiền bằng chuyển khoản ngoài hệ thống; không sửa số tiền đã chốt.
 export function Refunds() {
   const [tab, setTab] = useState('requested');
-  const list = useApi(`/frontdesk/refunds?status=${tab}`);
+  const list = usePagedApi(`/frontdesk/refunds?status=${tab}`);
   const sc = useScreen();
   const open = (list.data || []).find((r) => r._id === sc.id);
   const [msg, setMsg] = useState(null);
@@ -134,7 +138,7 @@ export function Refunds() {
           <button key={k} className={tab === k ? 'chip on' : 'chip'} aria-pressed={tab === k} onClick={() => { setTab(k); setMsg(null); }}>{label}</button>
         ))}
       </div>
-      <Notice ok={msg} />
+      <Notice ok={msg} /><Pagination list={list} />
       <Loading s={list} empty={tab === 'requested' ? 'Nothing is waiting for a refund.' : 'No refunds recorded yet.'} />
       {list.data?.length > 0 && (tab === 'requested' ? (
         <DataTable cols={['Booking', 'Booker', 'Amount', 'Reason', 'Waiting since', 'Phone', 'Contacts', '']} rows={list.data.map((r) => [

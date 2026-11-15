@@ -58,10 +58,10 @@ exports.updateCustomer = async (customerId, payload) => {
     if (payload[field] === undefined) return;
     changes[`customerProfile.${field}`] = payload[field] === '' || payload[field] === null ? undefined : check(payload[field]);
   };
-  if (payload.fullName !== undefined) changes['customerProfile.fullName'] = v.text(payload.fullName, 'fullName', 2, 50);
+  if (payload.fullName !== undefined) changes['customerProfile.fullName'] = v.name(payload.fullName);
   if (payload.phone !== undefined) changes.phone = v.phone(payload.phone, true);
   optional('address', (x) => v.text(x, 'address', 1, 300));
-  optional('idDocumentNo', (x) => v.text(x, 'idDocumentNo', 3, 40));
+  optional('idDocumentNo', (x) => v.idNumber(x));
   optional('dateOfBirth', (x) => {
     const d = new Date(v.date(x, 'dateOfBirth'));
     if (d > new Date()) v.fail('Date of birth must be in the past.', 'dateOfBirth');

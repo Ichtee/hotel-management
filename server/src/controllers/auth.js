@@ -34,7 +34,7 @@ async function register(req, res) {
     username: v.username(body.username),
     email: v.email(body.email),
     phone: v.phone(body.phone, true),
-    customerProfile: { fullName: v.text(body.fullName, "fullName", 2, 50) },
+    customerProfile: { fullName: v.name(body.fullName) },
   };
   v.password(body.password);
   const role = await Role.findOne({ key: "customer", isActive: true });
@@ -76,13 +76,20 @@ async function register(req, res) {
 // Xác minh mật khẩu và ghi nhận phiên bản tài khoản, quyền hiện tại.
 async function login(req, res) {
   v.keys(req.body, [
+    "login",
     "email",
     "password",
     "captchaToken",
     "recaptchaToken",
     "g-recaptcha-response",
   ]);
-  const email = v.email(req.body.email);
+  // Đăng nhập bằng email hoặc tên đăng nhập; "email" vẫn được nhận cho client cũ.
+  const login = req.body.login ?? req.body.email;
+  // Không tự cắt dấu cách ở đầu/cuối: "reception " không được coi là "reception".
+  if (typeof login === "string" && /\s/.test(login)) v.fail("Email or username cannot contain spaces.", "login");
+  const byEmail = typeof login === "string" && login.includes("@");
+  // Không áp quy tắc đặt username khi đăng nhập: tài khoản cũ hoặc tự sinh có thể có chữ hoa hay ký tự khác.
+  const account = byEmail ? { email: v.email(login) } : { username: v.text(login, "username", 1, 100) };
   v.text(req.body.password, "password", 1, 128);
   const password = req.body.password;
   const captchaToken =
@@ -112,7 +119,8 @@ async function login(req, res) {
     }
   }
 
-  const user = await User.findOne({ email }).select(
+  // strength 2: username khớp không phân biệt hoa thường.
+  const user = await User.findOne(account).collation({ locale: "en", strength: 2 }).select(
     "+passwordHash +authVersion +failedLogins +lockedUntil",
   );
 
@@ -163,7 +171,7 @@ async function login(req, res) {
   if (!valid || user.status !== "active" || !role) {
     const err = new v.HttpError(
       401,
-      "Invalid email or password",
+      "Invalid email, username or password",
     );
     err.code = "INVALID_CREDENTIALS";
     throw err;
@@ -237,7 +245,7 @@ async function recordFailedLogin(req, user) {
   const remainingAttempts = Math.max(0, MAX_FAILED_LOGINS - attempts);
   const err = new v.HttpError(
     401,
-    `Invalid email or password. You have ${remainingAttempts} attempt(s) remaining.`,
+    `Invalid email, username or password. You have ${remainingAttempts} attempt(s) remaining.`,
   );
   err.code = "INVALID_CREDENTIALS";
   err.remainingAttempts = remainingAttempts;
@@ -285,7 +293,7 @@ async function updateProfile(req, res) {
     message = "A verification e-mail has been sent. The link is valid for 24 hours.";
   }
   if (b.fullName !== undefined)
-    u.customerProfile.fullName = v.text(b.fullName, "fullName", 2, 50);
+    u.customerProfile.fullName = v.name(b.fullName);
   if (b.phone !== undefined)
     u.phone = v.phone(b.phone, req.role.scope === "hotel");
   if (b.address !== undefined)
@@ -472,7 +480,7 @@ async function verifyEmail(req, res) {
 async function resendVerification(req, res) {
   v.keys(req.body, ["email"]);
   const email = v.email(req.body.email);
-  const user = await User.findOne({ email }).select(
+  const user = await User.findOne({ $or: [{ email }, { pendingEmail: email }] }).select(
     "+emailVerification.tokenHash +emailVerification.expiresAt +emailVerification.lastSentAt +emailVerification.sentAt"
   );
 
@@ -484,7 +492,8 @@ async function resendVerification(req, res) {
     });
   }
 
-  if (user.isVerified) {
+  const changingEmail = user.pendingEmail === email;
+  if (user.isVerified && !changingEmail) {
     return res.json({
       data: { message: "This email address is already verified. You can sign in directly." },
     });
@@ -518,7 +527,7 @@ async function resendVerification(req, res) {
 
   try {
     await sendVerificationEmail({
-      email: user.email,
+      email: changingEmail ? user.pendingEmail : user.email,
       fullName: user.customerProfile?.fullName || user.username,
       token: rawToken,
     });

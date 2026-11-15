@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { api, dateLabel } from './api/client.js';
-import { DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useScreen } from './ui.jsx';
+import { DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useScreen, usePagedApi, Pagination } from './ui.jsx';
 
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date());
 const endOfMonth = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(Date.now() + 30 * 864e5));
 
 export default function HousekeepingAssignments() {
-  const plans = useApi('/housekeeping-assignments?isActive=true&limit=100');
+  const plans = usePagedApi('/housekeeping-assignments?isActive=true&limit=100');
   const options = useApi('/housekeeping-assignments/options');
   const sc = useScreen();
   const [error, setError] = useState(null);
@@ -21,7 +21,7 @@ export default function HousekeepingAssignments() {
   if (sc.name === 'new') return options.loading ? <WaitScreen loading onClose={sc.close} /> : <CreateAssignment staff={staff} rooms={rooms} onClose={sc.close} onSaved={() => { plans.reload(); sc.close(); }} />;
   return <>
     <PageHead title="Housekeeping assignments" sub="Assign responsibility by room or floor and shift. Open tasks are automatically reassigned when a plan changes." action="New assignment" onAction={() => sc.go('new')} />
-    <Notice error={error || plans.error || options.error} />
+    <Notice error={error || plans.error || options.error} /><Pagination list={plans} />
     {plans.loading || options.loading ? <p className="muted">Loading assignments...</p> : <DataTable cols={['Staff member', 'Shift', 'Responsibility', 'Effective period', '']} rows={(plans.data || []).map((plan) => [labelFor(plan.staffId), plan.shift, roomScope(plan), `${dateLabel(plan.effectiveFrom)} - ${dateLabel(plan.effectiveTo)}`, <button className="btn sm danger" onClick={() => revoke(plan)}>Revoke</button>])} />}
     {!plans.loading && !plans.error && !(plans.data || []).length && <p className="muted center-msg">No active assignments. Create one so cleaning tasks can be assigned automatically.</p>}
   </>;

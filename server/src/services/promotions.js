@@ -17,7 +17,7 @@ function checkPeriodAndSpend(coupon, subtotal, now) {
 async function validateCoupon({ code, customerId, subtotal, now = new Date() }) {
   if (customerId) v.id(String(customerId), "customerId");
   v.number(subtotal, "subtotal", 1);
-  const coupon = await Coupon.findOne({ code: v.text(code, "code", 2, 30).toUpperCase() });
+  const coupon = await Coupon.findOne({ code: v.couponCode(code) });
   if (!coupon || !coupon.isActive) v.fail("Coupon code is invalid.", "couponCode");
   if (coupon.usageCount >= coupon.usageLimit) v.fail("Reached limit. This coupon can no longer be used.", "couponCode");
   const discountAmount = checkPeriodAndSpend(coupon, subtotal, now);
@@ -31,4 +31,16 @@ async function recheckCoupon({ code, subtotal, now = new Date() }) {
   if (!coupon || !coupon.isActive) v.fail("Coupon code is invalid.", "couponCode");
   return checkPeriodAndSpend(coupon, subtotal, now);
 }
-module.exports = { validateCoupon, recheckCoupon };
+// Kiểm tra hạn mức ngay khi ghi lượt sử dụng trong cùng giao dịch với booking.
+async function redeemCoupon(coupon, booking) {
+  const claimed = await Coupon.updateOne({ _id: coupon.couponId, isActive: true, $expr: { $lt: ["$usageCount", "$usageLimit"] } }, { $inc: { usageCount: 1 } });
+  if (!claimed.modifiedCount) throw new v.HttpError(409, "This coupon has reached its usage limit.");
+  if (booking.customerId) {
+    try { await CouponUsage.create({ couponId: coupon.couponId, bookingId: booking._id, customerId: booking.customerId }); }
+    catch (error) {
+      if (error.code === 11000) throw new v.HttpError(409, "You have already used this coupon.");
+      throw error;
+    }
+  }
+}
+module.exports = { validateCoupon, recheckCoupon, redeemCoupon };

@@ -1,24 +1,27 @@
+import { useAuth } from './context/Auth.jsx';
 import { useState } from 'react';
 import { api, dateLabel } from './api/client.js';
-import { Badge, DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useScreen } from './ui.jsx';
+import { Badge, DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useScreen, usePagedApi, Pagination } from './ui.jsx';
 
 // Hiển thị ngày giờ theo múi giờ khách sạn để lễ tân duyệt đúng thời điểm.
 const when = (v) => `${dateLabel(v)}, ${new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit' }).format(new Date(v))}`;
 
 // Mở ảnh giấy tờ qua liên kết riêng tư hạn năm phút; ghi nhật ký mỗi lần xem.
 export function IdPhotoLink({ requestId }) {
+  const { user } = useAuth();
   const [error, setError] = useState(null);
   const open = async () => { setError(null); try { window.open((await api(`/frontdesk/requests/${requestId}/id-photo`)).data.url, '_blank', 'noopener'); } catch (x) { setError(x); } };
+  if (!user.permissions.includes("stays.check_in")) return null;
   return <span><button type="button" className="btn sm" onClick={open}>View ID photo</button><Notice error={error} /></span>;
 }
 export default function StayRequests() {
-  const list = useApi('/frontdesk/requests?status=pending&limit=100');
+  const list = usePagedApi('/frontdesk/requests?status=pending&limit=100');
   const sc = useScreen();
   const selected = (list.data || []).find((r) => r._id === sc.id);
   if (sc.name === 'review') return selected ? <HandleRequest request={selected} onClose={sc.close} onDone={() => { list.reload(); sc.close(); }} /> : <WaitScreen loading={list.loading} onClose={sc.close} />;
   return <>
     <PageHead title="Stay requests" sub="Approve or reject customer check-in and check-out requests. The quoted fee is shown but is charged only during the stay workflow." />
-    <Notice error={list.error} />
+    <Notice error={list.error} /><Pagination list={list} />
     {list.loading ? <p className="muted">Loading requests...</p> : <DataTable cols={['Booking', 'Guest', 'Request', 'Requested time', 'Quoted fee', '']} rows={(list.data || []).map((request) => [request.bookingId?.bookingReference || 'Booking removed', request.customerId?.customerProfile?.fullName || request.bookingId?.guestName || 'Guest', <Badge v={request.type} />, when(request.requestedTime), `${request.quotedFee?.toLocaleString('en-US') || 0} VND`, <button className="btn sm" onClick={() => sc.go('review', request._id)}>Review</button>])} />}
     {!list.loading && !list.error && !(list.data || []).length && <p className="muted center-msg">There are no pending stay requests.</p>}
   </>;

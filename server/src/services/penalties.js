@@ -1,3 +1,4 @@
+const { hotelTransaction } = require('./hotelOperations');
 const Booking = require("../models/Booking");
 const Penalty = require("../models/Penalty");
 const { paidAmount } = require("./payments");
@@ -23,4 +24,4 @@ async function waiveUnpaid(now = new Date()) {
   }
   return { waived };
 }
-module.exports = { charge, settlePaid, waiveUnpaid };
+module.exports = { charge, settlePaid, waiveUnpaid: (...args) => hotelTransaction(() => waiveUnpaid(...args)) };

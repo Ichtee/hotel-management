@@ -100,6 +100,7 @@ textarea { font: inherit; min-height: 88px; padding: .55rem .7rem; }
 .rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: .75rem; }
 .room { min-height: 72px; border: 0; border-radius: 12px; color: #fff; display: grid; place-content: center; text-align: center; transition: transform .15s; }
 .room:hover { transform: translateY(-2px); } .room b { font-size: 1.2rem; } .room small { text-transform: capitalize; opacity: .9; }
+.room .room-type { font-size: .72rem; line-height: 1.15; opacity: .85; text-transform: none; padding: 0 6px; }
 .room.s-cleaning { color: #1a1205; }
 
 /* Biểu mẫu. */
@@ -186,7 +187,7 @@ input, select { min-height: 44px; padding: 0 .75rem; border: 1px solid var(--lin
 .book { display: grid; gap: .85rem; align-self: start; }
 .book fieldset, .form fieldset { border: 1px solid var(--line); border-radius: 10px; padding: .6rem .9rem; display: grid; gap: .2rem; } legend { font-weight: 600; font-size: .85rem; color: var(--muted); padding: 0 .3rem; }
 .check { display: flex; align-items: center; gap: .6rem; min-height: 40px; color: var(--text); font-weight: 500; } .check input { min-height: 0; width: 18px; height: 18px; } .check span { margin-left: auto; color: var(--muted); }
-.sum { margin: 0; } .sum div { display: flex; justify-content: space-between; padding: .3rem 0; } .sum dt, .sum dd { margin: 0; } .sum .tot { border-top: 1px solid var(--line); margin-top: .4rem; padding-top: .6rem; font-weight: 700; font-size: 1.15rem; }
+.sum { margin: 0; } .sum .bill-head { font-weight: 600; margin-top: .35rem; } .sum .bill-line { padding: .15rem 0 .15rem 1rem; color: var(--muted); font-size: .9rem; } .sum .bill-pending { color: var(--amber, #8a5a00); } .bill-title { margin: 0 0 .5rem; font-size: 1.1rem; } .sum div { display: flex; justify-content: space-between; padding: .3rem 0; } .sum dt, .sum dd { margin: 0; } .sum .tot { border-top: 1px solid var(--line); margin-top: .4rem; padding-top: .6rem; font-weight: 700; font-size: 1.15rem; }
 .ok { color: var(--green); } .bad { color: var(--red); } .btn:disabled { opacity: .5; cursor: not-allowed; }
 .thumb { width: 100%; border-radius: 10px; aspect-ratio: 3/2; object-fit: cover; }
 .full { grid-column: 1 / -1; }

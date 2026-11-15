@@ -10,16 +10,21 @@ const Penalty = require("../models/Penalty");
 const CompensationItem = require("../models/CompensationItem");
 const { notifyRole } = require("../services/notifications");
 
-async function create(req, res) {
-  v.keys(req.body, ["roomId", "title", "description", "severity", "chargeItemId", "quantity"]);
+async function create(req) {
+  v.keys(req.body, ["roomId", "title", "description", "unusable", "chargeItemId", "quantity"]);
   const chargeItemId = req.body.chargeItemId ? v.id(req.body.chargeItemId, "chargeItemId") : null;
+  if (chargeItemId && !req.role.permissions.includes('damages.report')) throw new v.HttpError(403, 'You do not have permission to report damage.');
+  if ((!chargeItemId || req.body.unusable === true) && !req.role.permissions.includes('room_issues.report')) throw new v.HttpError(403, 'You do not have permission to report room issues.');
   const quantity = req.body.quantity === undefined || req.body.quantity === "" ? 1 : Number(req.body.quantity);
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 20) v.fail("Quantity must be a whole number from 1 to 20.", "quantity");
-  const input = { roomId: v.id(req.body.roomId, "roomId"), title: v.text(req.body.title, "title", 2, 120), description: v.text(req.body.description, "description", 0, 2000), severity: v.choice(req.body.severity, "severity", ["low", "medium", "high"]) };
+  const input = { roomId: v.id(req.body.roomId, "roomId"), title: v.text(req.body.title, "title", 2, 120), description: v.text(req.body.description, "description", 0, 2000) };
+  // Phòng không sử dụng được thì đưa phòng trống vào bảo trì.
+  if (req.body.unusable !== undefined && typeof req.body.unusable !== "boolean") v.fail("Unusable must be true or false.", "unusable");
+  const unusable = req.body.unusable === true;
   // Hư hỏng vật phẩm chỉ tạo bồi thường đề xuất; không đưa phòng vào bảo trì nếu vẫn sử dụng được.
-  if (chargeItemId && input.severity !== "high") {
+  if (chargeItemId && !unusable) {
     if (!(await Room.exists({ _id: input.roomId }))) throw new v.HttpError(404, "Room not found.");
-    return res.status(201).json({ data: { issue: null, maintenanceApplied: false, penalty: await proposePenalty(input, chargeItemId, req.user._id, quantity) } });
+    return { data: { issue: null, maintenanceApplied: false, penalty: await proposePenalty(input, chargeItemId, req.user._id, quantity) } };
   }
   const result = await hotelTransaction(async (session) => {
     const room = await Room.findById(input.roomId).session(session);
@@ -27,11 +32,12 @@ async function create(req, res) {
     const [issue] = await RoomIssue.create([{ ...input, reportedBy: req.user._id }], { session });
     const events = [];
     let maintenanceApplied = false;
-    if (input.severity === "high" && ["available", "cleaning"].includes(room.status)) {
+    if (unusable && ["available", "cleaning"].includes(room.status)) {
       const before = room.toObject();
       // Kiểm tra thiếu phòng cho booking sắp tới trước khi đưa phòng ra khỏi nguồn bán.
       let shortfall = false;
-      try { await assertCapacity(room.roomTypeId, room._id, session); } catch { shortfall = true; }
+      try { await assertCapacity(room.roomTypeId, room._id, session); }
+      catch (error) { if (error.code !== 'MSG-61') throw error; shortfall = true; }
       room.status = "maintenance";
       await room.save({ session });
       maintenanceApplied = true;
@@ -43,14 +49,19 @@ async function create(req, res) {
     return { issue, maintenanceApplied, events };
   });
   const penalty = chargeItemId ? await proposePenalty(result.issue, chargeItemId, req.user._id, quantity) : null;
-  res.status(201).json({ data: { issue: result.issue, maintenanceApplied: result.maintenanceApplied, penalty }, meta: { notificationStored: await deliver(result.events) } });
+  return { data: { issue: result.issue, maintenanceApplied: result.maintenanceApplied, penalty }, meta: { notificationStored: await deliver(result.events) } };
 }
 
 async function listing(req, res) {
   v.keys(req.query, ["status", "page", "limit"]);
   const filter = {};
   if (req.query.status !== undefined) filter.status = v.choice(req.query.status, "status", ["open", "in_progress", "resolved"]);
-  res.json(await v.list(RoomIssue, filter, req.query));
+  const result = await v.list(RoomIssue, filter, req.query);
+  // Gắn số phòng để quản lý xem được, kể cả phòng đã ngừng hoạt động.
+  const rooms = await Room.find({ _id: { $in: result.data.map((i) => i.roomId) } }).select("roomNumber floor").lean();
+  const byId = new Map(rooms.map((r) => [String(r._id), r]));
+  result.data.forEach((i) => { const r = byId.get(String(i.roomId)); i.roomNumber = r?.roomNumber; i.floor = r?.floor; });
+  res.json(result);
 }
 
 async function options(_req, res) {
@@ -77,4 +88,4 @@ async function proposePenalty(issue, itemId, reportedBy, quantity = 1) {
   return penalty;
 }
 
-module.exports = { create, listing, options };
+module.exports = { create: require("../services/hotelOperations").transactional(create, 201), listing, options };

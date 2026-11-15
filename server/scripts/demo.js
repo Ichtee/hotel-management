@@ -33,6 +33,7 @@ async function main() {
   const stopScheduler = startHousekeepingScheduler();
   // Khởi chạy lịch hết hạn giữ phòng, duyệt hủy, xử lý vắng mặt và nhắc lịch.
   schedule();
+  await require('../src/services/roomHistory').initializeRoomHistory();
   const server = app.listen(3001, "127.0.0.1", () =>
     console.log(
       `Local API: http://localhost:3001. ${persist ? "Data kept in server/data/mongo (Compass: mongodb://127.0.0.1:27018/?directConnection=true)." : "Sample data only; resets on restart."} Accounts: admin@, manager@, reception@, housekeeping@, customer@demo.hotel. Password: HotelDemo123!`,

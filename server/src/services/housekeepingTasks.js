@@ -1,3 +1,4 @@
+const { setRoomStatus } = require('./roomHistory');
 const Room = require("../models/Room");
 const Booking = require("../models/Booking");
 const Task = require("../models/CleaningTask");
@@ -126,8 +127,8 @@ async function updateOwnTaskStatus(taskId, actorId, input, { now = new Date() } 
     if (status === "completed") task.completedAt = now;
     await task.save({ session });
 
-    if (task.type === "turnover" && status === "completed")
-      await Room.updateOne({ _id: task.roomId, status: "cleaning" }, { $set: { status: "available" } }, { session });
+    if (task.type === "turnover" && status === "completed" && await Room.exists({ _id: task.roomId, status: "cleaning" }))
+      await setRoomStatus(task.roomId, "available");
 
     return task.populate([{ path: "roomId", select: "roomNumber floor status" }, { path: "assignedTo", select: "username customerProfile.fullName" }]);
   });

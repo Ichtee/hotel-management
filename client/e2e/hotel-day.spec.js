@@ -622,15 +622,22 @@ test.describe("10b. Customer pages are closed to staff and Admin accounts (BR-26
   for (const [name, who] of [["reception", as.reception], ["manager", as.manager], ["admin", as.admin], ["housekeeping", as.housekeeping]]) {
     test(`${name}: customer pages send the account to the staff portal, the API refuses the self-service calls`, async ({ browser }) => {
       const a = await who(browser);
-      for (const path of ["#/my-bookings", "#/profile", "#/notifications", "#/checkout?room=x&in=2030-01-01&out=2030-01-02&guests=1"]) {
+      // The Receptionist books for guests (BR-26), so only the booking pages stay open to them.
+      const reception = name === "reception";
+      const closed = reception ? ["#/profile", "#/notifications"] : ["#/my-bookings", "#/profile", "#/notifications", "#/checkout?room=x&in=2030-01-01&out=2030-01-02&guests=1"];
+      for (const path of closed) {
         await a.page.goto("/" + path);
         await expect(a.page).toHaveURL(/#\/admin/);
+      }
+      if (reception) {
+        await a.page.goto("/#/my-bookings");
+        await expect(a.page.getByRole("heading", { name: "My bookings" })).toBeVisible();
       }
       await a.page.goto("/#/");
       await expect(a.page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Staff portal" })).toBeVisible();
       await expect(a.page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Book now" })).toHaveCount(0);
-      expect((await a.api.get("/api/bookings")).status()).toBe(403);
-      expect((await a.api.post("/api/bookings", { data: {} })).status()).toBe(403);
+      expect((await a.api.get("/api/bookings")).status()).toBe(reception ? 200 : 403);
+      expect((await a.api.post("/api/bookings", { data: {} })).status()).toBe(reception ? 400 : 403);
     });
   }
   test("a customer cannot open the staff pages", async ({ browser }) => {

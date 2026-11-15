@@ -13,6 +13,7 @@ const schema = new Schema({
   gateway: String,
   gatewayOrderId: String,
   transactionRef: String,
+  deskReference: { type: String, unique: true, sparse: true },
   idempotencyKey: { type: String, unique: true, sparse: true },
   failureReason: String,
   paidAt: Date,

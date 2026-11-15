@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { roomApi } from '../api/roomApi.js';
-import { Screen, WaitScreen, useScreen } from '../ui.jsx';
+import { apiAll } from '../api/client.js';
+import { Screen, WaitScreen, Notice, useScreen } from '../ui.jsx';
 
 const STATUS_CONFIG = {
   available: { label: 'Available', color: '#1f7a4c', desc: 'Ready for guest check-in' },
@@ -20,6 +21,7 @@ export default function AdminRoomMap() {
   const [newRoomTypeId, setNewRoomTypeId] = useState('');
   const [toastMessage, setToastMessage] = useState('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -27,14 +29,19 @@ export default function AdminRoomMap() {
   };
 
   const loadData = async () => {
-    setLoading(true);
+    setLoading(true); setError(null);
     try {
-      const [roomsRes, typesRes] = await Promise.allSettled([
+      const [roomsRes, typesRes, allTypesRes] = await Promise.allSettled([
         // Chỉ định số bản ghi vì API mặc định phân trang theo mười mục.
         roomApi.getRooms({ limit: 100 }),
-        roomApi.getRoomTypes()
+        roomApi.getRoomTypes(),
+        // API phòng chỉ trả mã loại phòng; lấy tên từ mọi loại phòng, kể cả loại đã tắt.
+        apiAll('/room-types')
       ]);
+      const typeNames = Object.fromEntries((allTypesRes.status === 'fulfilled' ? allTypesRes.value.data || [] : []).map((t) => [String(t._id), t.name]));
 
+      const failed = [roomsRes, typesRes, allTypesRes].find(r => r.status === 'rejected');
+      if (failed) setError(failed.reason);
       if (typesRes.status === 'fulfilled') {
         const rawTypes = Array.isArray(typesRes.value) ? typesRes.value : (typesRes.value?.data || []);
         if (rawTypes.length > 0) {
@@ -56,14 +63,14 @@ export default function AdminRoomMap() {
             no: r.roomNumber || r.no,
             floor: r.floor,
             status: r.status || 'available',
-            typeName: r.roomTypeId?.name || '',
+            typeName: r.roomTypeId?.name || typeNames[String(r.roomTypeId)] || '',
             roomTypeId: r.roomTypeId?._id || r.roomTypeId
           })).sort((a, b) => a.no.localeCompare(b.no));
           setRooms(mapped);
         }
       }
     } catch (err) {
-      console.warn('Error loading room map data:', err);
+      setError(err);
     } finally {
       setLoading(false);
     }
@@ -93,7 +100,7 @@ export default function AdminRoomMap() {
   // Thêm phòng mới.
   const handleAddRoom = async (e) => {
     e.preventDefault();
-    const trimmedNo = newRoomNumber.trim();
+    const trimmedNo = newRoomNumber; // không tự cắt: số phòng có dấu cách bị server từ chối
     if (!trimmedNo) return;
 
     if (rooms.some(r => r.no === trimmedNo)) {
@@ -186,7 +193,7 @@ export default function AdminRoomMap() {
             <p className="muted" style={{ marginTop: 0 }}>A new room starts as Available.</p>
             <label>
               Room number
-              <input type="text" placeholder="e.g. 305" value={newRoomNumber} onChange={e => setNewRoomNumber(e.target.value)} required />
+              <input type="text" placeholder="e.g. 305" pattern="[A-Za-z0-9\-]{1,30}" title="Letters, digits or -, no spaces." value={newRoomNumber} onChange={e => setNewRoomNumber(e.target.value)} required />
             </label>
             <label>
               Floor
@@ -207,6 +214,7 @@ export default function AdminRoomMap() {
   );
   return (
     <div className="room-map-page">
+      <Notice error={error} />
       {toastMessage && (
         <div style={{
           position: 'fixed', bottom: '24px', right: '24px', zIndex: 9999,
@@ -260,9 +268,10 @@ export default function AdminRoomMap() {
                     cursor: 'pointer',
                     outline: selectedRoom?.no === r.no ? '3px solid #ffd700' : 'none'
                   }}
-                  title={`Room ${r.no} (${STATUS_CONFIG[r.status]?.label})`}
+                  title={`Room ${r.no}${r.typeName ? ` · ${r.typeName}` : ''} (${STATUS_CONFIG[r.status]?.label})`}
                 >
                   <b>{r.no}</b>
+                  {r.typeName && <small className="room-type">{r.typeName}</small>}
                   <small>{STATUS_CONFIG[r.status]?.label || r.status}</small>
                 </button>
               ))}

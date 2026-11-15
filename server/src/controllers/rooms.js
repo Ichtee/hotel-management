@@ -16,7 +16,7 @@ const { deliver } = require("../services/operationNotifications");
 function validate(body, creating = false) {
   fields.body(body, ["roomNumber", "roomTypeId", "floor", "viewType", "description", "images", "isActive"]);
   const input = {};
-  if (creating || body.roomNumber !== undefined) input.roomNumber = v.text(body.roomNumber, "roomNumber", 1, 30);
+  if (creating || body.roomNumber !== undefined) input.roomNumber = v.code(body.roomNumber, "roomNumber", /^[A-Za-z0-9-]{1,30}$/, "Room number: letters, digits or -, no spaces.");
   if (creating || body.roomTypeId !== undefined) input.roomTypeId = v.id(body.roomTypeId, "roomTypeId");
   if (body.floor !== undefined) input.floor = v.number(body.floor, "floor", -100, 1000);
   for (const key of ["viewType", "description"])

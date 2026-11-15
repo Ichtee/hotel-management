@@ -100,6 +100,7 @@ textarea { font: inherit; min-height: 88px; padding: .55rem .7rem; }
 .rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: .75rem; }
 .room { min-height: 72px; border: 0; border-radius: 12px; color: #fff; display: grid; place-content: center; text-align: center; transition: transform .15s; }
 .room:hover { transform: translateY(-2px); } .room b { font-size: 1.2rem; } .room small { text-transform: capitalize; opacity: .9; }
+.room .room-type { font-size: .72rem; line-height: 1.15; opacity: .85; text-transform: none; padding: 0 6px; }
 .room.s-cleaning { color: #1a1205; }
 
 /* Biểu mẫu. */

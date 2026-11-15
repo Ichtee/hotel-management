@@ -48,6 +48,8 @@ export function AuthTabs({ mode, onChange }) {
 
 function PasswordField({ label, name, error, autoComplete, onChange, minLength, maxLength, children }) {
   const [show, setShow] = useState(false);
+  // Mật khẩu mới không được có dấu cách (giống server).
+  const newPassword = autoComplete === 'new-password';
   return (
     <Field label={label} error={error}>
       <span className="pw">
@@ -58,6 +60,8 @@ function PasswordField({ label, name, error, autoComplete, onChange, minLength, 
           onChange={onChange}
           minLength={minLength}
           maxLength={maxLength}
+          pattern={newPassword ? '\\S+' : undefined}
+          title={newPassword ? 'No spaces.' : undefined}
           required
         />
         <button type="button" aria-label={show ? 'Hide password' : 'Show password'} aria-pressed={show} onClick={() => setShow(!show)}><Icon d={show ? EYE_OFF : EYE} /></button>
@@ -104,7 +108,7 @@ export function SignIn({ onDone, hint, onForgot }) {
   };
   return (
     <form className="form one" onSubmit={submit}>
-      <Field label="Email or username" error={err?.fields?.email || err?.fields?.username}><input name="login" autoComplete="username" placeholder="you@example.com or username" autoCapitalize="none" spellCheck="false" autoFocus required /></Field>
+      <Field label="Email or username" error={err?.fields?.login || err?.fields?.email || err?.fields?.username}><input name="login" pattern="\S+" title="No spaces." autoComplete="username" placeholder="you@example.com or username" autoCapitalize="none" spellCheck="false" autoFocus required /></Field>
       <PasswordField label="Password" name="password" autoComplete="current-password" error={err?.fields?.password} />
       {onForgot && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-0.35rem', marginBottom: '0.25rem' }}>
@@ -144,7 +148,7 @@ export function ForgotPassword({ onDone, onCancel, link }) {
     setErr(null);
     setOk(null);
     const f = Object.fromEntries(new FormData(e.target));
-    const em = (f.email || '').trim();
+    const em = f.email || ''; // không tự cắt: server từ chối email có dấu cách
     if (!em) return;
     setBusy(true);
     try {
@@ -278,7 +282,11 @@ export function Register({ onDone, hint }) {
       return;
     }
 
-    const username = (f.username || '').trim();
+    const username = f.username || '';
+    if (/\s/.test(username)) {
+      setErr({ message: 'Username cannot contain spaces.', fields: { username: 'Username cannot contain spaces.' } });
+      return;
+    }
     if (username.length < 3 || username.length > 40) {
       setErr({
         message: 'Username must be 3–40 characters.',
@@ -287,7 +295,11 @@ export function Register({ onDone, hint }) {
       return;
     }
 
-    const email = (f.email || '').trim();
+    const email = f.email || '';
+    if (/\s/.test(email)) {
+      setErr({ message: 'Email cannot contain spaces.', fields: { email: 'Email cannot contain spaces.' } });
+      return;
+    }
     if (email.length < 3 || email.length > 254) {
       setErr({
         message: 'Email must be 3–254 characters.',
@@ -296,7 +308,7 @@ export function Register({ onDone, hint }) {
       return;
     }
 
-    const phone = (f.phone || '').trim();
+    const phone = f.phone || '';
     if (!/^(\d{10,11}|\+\d{8,15})$/.test(phone)) {
       setErr({
         message: 'Phone number must have 10 to 11 digits, or + and 8 to 15 digits with the country code.',
@@ -305,6 +317,10 @@ export function Register({ onDone, hint }) {
       return;
     }
 
+    if (/\s/.test(f.password || '')) {
+      setErr({ message: 'Password cannot contain spaces.', fields: { password: 'Password cannot contain spaces.' } });
+      return;
+    }
     if (!RULES.every(([, ok]) => ok(f.password || ''))) {
       setErr({ message: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.', fields: { password: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.' } });
       return;
@@ -343,6 +359,8 @@ export function Register({ onDone, hint }) {
         <input
           name="username"
           autoComplete="username"
+          pattern="\S+"
+          title="No spaces."
           minLength={3}
           maxLength={40}
           required

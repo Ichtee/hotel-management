@@ -75,7 +75,8 @@ async function create(req, res) {
   v.choice(req.body.paymentOption || "deposit", "paymentOption", ["deposit"]);
   // Yêu cầu đồng ý chính sách và điền sẵn liên hệ từ hồ sơ để khách chỉnh sửa.
   if (req.body.consent !== true) v.fail("Privacy consent is required.", "consent");
-  const guestName = v.text(req.body.fullName ?? req.user.customerProfile?.fullName ?? req.user.username, "fullName", 2, 80);
+  // Chỉ kiểm tra tên được gửi lên; tên lấy sẵn từ hồ sơ là dữ liệu đã lưu.
+  const guestName = req.body.fullName !== undefined ? v.name(req.body.fullName) : req.user.customerProfile?.fullName || req.user.username;
   const guestPhone = req.body.phone === undefined ? req.user.phone : v.phone(req.body.phone, true);
   const guestEmail = req.body.email === undefined ? req.user.email : v.email(req.body.email);
   await assertCaptcha(req.body.captchaToken, req.ip);
@@ -159,7 +160,7 @@ async function createWalkIn(req, res) {
   v.id(b.roomTypeId, "roomTypeId"); stayDates(b.checkInDate, b.checkOutDate);
   if (b.checkInDate !== vnDate()) v.fail("A booking without a deposit can only be created for today's check-in date.", "checkInDate", 409);
   const guestCount = v.number(b.guestCount, "guestCount", 1, 20);
-  const fullName = v.text(b.fullName, "fullName", 2, 80), phone = v.phone(b.phone, true), idDocumentNo = v.text(b.idDocumentNo, "idDocumentNo", 3, 40);
+  const fullName = v.name(b.fullName), phone = v.phone(b.phone, true), idDocumentNo = v.idNumber(b.idDocumentNo);
   const email = b.email ? v.email(b.email) : undefined;
   const type = await RoomType.findOne({ _id: b.roomTypeId, isActive: true });
   if (!type) throw new v.HttpError(404, "This room type is no longer available.");
@@ -224,12 +225,12 @@ async function modifyWalkIn(req, res) {
   const booking = await Booking.findById(v.id(req.params.id)).select("+guestIdDocumentNo");
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   const b = req.body;
-  if (!["pending", "confirmed", "checked_in", "checked_out"].includes(booking.status)) throw new v.HttpError(409, "This booking can no longer be modified.");
+  // Booking đã trả phòng không sửa được: hoá đơn đã phát hành theo thông tin lúc trả phòng.
+  if (!["pending", "confirmed", "checked_in"].includes(booking.status)) throw new v.HttpError(409, "This booking can no longer be modified.");
   const stayChange = ["checkInDate", "checkOutDate", "guestCount"].some((key) => b[key] !== undefined);
-  if (booking.status === "checked_out" && stayChange) throw new v.HttpError(409, "Only guest information can be corrected after check-out.");
-  if (b.fullName !== undefined) booking.guestName = v.text(b.fullName, "fullName", 2, 80);
+  if (b.fullName !== undefined) booking.guestName = v.name(b.fullName);
   if (b.phone !== undefined) booking.guestPhone = v.phone(b.phone, true);
-  if (b.idDocumentNo !== undefined) booking.guestIdDocumentNo = v.text(b.idDocumentNo, "idDocumentNo", 3, 40);
+  if (b.idDocumentNo !== undefined) booking.guestIdDocumentNo = v.idNumber(b.idDocumentNo);
   booking.events.push({ actorId: req.user._id, type: "modified", note: "Booking modified by receptionist" });
   // Khóa việc giữ và lưu các đêm mới để tránh tranh chấp phòng.
   await locked(async () => {
@@ -247,7 +248,7 @@ async function modifyOwn(req, res) {
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   if (!["pending", "confirmed"].includes(booking.status)) throw new v.HttpError(409, "This booking can no longer be modified.");
   const b = req.body;
-  if (b.fullName !== undefined) booking.guestName = v.text(b.fullName, "fullName", 2, 80);
+  if (b.fullName !== undefined) booking.guestName = v.name(b.fullName);
   if (b.phone !== undefined) booking.guestPhone = v.phone(b.phone, true);
   if (b.email !== undefined) booking.guestEmail = v.email(b.email);
   booking.events.push({ actorId: req.user._id, type: "modified", note: "Booking modified by the customer" });
@@ -278,7 +279,7 @@ async function checkIn(req, res) {
   const guestCount = v.number(req.body.guestCount, "guestCount", 1, 20);
   const type = await RoomType.findById(booking.rooms[0].roomTypeId);
   if (!type || guestCount > type.maxOccupancy) v.fail("Invalid guest count.", "guestCount");
-  booking.rooms[0].roomId = room._id; booking.rooms[0].guestCount = guestCount; booking.guestIdDocumentNo = v.text(req.body.idDocumentNo, "idDocumentNo", 3, 40);
+  booking.rooms[0].roomId = room._id; booking.rooms[0].guestCount = guestCount; booking.guestIdDocumentNo = v.idNumber(req.body.idDocumentNo);
   // Chỉ ghi phí nhận sớm một lần khi khách thực sự nhận trước giờ chuẩn.
   const policy = await currentCancellationPolicy();
   const earlyFee = now < at(booking.checkInDate, policy?.checkInTime || "14:00") ? policy?.earlyCheckInFee || 0 : 0;

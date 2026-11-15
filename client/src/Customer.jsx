@@ -538,8 +538,8 @@ function Checkout({ q, user }) {
           <h2>{r.name}</h2>
           <p className="muted">{dateLabel(q.in)} → {dateLabel(q.out)} · {nights} night(s) · {q.guests} guest(s)</p>
           <div className="promo-actions">
-            <input aria-label="Promo code" placeholder="Promo code" value={typed} onChange={(e) => setTyped(e.target.value)} autoCapitalize="characters" />
-            <button type="button" className="btn" onClick={() => setCoupon(typed.trim().toUpperCase())} disabled={quote.loading}>Apply</button>
+            <input aria-label="Promo code" placeholder="Promo code" pattern="[A-Za-z0-9]{2,30}" title="2–30 letters or digits, no spaces." value={typed} onChange={(e) => setTyped(e.target.value)} autoCapitalize="characters" />
+            <button type="button" className="btn" onClick={() => setCoupon(typed.toUpperCase())} disabled={quote.loading}>Apply</button>
           </div>
           {price?.couponError && <p className="note bad-note" role="alert">{price.couponError} The booking continues without the discount.</p>}
           {quote.error && <p className="note bad-note" role="alert">{quote.error}</p>}

@@ -310,3 +310,69 @@ test("verification e-mail can be requested at most 3 times per hour (BR-42, MSG-
   assert.ok(statuses.slice(0, 3).every((c) => c === 200), `first three allowed: ${statuses}`);
   assert.ok(statuses.slice(3).every((c) => c === 429), `the fourth and fifth refused: ${statuses}`);
 });
+
+// Không trường nào được âm thầm nhận dấu cách hay sai định dạng: mã định danh từ chối mọi dấu cách,
+// tên người chỉ có chữ cái và một dấu cách giữa các từ (BR-24).
+test("no field silently accepts spaces: identifiers refuse any space, person names follow BR-24", async () => {
+  let n = 0;
+  const reg = (o) => ({ username: `sp${++n}x`, email: `sp${n}@example.com`, fullName: "Tran Thi Mai", phone: "0912345678", password: "StrongPass123", confirmPassword: "StrongPass123", consent: true, ...o });
+  await check("register", [
+    ["valid, Vietnamese name", reg({ fullName: "Nguyễn Thị Ánh" }), 201],
+    ["username leading space", reg({ username: " spaced1" }), 400],
+    ["username trailing space", reg({ username: "spaced2 " }), 400],
+    ["username inner space", reg({ username: "spa ced" }), 400],
+    ["email leading space", reg({ email: " sp99@example.com" }), 400],
+    ["password inner space", reg({ password: "Strong Pass123", confirmPassword: "Strong Pass123" }), 400],
+    ["password trailing space", reg({ password: "StrongPass123 ", confirmPassword: "StrongPass123 " }), 400],
+    ["name with digits", reg({ fullName: "Mai 2" }), 400],
+    ["name double space", reg({ fullName: "Tran  Mai" }), 400],
+    ["name with symbols", reg({ fullName: "Mai <b>" }), 400],
+    ["name only spaces", reg({ fullName: "    " }), 400],
+  ], (b) => send(request(app), "post", "/api/auth/register", b));
+
+  await check("sign in", [
+    ["username", { login: "customer", password }, 200],
+    ["username + space", { login: "customer ", password }, 400],
+    ["space + email", { login: " customer@example.com", password }, 400],
+  ], (b) => send(request.agent(app), "post", "/api/auth/login", b));
+
+  await check("profile", [
+    ["name trimmed at both ends is fine", { fullName: " Tran Mai " }, 200],
+    ["name with digits", { fullName: "Tran Mai 3" }, 400],
+    ["phone with space", { phone: "0912 345678" }, 400],
+  ], (b) => send(customer, "patch", "/api/profile", b));
+
+  const id = (await User.findOne({ email: "customer@example.com" }))._id;
+  await check("front-desk customer ID number", [
+    ["12 digits", { idDocumentNo: "079123456789" }, 200],
+    ["passport letters + digits", { idDocumentNo: "B1234567" }, 200],
+    ["spaces between groups", { idDocumentNo: "079 123 456 789" }, 400],
+    ["leading space", { idDocumentNo: " 079123456789" }, 400],
+    ["symbols", { idDocumentNo: "079-123-456" }, 400],
+    ["too short", { idDocumentNo: "12345" }, 400],
+  ], (b) => send(reception, "patch", `/api/front-desk/customers/${id}`, b));
+
+  const coupon = (code) => ({ code, discountType: "percentage", discountValue: 10, usageLimit: 5, startDate: day(0), endDate: day(30) });
+  await check("coupon code", [
+    ["letters and digits", coupon("SPACE10"), 201],
+    ["leading space", coupon(" SPACE11"), 400],
+    ["inner space", coupon("SPACE 12"), 400],
+    ["symbol", coupon("SPACE-13"), 400],
+  ], (b) => send(manager, "post", "/api/promotions", b));
+
+  const rt = await bookableType();
+  await check("room number", [
+    ["valid", { roomNumber: "SP-1", roomTypeId: rt._id, floor: 1 }, 201],
+    ["leading space", { roomNumber: " SP-2", roomTypeId: rt._id, floor: 1 }, 400],
+    ["inner space", { roomNumber: "SP 3", roomTypeId: rt._id, floor: 1 }, 400],
+  ], (b) => send(manager, "post", "/api/rooms", b));
+
+  // Walk-in shares the guest-detail rules with the online booking and has no per-IP booking limit.
+  const walkIn = { roomTypeId: rt._id, checkInDate: day(0), checkOutDate: day(1), guestCount: 1, fullName: "Tran Mai", phone: "0912345678", idDocumentNo: "079123456789" };
+  await check("walk-in guest details", [
+    ["name with digits", { ...walkIn, fullName: "Mai 2" }, 400],
+    ["phone with leading space", { ...walkIn, phone: " 0912345678" }, 400],
+    ["email with trailing space", { ...walkIn, email: "mai@example.com " }, 400],
+    ["ID number with spaces", { ...walkIn, idDocumentNo: "079 123 456 789" }, 400],
+  ], (b) => send(reception, "post", "/api/front-desk/bookings", b));
+});

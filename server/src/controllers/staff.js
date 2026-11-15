@@ -12,7 +12,7 @@ function validate(body, creating = false) {
     ...(creating ? ["username", "password"] : [])]);
   const data = {};
   if (!Object.keys(body).length) v.fail("Provide at least one field.");
-  if (creating || body.fullName !== undefined) data.fullName = v.text(body.fullName, "fullName", 2, 50);
+  if (creating || body.fullName !== undefined) data.fullName = v.name(body.fullName);
   if (creating || body.email !== undefined) data.email = v.email(body.email);
   if (creating || body.phone !== undefined) data.phone = v.phone(body.phone, true);
   if (creating || body.role !== undefined) data.role = v.choice(body.role, "role", editableRoles);

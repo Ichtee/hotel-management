@@ -17,7 +17,7 @@ function checkPeriodAndSpend(coupon, subtotal, now) {
 async function validateCoupon({ code, customerId, subtotal, now = new Date() }) {
   if (customerId) v.id(String(customerId), "customerId");
   v.number(subtotal, "subtotal", 1);
-  const coupon = await Coupon.findOne({ code: v.text(code, "code", 2, 30).toUpperCase() });
+  const coupon = await Coupon.findOne({ code: v.couponCode(code) });
   if (!coupon || !coupon.isActive) v.fail("Coupon code is invalid.", "couponCode");
   if (coupon.usageCount >= coupon.usageLimit) v.fail("Reached limit. This coupon can no longer be used.", "couponCode");
   const discountAmount = checkPeriodAndSpend(coupon, subtotal, now);

@@ -32,7 +32,7 @@ async function login(email, secret = password) {
 // Tạo dữ liệu nhân viên khác nhau cho từng trường hợp kiểm thử.
 function payload(role = "receptionist") {
   const n = ++sequence;
-  return { email: `employee${n}@example.com`, fullName: `Employee ${n}`, phone: "0912345678", role, password };
+  return { email: `employee${n}@example.com`, fullName: `Employee ${String(n).replace(/\d/g, (d) => "abcdefghij"[d])}` /* a person name has no digits */, phone: "0912345678", role, password };
 }
 
 // Tạo nhân viên qua API thật và hoàn tất đổi mật khẩu khi cần.

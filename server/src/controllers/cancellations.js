@@ -65,7 +65,7 @@ const summary = (b) => ({
 });
 // Tìm booking bằng mã hoặc số điện thoại.
 async function lookup(req, res) {
-  const q = v.text(req.query.q, "q", 3, 40).toUpperCase();
+  const q = v.code(req.query.q, "q", /^[A-Za-z0-9+-]{3,40}$/, "Enter a booking code or phone number without spaces.").toUpperCase();
   const or = [{ bookingReference: q }];
   if (/^\d{10,11}$/.test(q)) or.push({ guestPhone: q }, { customerId: { $in: await User.find({ phone: q }).distinct("_id") } });
   const rows = await Booking.find({ $or: or }).populate("customerId", BOOKER).sort({ checkInDate: -1 }).limit(20);

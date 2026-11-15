@@ -296,26 +296,17 @@ test("profile updates only self and password change revokes other sessions", asy
   await b.get("/api/auth/me").expect(401);
   await a.get("/api/auth/me").expect(200);
 });
-test("password whitespace is preserved at login and password change", async () => {
+test("a new password cannot contain spaces; an older password with spaces is still compared as typed", async () => {
   const agent = request.agent(app);
   const spaced = "  SpacesMatter123!  ";
-  await send(agent, "post", "/api/auth/register", {
-    consent: true,
-    username: "spaced",
-    email: "spaced@example.com",
-    fullName: "Spaced Password",
-    password: spaced,
-    phone: "0912345678",
-  }).expect(201);
-  await User.updateOne({ email: "spaced@example.com" }, { isVerified: true });
-  await send(agent, "post", "/api/auth/login", {
-    email: "spaced@example.com",
-    password: spaced,
-  }).expect(200);
-  await send(agent, "put", "/api/profile/password", {
-    currentPassword: spaced,
-    newPassword: "AnotherPass123!",
-  }).expect(200);
+  const signUp = { consent: true, username: "spaced", email: "spaced@example.com", fullName: "Spaced Password", phone: "0912345678" };
+  assert.match((await send(agent, "post", "/api/auth/register", { ...signUp, password: spaced }).expect(400)).body.error.message, /cannot contain spaces/);
+  // An account saved before the rule keeps working: the password is not trimmed at sign-in.
+  await User.create({ ...signUp, customerProfile: { fullName: signUp.fullName }, passwordHash: await hashPassword(spaced), roleId: await roleId("customer"), isVerified: true });
+  await send(agent, "post", "/api/auth/login", { email: "spaced@example.com", password: spaced.trim() }).expect(401);
+  await send(agent, "post", "/api/auth/login", { email: "spaced@example.com", password: spaced }).expect(200);
+  await send(agent, "put", "/api/profile/password", { currentPassword: spaced, newPassword: "Another Pass123!" }).expect(400);
+  await send(agent, "put", "/api/profile/password", { currentPassword: spaced, newPassword: "AnotherPass123!" }).expect(200);
 });
 test("admin manages accounts, cannot demote admin; deactivation takes effect on existing sessions", async () => {
   await customer.get("/api/users").expect(403);
@@ -1682,7 +1673,28 @@ test("sign in with the e-mail or the username", async () => {
   const wrong = await send(request.agent(app), "post", "/api/auth/login", { login: "nobody_here", password }).expect(401);
   assert.match(wrong.body.error.message, /Invalid email, username or password/);
   await send(request.agent(app), "post", "/api/auth/login", { login: "", password }).expect(400);
+  // Spaces are refused, not trimmed: in the sign-in name, and in a new username or password.
+  for (const login of ["loginbyname ", " loginbyname", " loginbyname@example.com"])
+    assert.match((await send(request.agent(app), "post", "/api/auth/login", { login, password }).expect(400)).body.error.message, /cannot contain spaces/);
+  const v = require("../src/utils/validation");
+  assert.throws(() => v.username("new guest"), /Username cannot contain spaces/);
+  assert.throws(() => v.username(" newguest"), /Username cannot contain spaces/);
+  assert.throws(() => v.password("Strong Pass123"), /Password cannot contain spaces/);
+  assert.throws(() => v.password("StrongPass123 "), /Password cannot contain spaces/);
+  assert.equal(v.password("StrongPass123!"), "StrongPass123!");
   // An older or generated username that breaks today's sign-up rules (capitals, "+") still signs in, in any case.
   await User.create({ username: "Old.Guest+1", email: "oldguest@example.com", passwordHash: await hashPassword(password), roleId: await roleId("customer"), phone: "0912345678", customerProfile: { fullName: "Old Guest" }, isVerified: true });
   await send(request.agent(app), "post", "/api/auth/login", { login: "old.guest+1", password }).expect(200);
+});
+
+test("a checked-out booking can no longer be modified at the front desk or by the customer", async () => {
+  await srsUser("outguest", "customer");
+  const guest = await login("outguest@example.com");
+  const me = await User.findOne({ username: "outguest" });
+  const { Std } = await srsRooms("OUT", { Std: 1000 });
+  const done = await srsBooking(me._id, Std, { checkInDate: "2026-01-10", checkOutDate: "2026-01-11", status: "checked_out", roomAmount: 1000, totalAmount: 1000, guestName: "Out Guest", guestPhone: "0912345678" });
+  const res = await send(staff, "patch", `/api/front-desk/bookings/${done.id}`, { fullName: "Changed Name" }).expect(409);
+  assert.match(res.body.error.message, /can no longer be modified/);
+  await send(guest, "patch", `/api/bookings/${done.id}/modify`, { guestCount: 1 }).expect(409);
+  assert.equal((await Booking.findById(done.id)).guestName, "Out Guest");
 });

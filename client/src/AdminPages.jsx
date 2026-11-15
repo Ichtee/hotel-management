@@ -203,8 +203,8 @@ function UserForm({ user, isStaff, base, options, onClose, onSaved }) {
       <form className="form" onSubmit={submit}>
         <Field label="Full name" error={fe('fullName')}><input name="fullName" defaultValue={user.customerProfile?.fullName} required /></Field>
         <Field label="Email" error={fe('email')}><input name="email" type="email" defaultValue={user.email} required /></Field>
-        {creating && <Field label="Username" error={fe('username')}><input name="username" required /></Field>}
-        {creating && <Field label="Password" error={fe('password')}><input name="password" type="password" autoComplete="new-password" required /></Field>}
+        {creating && <Field label="Username" error={fe('username')}><input name="username" pattern="\S+" title="No spaces." required /></Field>}
+        {creating && <Field label="Password" error={fe('password')}><input name="password" type="password" autoComplete="new-password" pattern="\S+" title="No spaces." required /></Field>}
         <Field label="Phone" error={fe('phone')}><input name="phone" defaultValue={user.phone} required={scope === 'hotel'} /></Field>
         <Field label="Role" error={fe('role')}>
           <select value={role} onChange={(e) => setRole(e.target.value)} disabled={user.role === 'admin'}>
@@ -268,7 +268,7 @@ function CouponForm({ coupon, onClose, onSaved }) {
   return (
     <Screen title={creating ? 'New coupon' : `Edit ${coupon.code}`} onClose={onClose}>
       <form className="form" onSubmit={submit}>
-        <Field label="Code" error={fe('code')}><input name="code" defaultValue={coupon.code} required /></Field>
+        <Field label="Code" error={fe('code')}><input name="code" defaultValue={coupon.code} pattern="[A-Za-z0-9]{2,30}" title="2–30 letters or digits, no spaces." required /></Field>
         <Field label="Type" error={fe('discountType')}><select name="discountType" defaultValue={coupon.discountType || 'percentage'}><option value="percentage">Percentage (1 to 100)</option><option value="fixed">Fixed amount (VND)</option></select></Field>
         <Field label="Discount value" error={fe('discountValue')}><input name="discountValue" type="number" min="1" step="1" defaultValue={coupon.discountValue} required /></Field>
         <Field label="Usage limit" error={fe('usageLimit')}><input name="usageLimit" type="number" min="1" defaultValue={coupon.usageLimit} required /></Field>
@@ -424,8 +424,8 @@ export function ChangePassword({ base = '#/profile' }) {
       <ProfileTabs base={base} on="password" />
       <form className="panel form one" onSubmit={submit} style={{ maxWidth: 480 }}>
         <Field label="Current password" error={err?.fields?.currentPassword}><input name="currentPassword" type="password" autoComplete="current-password" required /></Field>
-        <Field label="New password" error={err?.fields?.newPassword}><input name="newPassword" type="password" autoComplete="new-password" minLength={8} maxLength={128} required /></Field>
-        <Field label="Confirm new password" error={err?.fields?.confirmPassword}><input name="confirmPassword" type="password" autoComplete="new-password" required /></Field>
+        <Field label="New password" error={err?.fields?.newPassword}><input name="newPassword" type="password" autoComplete="new-password" pattern="\S+" title="No spaces." minLength={8} maxLength={128} required /></Field>
+        <Field label="Confirm new password" error={err?.fields?.confirmPassword}><input name="confirmPassword" type="password" autoComplete="new-password" pattern="\S+" title="No spaces." required /></Field>
         <Notice error={err && !err.fields ? err : null} ok={ok} />
         <div className="modal-actions"><button className="btn primary" type="submit" disabled={busy}>{busy ? 'Updating…' : 'Update password'}</button></div>
       </form>

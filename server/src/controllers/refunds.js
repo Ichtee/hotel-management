@@ -68,9 +68,9 @@ async function listing(req, res) {
 async function setAccount(req, res) {
   v.keys(req.body, ["bank", "accountNumber", "holderName"]);
   const bank = v.text(req.body.bank, "bank", 2, 100);
-  const accountNumber = v.text(req.body.accountNumber, "accountNumber", 6, 20);
+  const accountNumber = v.code(req.body.accountNumber, "accountNumber", /^\d{6,20}$/, "Account number: 6–20 digits, no spaces.");
   if (!/^\d+$/.test(accountNumber)) v.fail("The account number contains digits only.", "accountNumber");
-  const holderName = plain(v.text(req.body.holderName, "holderName", 2, 100));
+  const holderName = plain(v.name(req.body.holderName, "holderName"));
   const refund = await waiting(req, req.params.id);
   if (holderName !== plain(bookerName(refund.bookingId)))
     v.fail("The account holder name must be the same as the name of the person who made the booking.", "holderName");

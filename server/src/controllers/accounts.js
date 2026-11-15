@@ -43,7 +43,7 @@ function editable(body, isStaff, creating) {
     v.password(body.password);
   }
   if (creating || body.fullName !== undefined)
-    out.fullName = v.text(body.fullName, "fullName", 2, 50);
+    out.fullName = v.name(body.fullName);
   if (creating || body.email !== undefined) out.email = v.email(body.email);
   if (creating || body.phone !== undefined)
     out.phone = v.phone(body.phone, isStaff);

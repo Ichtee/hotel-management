@@ -89,7 +89,7 @@ async function finalPayment(req, res) {
   const due = booking.totalAmount - (await paidAmount(booking._id));
   if (due < 1) throw new v.HttpError(409, "Nothing is left to pay.");
   const amount = req.body.amount === undefined ? due : v.number(req.body.amount, "amount", 1, due);
-  const transactionRef = method === "cash" ? undefined : v.text(req.body.transactionRef, "transactionRef", 1, 100);
+  const transactionRef = method === "cash" ? undefined : v.code(req.body.transactionRef, "transactionRef", /^[A-Za-z0-9._\/-]{1,100}$/, "Transaction reference: letters, digits or . _ / -, no spaces.");
   const payment = await Payment.create({ bookingId: booking._id, kind: "final", amount, method, transactionRef, status: "success", paidAt: new Date(), recordedBy: req.user._id });
   await announce(payment, true);
   if (amount === due) {
@@ -106,7 +106,7 @@ async function callback(req, res) {
   v.keys(req.body, ["orderId", "transactionRef", "status", "amount", "signature"]);
   const p = {
     orderId: v.text(req.body.orderId, "orderId", 1, 64),
-    transactionRef: v.text(req.body.transactionRef, "transactionRef", 1, 100),
+    transactionRef: v.code(req.body.transactionRef, "transactionRef", /^[A-Za-z0-9._\/-]{1,100}$/, "Transaction reference: letters, digits or . _ / -, no spaces."),
     status: v.choice(req.body.status, "status", ["success", "failed"]),
     amount: v.number(req.body.amount, "amount", 1),
   };

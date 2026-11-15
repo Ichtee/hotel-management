@@ -218,7 +218,7 @@ function ModifyModal({ booking, onClose, onSaved }) {
           checkOutDate: outDate,
           guestCount: Number(guests),
           ...(name.trim() ? { fullName: name.trim() } : {}),
-          ...(phone.trim() ? { phone: phone.trim() } : {}),
+          ...(phone ? { phone } : {}),
         }
       });
       onSaved(`Reservation ${booking.bookingReference || ''} updated successfully.`);
@@ -476,7 +476,7 @@ function StayRequestModal({ booking, type, onClose, onSaved }) {
         {isIn && <>
           <Field label="Number of guests"><input name="numberOfGuests" type="number" min="1" max="10" defaultValue={booking.rooms?.[0]?.guestCount || 1} required /></Field>
           <Field label="Main guest full name"><input name="mainGuestName" defaultValue={booking.guestName || ''} minLength={2} maxLength={80} required /></Field>
-          <Field label="Main guest ID / passport number (optional, can be shown at the front desk)"><input name="mainGuestIdNumber" minLength={3} maxLength={40} /></Field>
+          <Field label="Main guest ID / passport number (optional, can be shown at the front desk)"><input name="mainGuestIdNumber" pattern="[A-Za-z0-9]{6,20}" title="6–20 letters or digits, no spaces." /></Field>
           <Field label="Photo of the ID / passport (optional, JPG or PNG, max 5 MB)"><input name="idFile" type="file" accept="image/jpeg,image/png" /></Field>
           <p className="muted full">The photo is private: only the front desk can open it, and it is deleted when your stay starts or the booking ends. Bring the original document to the front desk anyway.</p>
         </>}

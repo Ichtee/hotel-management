@@ -15,9 +15,7 @@ function validate(body, coupon) {
   const creating = !coupon;
   const data = {};
   if (creating || body.code !== undefined) {
-    data.code = v.text(body.code, "code", 2, 30).toUpperCase();
-    if (!/^[A-Z0-9]+$/.test(data.code))
-      v.fail("Coupon code must be alphanumeric.", "code");
+    data.code = v.couponCode(body.code);
   }
   if (creating || body.discountType !== undefined)
     data.discountType = v.choice(body.discountType, "discountType", [

@@ -66,7 +66,7 @@ test("register: CR-12 password, CR-04 email and phone, BR-24 name, CR-21 consent
     ["no lower-case", unique({ password: "ABCDEFG1", confirmPassword: "ABCDEFG1" }), 400],
     ["no digit", unique({ password: "Abcdefgh", confirmPassword: "Abcdefgh" }), 400],
     ["only digits", unique({ password: "12345678", confirmPassword: "12345678" }), 400],
-    ["password with spaces is allowed", unique({ password: "Abc defg 1", confirmPassword: "Abc defg 1" }), 201],
+    ["password with spaces is refused", unique({ password: "Abc defg 1", confirmPassword: "Abc defg 1" }), 400],
     ["password not a string", unique({ password: 12345678, confirmPassword: 12345678 }), 400],
     ["confirm does not match", unique({ confirmPassword: "Abcdefg2" }), 400],
     ["password over 128", unique({ password: "Aa1" + "x".repeat(130), confirmPassword: "Aa1" + "x".repeat(130) }), 400],

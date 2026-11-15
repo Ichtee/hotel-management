@@ -28,13 +28,33 @@ function text(value, field, min = 1, max = 120) {
     fail(`${field} must be ${min}–${max} characters.`, field);
   return value.trim();
 }
+// Mã định danh (số giấy tờ, số tài khoản, mã giảm giá, số phòng...): không tự cắt, không có dấu cách, đúng mẫu.
+function code(value, field, pattern, message) {
+  if (typeof value !== "string" || /\s/.test(value) || !pattern.test(value)) fail(message, field);
+  return value;
+}
+// Tên người (BR-24): 2–50 ký tự, chữ cái (có dấu), một dấu cách giữa các từ, ' . - ; bỏ dấu cách hai đầu.
+function name(value, field = "fullName", min = 2, max = 50) {
+  const v = text(value, field, min, max);
+  if (/\s{2,}/.test(v)) fail("Use a single space between words.", field);
+  if (!/^\p{L}[\p{L}\p{M} .'-]*$/u.test(v)) fail("Use letters only (spaces, ' . - allowed), no digits or symbols.", field);
+  return v;
+}
+// Số CCCD / CMND / hộ chiếu và mã giảm giá dùng ở nhiều nơi.
+const idNumber = (value, field = "idDocumentNo") =>
+  code(value, field, /^[A-Za-z0-9]{6,20}$/, "ID / passport number: 6–20 letters or digits, no spaces.");
+const couponCode = (value, field = "code") =>
+  code(value, field, /^[A-Za-z0-9]{2,30}$/, "Coupon code: 2–30 letters or digits, no spaces.").toUpperCase();
 function email(value) {
+  if (typeof value === "string" && /\s/.test(value)) fail("Email cannot contain spaces.", "email");
   const v = text(value, "email", 3, 254).toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v))
     fail("Enter a valid email address.", "email");
   return v;
 }
 function username(value) {
+  // Không tự cắt dấu cách: username có dấu cách bị từ chối thay vì lưu bản đã cắt.
+  if (typeof value === "string" && /\s/.test(value)) fail("Username cannot contain spaces.", "username");
   const v = text(value, "username", 3, 40).toLowerCase();
   if (!/^[a-z0-9_.-]+$/.test(v))
     fail("Use letters, numbers, dots, hyphens or underscores.", "username");
@@ -50,6 +70,7 @@ function password(value, field = "password") {
     !/\d/.test(value)
   )
     fail("Use 8–128 characters with an upper-case letter, a lower-case letter and a number.", field);
+  if (/\s/.test(value)) fail("Password cannot contain spaces.", field);
   return value;
 }
 function phone(value, required = false) {
@@ -130,6 +151,10 @@ module.exports = {
   fail,
   keys,
   text,
+  code,
+  name,
+  idNumber,
+  couponCode,
   email,
   username,
   password,

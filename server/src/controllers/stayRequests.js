@@ -34,9 +34,9 @@ async function create(req, res) {
   if (type === "check_in") {
     const roomType = await RoomType.findById(booking.rooms[0].roomTypeId).select("maxOccupancy");
     data.numberOfGuests = v.number(req.body.numberOfGuests, "numberOfGuests", 1, roomType?.maxOccupancy || 20);
-    data.mainGuestName = v.text(req.body.mainGuestName, "mainGuestName", 2, 80);
+    data.mainGuestName = v.name(req.body.mainGuestName, "mainGuestName");
     // Số giấy tờ không bắt buộc ở bước này; lễ tân đối chiếu bản gốc khi nhận phòng.
-    if (req.body.mainGuestIdNumber) data.mainGuestIdNumber = v.text(req.body.mainGuestIdNumber, "mainGuestIdNumber", 3, 40);
+    if (req.body.mainGuestIdNumber) data.mainGuestIdNumber = v.idNumber(req.body.mainGuestIdNumber, "mainGuestIdNumber");
   }
   if (req.body.idPhoto) {
     if (!idPhoto.ownsPhoto(req.user._id, req.body.idPhoto)) v.fail("The ID photo is not valid. Upload it again.", "idPhoto");

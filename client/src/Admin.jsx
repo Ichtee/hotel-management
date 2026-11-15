@@ -285,7 +285,8 @@ function Bookings() {
           <RowActions key={b._id} actions={[
             b.status === 'confirmed' && ['Check in', () => sc.go('check-in', b._id)],
             b.status === 'checked_in' && ['Check out', () => sc.go('check-out', b._id)],
-            ['pending', 'confirmed', 'checked_in', 'checked_out'].includes(b.status) && [b.status === 'checked_in' ? 'Extend / edit' : 'Edit', () => sc.go('edit', b._id)],
+            // Booking đã trả phòng thì không sửa nữa: hoá đơn đã phát hành theo thông tin lúc trả phòng.
+            ['pending', 'confirmed', 'checked_in'].includes(b.status) && [b.status === 'checked_in' ? 'Extend / edit' : 'Edit', () => sc.go('edit', b._id)],
             ['confirmed', 'checked_in'].includes(b.status) && [b.status === 'confirmed' ? 'Change room type' : 'Change room', () => sc.go('change-room', b._id)],
             b.status === 'checked_in' && ['Add service', () => sc.go('service', b._id)],
             ['checked_in', 'checked_out'].includes(b.status) && ['Penalties', () => sc.go('penalties', b._id)],
@@ -369,7 +370,7 @@ function SettleBalance({ booking, balance, onPaid }) {
     <Field label={`Amount (VND) · ${money(Number(amount) || 0)}`} error={error?.fields?.amount}><input key={balance} name="amount" type="number" min="1" max={balance} step="1" defaultValue={balance} onChange={(e) => setAmount(e.target.value)} required /></Field>
     {method === 'cash' && <Field label="Cash received from guest (optional)"><input type="number" min="0" step="1000" value={received} onChange={(e) => setReceived(e.target.value)} /></Field>}
     {method === 'cash' && received !== '' && <p className="full" role="status">{change >= 0 ? <>Change to give back: <strong>{money(change)}</strong></> : <>Still short by <strong>{money(-change)}</strong></>}</p>}
-    {method !== 'cash' && <Field label="Transaction reference" error={error?.fields?.transactionRef}><input name="transactionRef" required maxLength={100} /></Field>}
+    {method !== 'cash' && <Field label="Transaction reference" error={error?.fields?.transactionRef}><input name="transactionRef" pattern="[A-Za-z0-9._/\-]{1,100}" title="Letters, digits or . _ / -, no spaces." required maxLength={100} /></Field>}
     <div className="full"><Notice error={error} /></div>
     <div className="full pay-row"><button className="btn primary" disabled={saving}>{saving ? 'Recording…' : 'Record payment'}</button></div>
   </form>;
@@ -481,7 +482,7 @@ function CheckInBooking({ booking, onClose }) {
   return <Screen title={`Check in ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
     {pre && <p className="full note">Pre-filled from the guest's check-in request: verify it against the original ID document. {pre.hasIdPhoto && <IdPhotoLink requestId={pre._id} />}</p>}
     <Field label="Available room"><select name="roomId" required><option value="">Select a room</option>{rooms.data?.map((r) => <option key={r._id} value={r._id}>Room {r.roomNumber} · Floor {r.floor}</option>)}</select></Field>
-    <Field label="Number of guests"><input name="guestCount" type="number" min="1" defaultValue={pre?.guestCount || booking.rooms?.[0]?.guestCount || 1} required /></Field><Field label="ID / passport number"><input name="idDocumentNo" defaultValue={pre?.idDocumentNo || ''} required /></Field>
+    <Field label="Number of guests"><input name="guestCount" type="number" min="1" defaultValue={pre?.guestCount || booking.rooms?.[0]?.guestCount || 1} required /></Field><Field label="ID / passport number"><input name="idDocumentNo" defaultValue={pre?.idDocumentNo || ''} pattern="[A-Za-z0-9]{6,20}" title="6–20 letters or digits, no spaces." required /></Field>
     <div className="full"><Notice error={rooms.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || !rooms.data?.length}>{saving ? 'Checking in…' : 'Confirm check-in'}</button></div>
   </form></Screen>;
 }
@@ -507,13 +508,13 @@ function CancelBooking({ booking, onClose }) {
 function EditBooking({ booking, onClose }) {
   const detail = useApi(`/bookings/${booking._id}`); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
   if (detail.loading) return <Screen title="Modify booking" onClose={onClose}><p className="muted">Loading booking…</p></Screen>;
-  const b = detail.data || booking; const checkedOut = b.status === 'checked_out';
-  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${b._id}`, { method: 'PATCH', body: { fullName: f.fullName, phone: f.phone, ...(f.idDocumentNo ? { idDocumentNo: f.idDocumentNo } : {}), ...(checkedOut ? {} : { ...(b.status === 'checked_in' ? {} : { checkInDate: f.checkInDate }), checkOutDate: f.checkOutDate, guestCount: Number(f.guestCount) }), ...(f.dropCoupon ? { dropCoupon: true } : {}) } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
+  const b = detail.data || booking;
+  const submit = async (e) => { e.preventDefault(); setSaving(true); setError(null); const f = Object.fromEntries(new FormData(e.target)); try { await api(`/front-desk/bookings/${b._id}`, { method: 'PATCH', body: { fullName: f.fullName, phone: f.phone, ...(f.idDocumentNo ? { idDocumentNo: f.idDocumentNo } : {}), ...(b.status === 'checked_in' ? {} : { checkInDate: f.checkInDate }), checkOutDate: f.checkOutDate, guestCount: Number(f.guestCount), ...(f.dropCoupon ? { dropCoupon: true } : {}) } }); onClose(); } catch (x) { setError(x); } finally { setSaving(false); } };
   return <Screen title={b.status === 'checked_in' ? 'Extend or edit stay' : 'Modify booking'} onClose={onClose}><form className="form" onSubmit={submit}>
-    {!checkedOut && <p className="full muted">{b.status === 'checked_in' ? 'Extra nights are priced at the rate of each night and need no deposit.' : 'The deposit already paid does not change; the difference is paid at check-out.'}</p>}
-    {!checkedOut && b.couponCode && <label className="check full"><input type="checkbox" name="dropCoupon" /> If the coupon {b.couponCode} no longer applies to the new stay, the guest agrees to continue without the discount</label>}
-    <Field label="Guest full name"><input name="fullName" defaultValue={b.guestName} required /></Field><Field label="Phone"><input name="phone" defaultValue={b.guestPhone} required /></Field>{['checked_in', 'checked_out'].includes(b.status) && <Field label="ID / passport number"><input name="idDocumentNo" defaultValue={b.guestIdDocumentNo} required /></Field>}
-    {!checkedOut && <><Field label="Check-in"><input name="checkInDate" type="date" defaultValue={b.checkInDate?.slice(0, 10)} required disabled={b.status === 'checked_in'} /></Field><Field label="Check-out"><input name="checkOutDate" type="date" defaultValue={b.checkOutDate?.slice(0, 10)} required /></Field><Field label="Guests"><input name="guestCount" type="number" min="1" defaultValue={b.rooms?.[0]?.guestCount || 1} required /></Field></>}
+    <p className="full muted">{b.status === 'checked_in' ? 'Extra nights are priced at the rate of each night and need no deposit.' : 'The deposit already paid does not change; the difference is paid at check-out.'}</p>
+    {b.couponCode && <label className="check full"><input type="checkbox" name="dropCoupon" /> If the coupon {b.couponCode} no longer applies to the new stay, the guest agrees to continue without the discount</label>}
+    <Field label="Guest full name"><input name="fullName" defaultValue={b.guestName} required /></Field><Field label="Phone"><input name="phone" defaultValue={b.guestPhone} required /></Field>{b.status === 'checked_in' && <Field label="ID / passport number"><input name="idDocumentNo" defaultValue={b.guestIdDocumentNo} required /></Field>}
+    <><Field label="Check-in"><input name="checkInDate" type="date" defaultValue={b.checkInDate?.slice(0, 10)} required disabled={b.status === 'checked_in'} /></Field><Field label="Check-out"><input name="checkOutDate" type="date" defaultValue={b.checkOutDate?.slice(0, 10)} required /></Field><Field label="Guests"><input name="guestCount" type="number" min="1" defaultValue={b.rooms?.[0]?.guestCount || 1} required /></Field></>
     <div className="full"><Notice error={detail.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
   </form></Screen>;
 }
@@ -549,12 +550,12 @@ function WalkInBooking({ onClose, onCreated }) {
       <Field label="Check-out"><input type="date" min={vnDay(1)} value={stay.checkOutDate} onChange={set('checkOutDate')} required /></Field>
       <Field label="Guests"><input type="number" min="1" max="20" value={stay.guestCount} onChange={set('guestCount')} required /></Field>
       <Field label="Available room type"><select value={stay.roomTypeId} onChange={set('roomTypeId')} required disabled={types.loading}><option value="">{types.data && !types.data.length ? 'No room type is available' : 'Select a room type'}</option>{types.data?.map((t) => <option key={t._id} value={t._id}>{t.name} · {money(t.stayAmount)} · {t.roomsLeft} left</option>)}</select></Field>
-      <Field label="Coupon code (optional)"><input onBlur={(e) => setCoupon(e.target.value.trim().toUpperCase())} autoCapitalize="characters" /></Field>
+      <Field label="Coupon code (optional)"><input onBlur={(e) => setCoupon(e.target.value.toUpperCase())} pattern="[A-Za-z0-9]{2,30}" title="2–30 letters or digits, no spaces." autoCapitalize="characters" /></Field>
       {quote && <p className="full note">{quote.couponError ? `${quote.couponError} The booking continues without the discount. ` : ''}Total {money(quote.totalAmount)}{quote.discountAmount > 0 ? ` (discount ${money(quote.discountAmount)})` : ''}, paid at check-out.</p>}
       <Field label="Guest full name"><input name="fullName" required /></Field>
       <Field label="Phone"><input name="phone" inputMode="tel" required /></Field>
       <Field label="Email (optional)"><input name="email" type="email" /></Field>
-      <Field label="ID / passport number"><input name="idDocumentNo" required /></Field>
+      <Field label="ID / passport number"><input name="idDocumentNo" pattern="[A-Za-z0-9]{6,20}" title="6–20 letters or digits, no spaces." required /></Field>
       <div className="full"><Notice error={types.error || error} /></div>
       <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || types.loading || !stay.roomTypeId}>{saving ? 'Creating…' : 'Create booking and check in'}</button></div>
     </form>

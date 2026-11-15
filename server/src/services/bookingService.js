@@ -216,23 +216,9 @@ class BookingService {
         });
 
         if (!physicalRoom) {
-          const totalRoomsForType = await Room.countDocuments({ roomTypeId: roomType._id });
-          if (totalRoomsForType === 0) {
-            physicalRoom = await Room.create({
-              roomTypeId: roomType._id,
-              roomNumber: `R${Math.floor(100 + Math.random() * 899)}`,
-              floor: 1,
-              status: 'available'
-            });
-          } else {
-            const error = new Error(`No available rooms for room type "${roomType.name}" on the selected dates`);
-            error.status = 409;
-            throw error;
-  
-  
-          }
-
-
+          const error = new Error(`No available rooms for room type "${roomType.name}" on the selected dates`);
+          error.status = 409;
+          throw error;
         }
       } else {
         const error = new Error('Each room item must have either roomId or roomTypeId');
@@ -351,7 +337,6 @@ class BookingService {
     await booking.save();
 
     return Booking.findById(booking._id)
-
       .populate('rooms.roomTypeId', 'name basePrice maxOccupancy bedType amenities images')
       .populate('rooms.roomId', 'roomNumber floor status');
   }
@@ -384,7 +369,6 @@ class BookingService {
     }
 
     return Booking.find(query)
-
       .populate('rooms.roomTypeId', 'name basePrice bedType images')
       .populate('rooms.roomId', 'roomNumber floor')
       .sort({ createdAt: -1 });
@@ -395,7 +379,6 @@ class BookingService {
    */
   async getBookingByReference(reference) {
     const booking = await Booking.findOne({ bookingReference: reference.trim().toUpperCase() })
-
       .populate('rooms.roomTypeId', 'name basePrice bedType amenities images')
       .populate('rooms.roomId', 'roomNumber floor');
 
@@ -437,29 +420,6 @@ class BookingService {
 
     await booking.save();
     return booking;
-  }
-
-  /**
-   * Expire Room Holds Scheduled Job (BR-29: Hold expiry job)
-   * Automatically expires pending bookings past holdExpiresAt
-   */
-  async expireHolds(now = new Date()) {
-    const expiredBookings = await Booking.find({
-      status: 'pending',
-      holdExpiresAt: { $lte: now }
-    });
-
-    for (const b of expiredBookings) {
-      b.status = 'expired';
-      b.events.push({
-        actorId: b.customerId,
-        type: 'cancelled',
-        note: 'Reservation hold expired after 15 minutes without deposit confirmation (BR-29).',
-        createdAt: new Date()
-      });
-      await b.save();
-    }
-    return expiredBookings.length;
   }
 
   /**
@@ -959,7 +919,6 @@ class BookingService {
 
     const [data, total] = await Promise.all([
       Booking.find(query)
-
         .populate('rooms.roomTypeId', 'name basePrice')
         .populate('rooms.roomId', 'roomNumber floor')
         .sort({ createdAt: -1 })

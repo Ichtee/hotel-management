@@ -66,7 +66,7 @@ async function reconcile(payment, transactionRef) {
 // late deposits become refund cases; the Hotel Manager gets a summary.
 // ponytail: the SePay adapter has no "list paid orders" call, so a paid order the database never opened is not found.
 async function reconcileDaily(now = new Date()) {
-  if (process.env.PAYMENT_PROVIDER !== "sepay") return { checked: 0, settled: 0 };
+  if (!require("./sepay").enabled()) return { checked: 0, settled: 0 };
   const open = await Payment.find({ gateway: "sepay", status: { $in: ["pending", "cancelled"] }, createdAt: { $gte: new Date(now - 7 * 864e5) } });
   let settled = 0;
   for (const p of open) {

@@ -60,4 +60,7 @@ async function retrieveOrder(invoice) {
   if (!res.ok) throw new Error(`SePay order lookup failed with ${res.status}.`);
   return (await res.json()).data;
 }
-module.exports = { METHOD, signature, checkout, isIpnKey, retrieveOrder, methods };
+// SePay is on when PAYMENT_PROVIDER=sepay, or when it is unset and the SePay keys are filled in.
+const enabled = () => process.env.PAYMENT_PROVIDER === "sepay"
+  || (!process.env.PAYMENT_PROVIDER && Boolean(process.env.SEPAY_MERCHANT_ID && process.env.SEPAY_SECRET_KEY));
+module.exports = { enabled, METHOD, signature, checkout, isIpnKey, retrieveOrder, methods };

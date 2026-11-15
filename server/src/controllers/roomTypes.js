@@ -7,6 +7,7 @@ const v = require("../utils/validation");
 const fields = require("../utils/managerValidation");
 const { hotelTransaction } = require("../services/hotelOperations");
 const { logChange } = require("../services/audit");
+const { uploadParams } = require("../services/idPhoto");
 const visibleStatuses = ["visible", "approved"];
 
 // Kiểm tra dữ liệu loại phòng theo BR-01, không sửa giá mùa qua UC24.
@@ -192,4 +193,6 @@ async function customerReviews(req, res) {
   res.json({ data: reviews });
 }
 
-module.exports = { listing, detail, create, update, remove, reviews, visibility, submitReview, customerReviews };
+// UC24: signed parameters for one direct upload of a room photo to Cloudinary (the manager picks the file from the computer).
+const imageUploadParams = (req, res) => res.json({ data: uploadParams(req.user._id, "room") });
+module.exports = { imageUploadParams, listing, detail, create, update, remove, reviews, visibility, submitReview, customerReviews };

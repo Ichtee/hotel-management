@@ -44,20 +44,21 @@ function username(value) {
 function password(value, field = "password") {
   if (
     typeof value !== "string" ||
-    value.length < 10 ||
+    value.length < 8 ||
     value.length > 128 ||
-    !/[a-zA-Z]/.test(value) ||
+    !/[a-z]/.test(value) ||
+    !/[A-Z]/.test(value) ||
     !/\d/.test(value)
   )
-    fail("Use 10–128 characters with a letter and a number.", field);
+    fail("Use 8–128 characters with an upper-case letter, a lower-case letter and a number.", field); // CR-12
   return value;
 }
 function phone(value, required = false) {
   if (!required && (value === "" || value === undefined)) return "";
-  const cleaned = typeof value === "string" ? value.trim().replace(/[\s.-]/g, "").replace(/^\+84/, "0") : "";
-  if (!/^\d{10,11}$/.test(cleaned))
-    fail("Phone must contain 10–11 digits.", "phone");
-  return cleaned;
+  // CR-04 / MSG-52: Vietnamese 10-11 digits, or + and 8 to 15 digits with the country code.
+  if (typeof value !== "string" || !/^(\d{10,11}|\+\d{8,15})$/.test(value))
+    fail("Phone number must have 10 to 11 digits, or + and 8 to 15 digits with the country code.", "phone");
+  return value;
 }
 function choice(value, field, choices) {
   if (!choices.includes(value)) fail(`Invalid ${field}.`, field);

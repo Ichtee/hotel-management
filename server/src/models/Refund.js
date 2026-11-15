@@ -25,7 +25,8 @@ const schema = new Schema({
     enteredBy: { type: Schema.Types.ObjectId, ref: 'User' }, enteredAt: Date
   },
   contacts: [{ note: String, by: { type: Schema.Types.ObjectId, ref: 'User' }, at: { type: Date, default: Date.now } }],
-  bankTransactionCode: String,
+  bankTransactionCode: String, // refunds recorded before the bill upload
+  billPhoto: String, // Cloudinary public id of the bank receipt (private)
   note: String
 }, { timestamps: true });
 

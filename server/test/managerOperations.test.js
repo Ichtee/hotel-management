@@ -33,12 +33,12 @@ async function setup() {
   await seedRoles();
   await Promise.all(Object.values(mongoose.models).map((m) => m.init()));
   const passwordHash = await hashPassword("ManagerTest123!");
-  ({ app, store } = createApp({ mongoUri: db.getUri("manager_operations_tests"), sessionSecret: "temporary-manager-tests-secret-over-32-characters" }));
+  ({ app, store } = createApp({ mongoUri: db.getUri("manager_operations_tests"), jwtSecret: "temporary-manager-tests-secret-over-32-characters" }));
   const agents = {};
   for (const key of ["manager", "admin", "customer", "housekeeping"]) {
     const role = await Role.findOne({ key });
     const user = await User.create({ username: key, email: `${key}@example.com`, roleId: role._id,
-      passwordHash, phone: "0912345678", customerProfile: { fullName: key } });
+      passwordHash, phone: "0912345678", customerProfile: { fullName: key }, isVerified: true });
     if (key === "manager") actor = user;
     if (key === "housekeeping") housekeeping = user;
     const agent = request.agent(app);
@@ -247,7 +247,7 @@ test("UC36 detects floor/room overlap including inclusive end dates under concur
   await send(manager, "post", "/api/housekeeping-assignments", { ...base, shift: "morning" }).expect(201);
 });
 
-test("UC36 assigns Pending tasks, moves Assigned on manager changes, preserves In Progress and history", async () => {
+test("UC36 assigns Pending tasks, moves Assigned and In Progress tasks on manager changes (BR-41), keeps history", async () => {
   const type = await makeType();
   const room = await makeRoom(type._id, { floor: 22 });
   const pending = await Task.create({ roomId: room._id });
@@ -257,7 +257,8 @@ test("UC36 assigns Pending tasks, moves Assigned on manager changes, preserves I
   const other = await anotherHousekeeper();
   await send(manager, "patch", `/api/housekeeping-assignments/${plan._id}`, { staffId: other.id }).expect(200);
   assert.equal(String((await Task.findById(pending.id)).assignedTo), other.id);
-  assert.equal(String((await Task.findById(inProgress.id)).assignedTo), housekeeping.id);
+  const moved = await Task.findById(inProgress.id); // back to Pending, then assigned to the new responsible staff member
+  assert.deepEqual([String(moved.assignedTo), moved.status], [other.id, "assigned"]);
   await send(manager, "delete", `/api/housekeeping-assignments/${plan._id}`).expect(200);
   assert.equal((await Assignment.findById(plan._id)).isActive, false);
   assert.equal((await Task.findById(pending.id)).status, "pending");
@@ -394,7 +395,7 @@ test("UC23/UC36 floor moves reject overlapping responsibility and safely transfe
   const started = await Task.create({ roomId: room._id, status: "in_progress", assignedTo: housekeeping._id });
   await send(manager, "patch", `/api/rooms/${room._id}`, { floor: 32 }).expect(200);
   assert.equal(String((await Task.findById(task.id)).assignedTo), other.id);
-  assert.equal(String((await Task.findById(started.id)).assignedTo), housekeeping.id);
+  assert.equal(String((await Task.findById(started.id)).assignedTo), other.id); // BR-41: In Progress moves too
 });
 
 test("UC23 room creation racing with type deletion cannot produce an orphan room", async () => {

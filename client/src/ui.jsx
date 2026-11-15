@@ -1,5 +1,29 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from './api/client.js';
+
+// The hotel name for the logo and the © line: the saved Hotel information (UC27), "GrandStay" until it is loaded.
+let hotelNameReq;
+export const forgetHotelName = () => { hotelNameReq = null; dispatchEvent(new Event('hotel-info-saved')); }; // the logos on screen reload the name
+export function useHotelName() {
+  const [name, setName] = useState('GrandStay');
+  useEffect(() => {
+    const load = () => {
+      hotelNameReq ??= api('/hotel-info').then((x) => x.data?.name).catch(() => { hotelNameReq = null; return null; });
+      hotelNameReq.then((n) => n && setName(n));
+    };
+    load();
+    addEventListener('hotel-info-saved', load);
+    return () => removeEventListener('hotel-info-saved', load);
+  }, []);
+  return name;
+}
+// "Sunrise Hotel" -> Sunrise <Hotel>, "GrandStay" -> Grand<Stay>; the last part is the gold one. A name that cannot be split stays whole.
+export function BrandName() {
+  const n = useHotelName();
+  const m = /^(.+ )(\S+)$/.exec(n) || /^(.+?)([A-Z][a-z]+)$/.exec(n);
+  return m ? <>{m[1]}<span>{m[2]}</span></> : <>{n}</>;
+}
 
 export const Badge = ({ v, pre }) => <span className={`badge b-${v}`}>{pre}{String(v).replace('_', ' ')}</span>;
 
@@ -16,18 +40,117 @@ export const Field = ({ label, error, children }) => (
   <label className={error ? 'has-err' : ''}>{label}{children}{error && <small className="err">{error}</small>}</label>
 );
 
-// Native <dialog>: focus trap, Esc and inert background come for free.
-export function Modal({ title, onClose, children }) {
-  const ref = useRef(null);
-  useEffect(() => { ref.current?.showModal(); }, []);
-  return (
-    <dialog ref={ref} className="modal" onClose={onClose} onClick={(e) => e.target === ref.current && onClose()}>
-      <div className="modal-card">
-        <div className="phead"><h2>{title}</h2><button className="ibtn" aria-label="Close" onClick={onClose}>✕</button></div>
-        {children}
+// A task is its own page with its own URL: #/path?screen=name&id=123. Back, refresh and a copied link all work.
+const hashParts = () => { const [base, qs = ''] = location.hash.split('?'); return [base, new URLSearchParams(qs)]; };
+let navigated = false;
+export function useScreen() {
+  const read = () => { const [, q] = hashParts(); return { name: q.get('screen') || '', id: q.get('id') || '' }; };
+  const [s, setS] = useState(read);
+  useEffect(() => {
+    const on = () => setS(read());
+    addEventListener('hashchange', on);
+    return () => removeEventListener('hashchange', on);
+  }, []);
+  const go = (name, id = '') => {
+    const [base, q] = hashParts();
+    q.set('screen', name);
+    if (id) q.set('id', id); else q.delete('id');
+    navigated = true;
+    location.hash = `${base}?${q}`;
+  };
+  const close = () => {
+    if (navigated) { navigated = false; history.back(); return; }
+    const [base, q] = hashParts();
+    q.delete('screen'); q.delete('id');
+    location.hash = q.toString() ? `${base}?${q}` : base;
+  };
+  return { ...s, go, close };
+}
+// New / edit pages of a list: #/path?screen=new, or ?screen=edit&id=... (items are the loaded list).
+export function useEditPage(items) {
+  const sc = useScreen();
+  const open = sc.name === 'new' ? {} : sc.name === 'edit' ? (items || []).find((x) => x._id === sc.id) : undefined;
+  return { open, missing: sc.name === 'edit' && !open, add: () => sc.go('new'), edit: (x) => sc.go('edit', x._id), close: sc.close };
+}
+export function Dialog({ title, onClose, children }) {
+  const heading = useRef(null);
+  useEffect(() => {
+    const before = document.activeElement;
+    heading.current?.focus();
+    document.body.classList.add('dlg-open');
+    const esc = (e) => { if (e.key === 'Escape') onClose(); };
+    addEventListener('keydown', esc);
+    return () => { removeEventListener('keydown', esc); document.body.classList.remove('dlg-open'); before?.focus?.(); };
+  }, []);
+  return createPortal(
+    <div className="dlg-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title">
+        <div className="dlg-head"><h2 id="dlg-title" tabIndex={-1} ref={heading}>{title}</h2><button type="button" className="btn sm" aria-label="Close" onClick={onClose}>✕</button></div>
+        <div className="dlg-body">{children}</div>
       </div>
-    </dialog>
+    </div>, document.body);
+}
+export const WaitScreen = ({ loading, onClose }) => (
+  <Screen title={loading ? 'Loading…' : 'Not found'} onClose={onClose}><p className="muted">{loading ? 'Loading…' : 'This item was not found.'}</p></Screen>
+);
+export function Screen({ title, onClose, children }) {
+  const heading = useRef(null);
+  useEffect(() => {
+    heading.current?.focus();
+    const esc = (e) => { if (e.key === 'Escape') onClose(); };
+    addEventListener('keydown', esc);
+    return () => removeEventListener('keydown', esc);
+  }, []);
+  return (
+    <section className="screen">
+      <div className="screen-head">
+        <button type="button" className="btn back" onClick={onClose}><span aria-hidden="true">←</span> Back</button>
+        <h1 tabIndex={-1} ref={heading}>{title}</h1>
+      </div>
+      <div className="screen-body">{children}</div>
+    </section>
   );
+}
+
+// A task opens as its own screen in the page area (no overlay): the page behind is hidden, the header shows "Back",
+// and the browser Back button returns to the list. One history entry is pushed per screen and removed when it closes.
+let screens = 0;
+export function Modal({ title, onClose, children }) {
+  const [id] = useState(() => ++screens);
+  const close = useRef(onClose); close.current = onClose;
+  const host = typeof document !== 'undefined' ? document.getElementById('main') : null;
+  const heading = useRef(null);
+  const alive = useRef(false); const pushed = useRef(false);
+  useEffect(() => {
+    alive.current = true;
+    const scrollY = window.scrollY;
+    host?.classList.add('has-screen'); window.scrollTo(0, 0); heading.current?.focus();
+    if (!pushed.current) { history.pushState({ screen: id }, ''); pushed.current = true; }
+    const back = () => close.current();
+    const esc = (e) => { if (e.key === 'Escape') close.current(); };
+    window.addEventListener('popstate', back); window.addEventListener('keydown', esc);
+    return () => {
+      alive.current = false;
+      window.removeEventListener('popstate', back); window.removeEventListener('keydown', esc);
+      // Deferred: React strict mode unmounts and remounts once in development; only a real close drops our history entry.
+      setTimeout(() => {
+        if (alive.current) return;
+        if (!host?.querySelector('.screen')) host?.classList.remove('has-screen');
+        if (history.state?.screen === id) history.back(); // closed by a button, not by Back
+        window.scrollTo(0, scrollY);
+      }, 0);
+    };
+  }, []);
+  const screen = (
+    <section className="screen" aria-labelledby={`screen-${id}`}>
+      <div className="screen-head">
+        <button type="button" className="btn back" onClick={onClose}><span aria-hidden="true">←</span> Back</button>
+        <h1 id={`screen-${id}`} tabIndex={-1} ref={heading}>{title}</h1>
+      </div>
+      <div className="screen-body">{children}</div>
+    </section>
+  );
+  return host ? createPortal(screen, host) : screen;
 }
 
 // Fetches a list endpoint and reloads when the path or params change.
@@ -44,15 +167,17 @@ export function useApi(path, enabled = true) {
 }
 
 export function DataTable({ cols, rows }) {
-  const words = /^(confirmed|cancellation_requested|checked_in|checked_out|cancelled|pending|active|inactive|paid|done|in_progress|open|resolved|high|medium|low|published|suspended|deleted)$/;
+  const words = /^(confirmed|cancellation_requested|checked_in|checked_out|cancelled|pending|assigned|active|inactive|paid|completed|skipped|done|in_progress|open|resolved|high|medium|low|normal|urgent|published|suspended|deleted|approved|rejected|refunded|expired|no_show|unpaid|deposit_paid|fully_paid)$/;
   const figures = /^[\d\s.,:/₫$%+\-–→]+$/; // dates, times and amounts must not wrap
+  // "30 Jan 2027" and codes such as BK-MW7Q-10E2 must not break over two lines either
+  const tight = (c) => figures.test(c) || /^\d{1,2} [A-Za-z]{3,4} \d{4}$/.test(c) || /^[A-Z0-9]+(-[A-Z0-9]+)*$/.test(c);
   return (
     <div className="table-wrap">
-      <table>
+      <table className="cards">
         <thead><tr>{cols.map((c) => <th key={c}>{c}</th>)}</tr></thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={i}>{r.map((c, j) => <td key={j} className={typeof c === 'string' && figures.test(c) ? 'nw' : undefined}>{typeof c === 'string' && words.test(c) ? <Badge v={c} /> : c}</td>)}</tr>
+            <tr key={i}>{r.map((c, j) => <td key={j} data-label={cols[j]} className={typeof c === 'string' && tight(c) ? 'nw' : undefined}>{typeof c === 'string' && words.test(c) ? <Badge v={c} /> : c}</td>)}</tr>
           ))}
         </tbody>
       </table>
@@ -77,7 +202,7 @@ export function LineChart({ labels, cur, prev, format, summary }) {
     setHover(Math.min(cur.length - 1, Math.max(0, Math.round(((px - L) / (W - L - R)) * n))));
   };
   const step = Math.ceil(labels.length / 5);
-  const short = (v) => (v >= 1e6 ? `${v / 1e6}M` : v >= 1e3 ? `${v / 1e3}k` : v);
+  const short = (v) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(v);
   return (
     <div className="chart">
       <div className="legend-row"><span><i className="sw cur" />This period</span>{prev && <span><i className="sw prev" />Previous period</span>}</div>

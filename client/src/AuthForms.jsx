@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from './api/client.js';
 import { useAuth } from './context/Auth.jsx';
-import { Field, Notice } from './ui.jsx';
+import { BrandName, Field, Notice, useHotelName } from './ui.jsx';
 
 const Icon = ({ d }) => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>
@@ -12,22 +12,23 @@ const CHECK = 'M20 6L9 17l-5-5';
 
 // Split layout: brand panel + form card. `staff` swaps the copy for the admin portal.
 export function AuthShell({ staff, children }) {
+  const hotelName = useHotelName();
   const points = staff
     ? ['Manage accounts, roles and promotions', 'Live revenue and occupancy reports', 'Role-based access for every team member']
-    : ['Best-price guarantee on every room', 'Free cancellation up to 48 hours before', 'Manage all your bookings in one place'];
+    : ['Best-price guarantee on every room', 'Cancel or change a booking online', 'Manage all your bookings in one place'];
   return (
     <div className={`split ${staff ? 'staff' : ''}`}>
       <aside className="split-side">
-        <a className="brand" href={staff ? '#/admin' : '#/'}>Grand<span>Stay</span></a>
+        <a className="brand" href={staff ? '#/admin' : '#/'}><BrandName /></a>
         <div>
           <h2>{staff ? 'Run the hotel with confidence' : 'Your next stay, sorted'}</h2>
           <ul>{points.map((p) => <li key={p}><span className="tick"><Icon d={CHECK} /></span>{p}</li>)}</ul>
         </div>
-        <small>© 2026 GrandStay</small>
+        <small>© 2026 {hotelName}</small>
       </aside>
       <section className="split-main">
         <div className="split-card">
-          {staff && <a className="brand dark mobile-brand" href="#/admin">Grand<span>Stay</span></a>}
+          {staff && <a className="brand dark mobile-brand" href="#/admin"><BrandName /></a>}
           {children}
         </div>
       </section>
@@ -66,16 +67,39 @@ function PasswordField({ label, name, error, autoComplete, onChange, minLength, 
   );
 }
 
+// Google reCAPTCHA v2 checkbox; the site key comes from the server (Google's test key when none is configured).
+export function Captcha({ onToken, resetKey }) {
+  const box = useRef(null); const widget = useRef(null);
+  useEffect(() => {
+    let alive = true;
+    const draw = (siteKey) => { if (alive && box.current && widget.current == null) widget.current = window.grecaptcha.render(box.current, { sitekey: siteKey, callback: onToken, 'expired-callback': () => onToken('') }); };
+    api('/auth/captcha-config').then(({ data: { siteKey } }) => {
+      if (window.grecaptcha?.render) return draw(siteKey);
+      window.__onCaptchaLoad = () => draw(siteKey);
+      if (!document.getElementById('recaptcha-js')) document.head.append(Object.assign(document.createElement('script'), { id: 'recaptcha-js', src: 'https://www.google.com/recaptcha/api.js?onload=__onCaptchaLoad&render=explicit', async: true }));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => { if (resetKey && widget.current != null) { window.grecaptcha.reset(widget.current); onToken(''); } }, [resetKey]);
+  return <div ref={box} style={{ minHeight: 78 }} />;
+}
+
 export function SignIn({ onDone, hint, onForgot }) {
   const { signIn } = useAuth();
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [token, setToken] = useState(''); const [tries, setTries] = useState(0);
+  const [unverified, setUnverified] = useState(null); const [resent, setResent] = useState(null);
   const submit = async (e) => {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
-    setBusy(true);
-    try { await signIn({ email: f.email, password: f.password }); setErr(null); onDone(); }
-    catch (x) { setErr(x); setBusy(false); }
+    setBusy(true); setResent(null);
+    try { await signIn({ email: f.email, password: f.password, captchaToken: token || undefined }); setErr(null); onDone(); }
+    catch (x) { setErr(x); setUnverified(x.code === 'EMAIL_NOT_VERIFIED' ? f.email : null); setBusy(false); setTries((t) => t + 1); } // a token is single-use
+  };
+  const resend = async () => {
+    try { setResent({ ok: (await api('/auth/resend-verification', { method: 'POST', body: { email: unverified } })).data.message }); }
+    catch (x) { setResent({ error: x }); }
   };
   return (
     <form className="form one" onSubmit={submit}>
@@ -93,17 +117,21 @@ export function SignIn({ onDone, hint, onForgot }) {
           </button>
         </div>
       )}
+      <Captcha onToken={setToken} resetKey={tries} />
       <Notice error={err} />
+      {unverified && <p><button type="button" className="btn sm" onClick={resend}>Resend verification email</button></p>}
+      {resent && <Notice error={resent.error} ok={resent.ok} />}
       <button className="btn primary wide" type="submit" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
       {hint}
     </form>
   );
 }
 
-export function ForgotPassword({ onDone, onCancel }) {
-  const [step, setStep] = useState('request');
-  const [email, setEmail] = useState('');
-  const [token, setToken] = useState('');
+// With `link` ({ email, token } from the e-mailed link) the form asks only for the new password.
+export function ForgotPassword({ onDone, onCancel, link }) {
+  const step = link ? 'reset' : 'request';
+  const [email, setEmail] = useState(link?.email || '');
+  const token = link?.token || '';
   const [pw, setPw] = useState('');
   const [err, setErr] = useState(null);
   const [ok, setOk] = useState(null);
@@ -121,13 +149,7 @@ export function ForgotPassword({ onDone, onCancel }) {
     try {
       const res = await api('/auth/forgot-password', { method: 'POST', body: { email: em } });
       setEmail(em);
-      if (res.data?.resetToken) {
-        setToken(res.data.resetToken);
-        setOk(`Reset code generated! For testing: your code is ${res.data.resetToken}`);
-      } else {
-        setOk(res.data?.message || 'If an account exists, a reset code was sent.');
-      }
-      setStep('reset');
+      setOk(res.data?.message || 'If an account exists, a reset link was sent. It is valid for 30 minutes.');
     } catch (x) {
       setErr(x);
     } finally {
@@ -140,11 +162,10 @@ export function ForgotPassword({ onDone, onCancel }) {
     setErr(null);
     const f = Object.fromEntries(new FormData(e.target));
 
-    if (!f.token || !f.token.trim()) {
-      setErr({ message: 'Reset code is required.', fields: { token: 'Reset code is required.' } });
+    if (!RULES.every(([, ok]) => ok(f.newPassword || ''))) { // CR-12
+      setErr({ message: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.', fields: { newPassword: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.' } });
       return;
     }
-
     if (f.newPassword !== f.confirmPassword) {
       setErr({ message: 'Passwords do not match.', fields: { confirmPassword: 'Passwords do not match.' } });
       return;
@@ -156,7 +177,7 @@ export function ForgotPassword({ onDone, onCancel }) {
         method: 'POST',
         body: {
           email,
-          token: f.token.trim(),
+          token,
           newPassword: f.newPassword,
           confirmPassword: f.confirmPassword,
         }
@@ -186,7 +207,7 @@ export function ForgotPassword({ onDone, onCancel }) {
           </Field>
           <Notice error={err} ok={ok} />
           <button className="btn primary wide" type="submit" disabled={busy}>
-            {busy ? 'Sending code…' : 'Send reset code'}
+            {busy ? 'Sending link…' : 'Send reset link'}
           </button>
           <button type="button" className="btn wide" onClick={onCancel} style={{ marginTop: '0.25rem' }}>
             Back to Sign in
@@ -197,20 +218,11 @@ export function ForgotPassword({ onDone, onCancel }) {
           <p className="muted" style={{ fontSize: '0.9rem', margin: 0 }}>
             Resetting password for: <strong>{email}</strong>
           </p>
-          <Field label="Reset code" error={fe('token')}>
-            <input
-              name="token"
-              defaultValue={token}
-              placeholder="e.g. 4A2F8B1C"
-              required
-              autoFocus
-            />
-          </Field>
           <PasswordField
             label="New password"
             name="newPassword"
             autoComplete="new-password"
-            minLength={10}
+            minLength={8}
             maxLength={128}
             error={fe('newPassword')}
             onChange={(e) => setPw(e.target.value)}
@@ -228,7 +240,7 @@ export function ForgotPassword({ onDone, onCancel }) {
             label="Confirm new password"
             name="confirmPassword"
             autoComplete="new-password"
-            minLength={10}
+            minLength={8}
             maxLength={128}
             error={fe('confirmPassword')}
           />
@@ -245,23 +257,17 @@ export function ForgotPassword({ onDone, onCancel }) {
   );
 }
 
-const RULES = [['10+ characters', (p) => p.length >= 10], ['A letter', (p) => /[A-Za-z]/.test(p)], ['A number', (p) => /\d/.test(p)]];
+const RULES = [['8+ characters', (p) => p.length >= 8], ['An upper-case letter', (p) => /[A-Z]/.test(p)], ['A lower-case letter', (p) => /[a-z]/.test(p)], ['A number', (p) => /\d/.test(p)]];
 
 export function Register({ onDone, hint }) {
-  const [step, setStep] = useState('form'); // 'form' | 'verify'
-  const [email, setEmail] = useState('');
-  const [otpInput, setOtpInput] = useState('');
   const [err, setErr] = useState(null);
-  const [ok, setOk] = useState(null);
   const [pw, setPw] = useState('');
   const [busy, setBusy] = useState(false);
-  const { verifyEmail } = useAuth();
   const fe = (k) => err?.fields?.[k];
 
   const handleRegisterSubmit = async (e) => {
     e.preventDefault();
     setErr(null);
-    setOk(null);
     const f = Object.fromEntries(new FormData(e.target));
 
     const fullName = (f.fullName || '').trim();
@@ -298,12 +304,17 @@ export function Register({ onDone, hint }) {
       return;
     }
 
-    const phone = (f.phone || '').trim().replace(/[\s.-]/g, '').replace(/^\+84/, '0');
-    if (!/^\d{10,11}$/.test(phone)) {
+    const phone = (f.phone || '').trim().replace(/[\s.-]/g, '');
+    if (!/^(\d{10,11}|\+\d{8,15})$/.test(phone)) { // CR-04
       setErr({
-        message: 'Phone must contain 10–11 digits.',
-        fields: { phone: 'Phone must contain 10–11 digits.' }
+        message: 'Phone number must have 10 to 11 digits, or + and 8 to 15 digits with the country code.',
+        fields: { phone: 'Phone number must have 10 to 11 digits, or + and 8 to 15 digits with the country code.' }
       });
+      return;
+    }
+
+    if (!RULES.every(([, ok]) => ok(f.password || ''))) { // CR-12
+      setErr({ message: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.', fields: { password: 'Use 8–128 characters with an upper-case letter, a lower-case letter and a number.' } });
       return;
     }
 
@@ -315,116 +326,26 @@ export function Register({ onDone, hint }) {
       return;
     }
 
-    if (!f.password || f.password.length < 10 || !/[A-Za-z]/.test(f.password) || !/\d/.test(f.password)) {
-      setErr({
-        message: 'Password must be 10+ characters with at least a letter and a number.',
-        fields: { password: 'Must be 10+ characters with a letter and a number.' }
+    setBusy(true);
+    try {
+      await api('/auth/register', {
+        method: 'POST',
+        body: {
+          ...f,
+          fullName,
+          username,
+          email: targetEmail,
+          phone,
+          consent: f.consent === 'on', // CR-21
+        }
       });
-      return;
-    }
-
-    const payload = {
-      fullName,
-      username,
-      email: targetEmail,
-      phone,
-      password: f.password,
-      confirmPassword: f.confirmPassword
-    };
-
-    setBusy(true);
-    try {
-      const res = await api('/auth/register', { method: 'POST', body: payload });
-      setEmail(targetEmail);
-      setOk(res.data?.message || 'Verification code sent to your email.');
-      setStep('verify');
+      onDone(targetEmail); // the account must verify its email before it can sign in
     } catch (x) {
       setErr(x);
     } finally {
       setBusy(false);
     }
   };
-
-  const handleVerifySubmit = async (e) => {
-    e.preventDefault();
-    setErr(null);
-    setOk(null);
-    const code = (otpInput || '').trim();
-    if (!code) {
-      setErr({ message: 'Please enter the 6-digit verification code.', fields: { otp: 'Code required.' } });
-      return;
-    }
-    setBusy(true);
-    try {
-      await verifyEmail({ email, otp: code });
-      onDone();
-    } catch (x) {
-      setErr(x);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleResend = async () => {
-    setErr(null);
-    setOk(null);
-    setBusy(true);
-    try {
-      const res = await api('/auth/resend-verification', { method: 'POST', body: { email } });
-      setOk(res.data?.message || 'A new verification code has been sent to your email.');
-    } catch (x) {
-      setErr(x);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (step === 'verify') {
-    return (
-      <form className="form one" onSubmit={handleVerifySubmit}>
-        <div style={{ textAlign: 'center', marginBottom: '0.75rem' }}>
-          <p style={{ margin: '0 0 0.5rem', fontWeight: 600, color: 'var(--blue)' }}>
-            📬 Check your inbox
-          </p>
-          <p className="muted" style={{ margin: 0, fontSize: '0.9rem' }}>
-            We have sent a 6-digit verification code to <strong>{email}</strong>.<br />
-            Please check your inbox (and Spam folder) to enter the code below.
-          </p>
-        </div>
-
-        <Field label="Enter 6-digit verification code" error={fe('otp')}>
-          <input
-            name="otp"
-            type="text"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={6}
-            placeholder="123456"
-            value={otpInput}
-            onChange={(e) => setOtpInput(e.target.value)}
-            style={{ letterSpacing: '6px', fontSize: '1.35rem', textAlign: 'center', fontWeight: 'bold' }}
-            autoFocus
-            required
-          />
-        </Field>
-
-        <Notice error={err} ok={ok} />
-
-        <button className="btn primary wide full" type="submit" disabled={busy}>
-          {busy ? 'Verifying…' : 'Verify & Complete registration'}
-        </button>
-
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.75rem', fontSize: '0.85rem' }}>
-          <button type="button" className="linklike" onClick={handleResend} disabled={busy} style={{ color: 'var(--blue)', textDecoration: 'underline', cursor: 'pointer' }}>
-            Resend code
-          </button>
-          <button type="button" className="linklike" onClick={() => { setStep('form'); setErr(null); setOk(null); }} style={{ color: '#64748b', cursor: 'pointer' }}>
-            ← Back to form
-          </button>
-        </div>
-      </form>
-    );
-  }
 
   return (
     <form className="form" onSubmit={handleRegisterSubmit}>
@@ -464,10 +385,10 @@ export function Register({ onDone, hint }) {
           type="tel"
           autoComplete="tel"
           placeholder="0912345678"
-          pattern="[0-9]{10,11}"
-          minLength={10}
-          maxLength={11}
-          title="Phone must contain 10–11 digits."
+          pattern="([0-9]{10,11}|\+[0-9]{8,15})"
+          minLength={9}
+          maxLength={16}
+          title="10–11 digits, or + and 8–15 digits with the country code."
           required
         />
       </Field>
@@ -476,7 +397,7 @@ export function Register({ onDone, hint }) {
           label="Password"
           name="password"
           autoComplete="new-password"
-          minLength={10}
+          minLength={8}
           maxLength={128}
           error={fe('password')}
           onChange={(e) => setPw(e.target.value)}
@@ -491,12 +412,14 @@ export function Register({ onDone, hint }) {
           label="Confirm password"
           name="confirmPassword"
           autoComplete="new-password"
-          minLength={10}
+          minLength={8}
           maxLength={128}
           error={fe('confirmPassword')}
         />
       </div>
-      <div className="full"><Notice error={err} /></div>
+      <label className="check full"><input type="checkbox" name="consent" required /><span className="consent-text">I agree to the processing of my personal data (<a href="#/offers" target="_blank" rel="noreferrer">privacy notice</a>) *</span></label>
+      {fe('consent') && <p className="full note bad-note" role="alert">{fe('consent')}</p>}
+      <div className="full"><Notice error={err && !err.fields ? err : null} /></div>
       <button className="btn primary wide full" type="submit" disabled={busy}>
         {busy ? 'Creating account…' : 'Create account'}
       </button>

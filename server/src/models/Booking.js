@@ -15,7 +15,11 @@ const bookingServiceSchema = new Schema({
   unitPrice: { type: Number, required: true, min: 0 },
   amount: { type: Number, required: true, min: 0 },
   recordedBy: { type: Schema.Types.ObjectId, ref: 'User' },
-  recordedAt: { type: Date, default: Date.now }
+  recordedAt: { type: Date, default: Date.now },
+  status: { type: String, enum: ['active', 'voided'], default: 'active' },
+  voidReason: String,
+  voidedBy: { type: Schema.Types.ObjectId, ref: 'User' },
+  voidedAt: Date
 });
 
 const bookingEventSchema = new Schema({
@@ -43,6 +47,8 @@ const schema = new Schema({
   checkedOutBy: { type: Schema.Types.ObjectId, ref: 'User' },
   holdExpiresAt: Date, // BR-29: pending online bookings hold the room for 15 minutes
   cancelledAt: Date,
+  noShowAt: Date,
+  reminderSentAt: Date, // arrival reminder sent (one day before check-in)
   cancellationReason: String,
 
   // BR-32 / BR-36 / BR-37: cancellation request, locked refundable amount and approval
@@ -76,7 +82,7 @@ const schema = new Schema({
 
   status: {
     type: String,
-    enum: ['pending', 'confirmed', 'cancellation_requested', 'checked_in', 'checked_out', 'cancelled', 'expired'],
+    enum: ['pending', 'confirmed', 'cancellation_requested', 'checked_in', 'checked_out', 'cancelled', 'expired', 'no_show'],
     default: 'pending', index: true
   },
   rooms: {
@@ -105,6 +111,13 @@ const schema = new Schema({
   discountAmount: { type: Number, default: 0, min: 0 },
   roomAmount: { type: Number, required: true, min: 0 },
   serviceAmount: { type: Number, default: 0, min: 0 },
+  penaltyAmount: { type: Number, default: 0, min: 0 }, // confirmed UC38 penalties, included in totalAmount
+  feeAmount: { type: Number, default: 0, min: 0 }, // sum of feeLines
+  // BR-44 / BR-47: at most one line of each type; after 18:00 an extra night replaces the late check-out fee.
+  feeLines: [{ _id: false, type: { type: String, enum: ['early_check_in', 'late_check_out', 'extra_night'] }, amount: Number, postedAt: Date }],
+  consentAt: Date, // CR-21: privacy consent of an online booking
+  // SDS b.10 / BR-35 / BR-38: the price and room type of every night, copied when the night is booked.
+  nightlyRates: [{ _id: false, date: Date, roomTypeId: { type: Schema.Types.ObjectId, ref: 'RoomType' }, price: { type: Number, min: 0 } }],
   totalAmount: { type: Number, required: true, min: 0 },
   depositRequired: { type: Number, default: 0, min: 0 },
   currency: { type: String, default: 'VND', uppercase: true, trim: true },

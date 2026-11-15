@@ -6,8 +6,8 @@ function startHousekeepingScheduler() {
   let running = null;
   const tick = () => {
     if (stopped || running) return;
-    running = runHousekeepingTick().catch(() => {
-      console.error("Housekeeping scheduler tick failed.");
+    running = runHousekeepingTick().catch((error) => {
+      console.error("Housekeeping scheduler tick failed:", error?.message || error);
     }).finally(() => { running = null; });
   };
   const timer = setInterval(tick, 30000);

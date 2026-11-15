@@ -4,6 +4,8 @@ const Payment = require("../models/Payment");
 const Refund = require("../models/Refund");
 const Coupon = require("../models/Coupon");
 const CouponUsage = require("../models/CouponUsage");
+const CheckInOutRequest = require("../models/CheckInOutRequest");
+const { dropPhotos } = require("./idPhoto");
 const User = require("../models/User");
 const v = require("../utils/validation");
 const notifications = require("./notifications");
@@ -21,9 +23,9 @@ const NOT_ALLOWED = "This booking can no longer be cancelled."; // MSG-34
 const WRONG_OTP = "The verification code is incorrect or has expired. Please request a new code."; // MSG-83
 const reference = (b) => b.bookingReference || String(b._id).slice(-8).toUpperCase();
 
-// Verified deposits, newest first; what the hotel still holds is amount - refundedAmount.
+// Verified deposits not refunded yet, newest first (BR-17: a deposit is refunded whole, once).
 const deposits = (bookingId) => Payment.find({ bookingId, kind: "deposit", status: "success" }).sort({ paidAt: -1 });
-const held = (p) => p.amount - (p.refundedAmount || 0);
+const held = (p) => p.amount;
 
 // BR-32 / BR-37: the refundable amount if the request were made at `now`.
 async function estimate(booking, { now = new Date(), hotelCaused = false } = {}) {
@@ -40,6 +42,8 @@ async function estimate(booking, { now = new Date(), hotelCaused = false } = {})
 async function restoreCoupon(booking) {
   const usage = await CouponUsage.findOneAndDelete({ bookingId: booking._id });
   if (usage) await Coupon.updateOne({ _id: usage.couponId, usageCount: { $gt: 0 } }, { $inc: { usageCount: -1 } });
+  // A walk-in booking has no customer account, so its coupon use is counted without a usage row (UC14).
+  else if (booking.bookingSource === "front_desk" && booking.couponCode) await Coupon.updateOne({ code: booking.couponCode, usageCount: { $gt: 0 } }, { $inc: { usageCount: -1 } });
 }
 
 // BR-16: a Confirmed booking without a paid deposit (walk-in, total 0) is cancelled at once.
@@ -51,6 +55,8 @@ async function cancelNow(booking, actorId, reason) {
   );
   if (!done) throw new v.HttpError(409, NOT_ALLOWED);
   await restoreCoupon(done);
+  await dropPhotos({ bookingId: done._id, status: { $in: ["pending", "approved"] } });
+  await CheckInOutRequest.updateMany({ bookingId: done._id, status: { $in: ["pending", "approved"] } }, { $set: { status: "cancelled" } });
   await notify("booking_cancelled", done.customerId, { reference: reference(done) }, { bookingId: done._id });
   await audit(actorId, "booking.cancelled", "booking", done._id, { reason, refundableAmount: 0 });
   return done;
@@ -80,16 +86,17 @@ async function request(booking, { actorId, channel, verifyMethod, reason, hotelC
   return { booking: updated, refundableAmount };
 }
 
-// UC08 2b: the customer withdraws the request until it is approved; the booking is Confirmed again.
-async function withdraw(bookingId, customerId) {
+// UC08 2b / UC35 1a: the request is withdrawn until it is approved, by the customer online (customerId) or by the
+// Receptionist at the customer's request (no customerId); the booking is Confirmed again (BR-36).
+async function withdraw(bookingId, actorId, { customerId } = {}) {
   const booking = await Booking.findOneAndUpdate(
-    { _id: bookingId, customerId, status: "cancellation_requested" },
+    { _id: bookingId, ...(customerId ? { customerId } : {}), status: "cancellation_requested" },
     { $set: { status: "confirmed" }, $unset: { cancellation: 1 } },
     { new: true },
   );
   if (!booking) throw new v.HttpError(409, "There is no cancellation request waiting for review.");
-  await audit(customerId, "cancellation.withdrawn", "booking", booking._id);
-  await notifyRole("cancellation_withdrawn", "receptionist", { reference: reference(booking) }, { bookingId: booking._id });
+  await audit(actorId, "cancellation.withdrawn", "booking", booking._id, { by: customerId ? "customer" : "receptionist" });
+  if (customerId) await notifyRole("cancellation_withdrawn", "receptionist", { reference: reference(booking) }, { bookingId: booking._id });
   return booking;
 }
 
@@ -104,6 +111,8 @@ async function approve(bookingId, approverId) {
   const booking = await Booking.findOneAndUpdate({ _id: bookingId, status: "cancellation_requested" }, { $set: decision }, { new: true });
   if (!booking) throw new v.HttpError(409, "This request is no longer waiting for review.");
   await restoreCoupon(booking);
+  await dropPhotos({ bookingId: booking._id, status: { $in: ["pending", "approved"] } });
+  await CheckInOutRequest.updateMany({ bookingId: booking._id, status: { $in: ["pending", "approved"] } }, { $set: { status: "cancelled" } });
   const amount = booking.cancellation.refundableAmount || 0;
   // One refund case per deposit payment, so each payment is refunded at most once (BR-17).
   let left = amount;
@@ -154,6 +163,27 @@ async function cancelPayment(bookingId, customerId) {
   return booking;
 }
 
+// T10 / BR-29 (every minute): a Pending booking whose 15-minute hold ended without a deposit becomes Expired,
+// so its room is bookable again. A deposit already pending at the gateway when the hold ended keeps the room
+// 15 more minutes, the same grace payments.settle gives it.
+const HOLD_GRACE = 15 * 60000;
+async function expireHolds(now = new Date()) {
+  const due = await Booking.find({ status: "pending", holdExpiresAt: { $lte: now } }).select("_id holdExpiresAt");
+  let expired = 0;
+  for (const b of due) {
+    const atGateway = await Payment.exists({ bookingId: b._id, status: "pending", createdAt: { $lt: b.holdExpiresAt } });
+    if (atGateway && now - b.holdExpiresAt < HOLD_GRACE) continue;
+    const done = await Booking.findOneAndUpdate({ _id: b._id, status: "pending" }, { $set: { status: "expired" }, $unset: { holdExpiresAt: 1 } }, { new: true });
+    if (!done) continue; // paid or abandoned meanwhile
+    // A result that still arrives for these orders is settled as a late deposit (refund case).
+    await Payment.updateMany({ bookingId: done._id, status: "pending" }, { status: "cancelled", failureReason: "Room hold expired" });
+    await restoreCoupon(done);
+    await notify("hold_expired", done.customerId, { reference: reference(done) }, { bookingId: done._id });
+    expired++;
+  }
+  return { expired };
+}
+
 // T19 / BR-42: a phone cancellation is verified with a code sent to the e-mail of the booking's customer account.
 const otpHash = (bookingId, code) => createHash("sha256").update(`${bookingId}:${code}`).digest("hex");
 async function sendOtp(booking, actorId) {
@@ -182,4 +212,4 @@ async function verifyOtp(bookingId, code) {
   await Booking.updateOne({ _id: bookingId }, { $unset: { cancellationOtp: 1 } });
 }
 
-module.exports = { estimate, request, withdraw, approve, autoApprove, cancelPayment, sendOtp, verifyOtp, reference, HOTEL_REASON };
+module.exports = { estimate, request, withdraw, approve, autoApprove, cancelPayment, expireHolds, sendOtp, verifyOtp, reference, HOTEL_REASON };

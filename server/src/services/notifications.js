@@ -25,36 +25,66 @@ const events = {
       : `Booking ${d.reference} has been cancelled and is not eligible for a refund.`,
   ],
   cancellation_auto_approved: (d) => ["Cancellation approved automatically", `Booking ${d.reference} was cancelled automatically. Refund due: ${money(d.amount)}.`],
-  refund_completed: (d) => ["Refund sent", `We refunded ${money(d.amount)} for booking ${d.reference}. Bank transaction code: ${d.code}.`],
+  refund_completed: (d) => ["Refund sent", `We refunded ${money(d.amount)} for booking ${d.reference} by bank transfer.`],
+  hold_expired: (d) => ["Room hold expired", `The 15-minute hold of booking ${d.reference} ended without a deposit, so the room was released.`],
+  arrival_reminder: (d) => ["See you tomorrow", `Booking ${d.reference}: check-in is tomorrow, ${d.date}, from ${d.time}.`],
+  penalty_proposed: (d) => ["Damage / loss reported", `Booking ${d.reference}: ${d.item} (${money(d.amount)}) was reported by Housekeeping. Confirm or waive it with the guest.`],
+  supplementary_invoice: (d) => ["Supplementary invoice", `Invoice ${d.number} of ${money(d.amount)} was issued for booking ${d.reference}.`],
   reconciliation: (d) => ["Payment reconciliation", `${d.settled} gateway payment(s) were settled by the daily reconciliation.`],
+  stay_request_submitted: (d) => [
+    `${d.type === "check_in" ? "Check-in" : "Check-out"} request`,
+    `Booking ${d.reference} sent a ${d.type === "check_in" ? "check-in" : "check-out"} request${d.auto ? " (approved automatically)" : " waiting for your decision"}.`,
+  ],
+  stay_request_decided: (d) => [
+    `${d.type === "check_in" ? "Check-in" : "Check-out"} request ${d.approved ? "approved" : "rejected"}`,
+    d.approved
+      ? `Your ${d.type === "check_in" ? "early check-in" : "late check-out"} request for booking ${d.reference} was approved.${d.fee ? ` A fee of ${money(d.fee)} is charged only if it really takes place.` : ""}`
+      : `Your ${d.type === "check_in" ? "check-in" : "check-out"} request for booking ${d.reference} was rejected.${d.note ? ` ${d.note}` : ""}`,
+  ],
 };
+const emailjs = require("./emailjs");
 let transport;
-const getTransport = () => {
-  if (transport) return transport;
-  if (process.env.SMTP_URL) {
-    transport = require("nodemailer").createTransport(process.env.SMTP_URL);
-  } else if (process.env.SMTP_USER && (process.env.SMTP_PASS || process.env.SMTP_PASSWORD)) {
+// EmailJS / SMTP_URL / Gmail SMTP_USER+SMTP_PASS / Resend API fallback
+const resendTransport = () => {
+  const client = require("./resendService").getResendClient();
+  return client && { sendMail: async ({ to, subject, text, html }) => {
+    const { data, error } = await client.emails.send({
+      from: process.env.RESEND_FROM_EMAIL || "GrandStay <onboarding@resend.dev>",
+      to,
+      subject,
+      text,
+      ...(html ? { html } : {}),
+    });
+    if (error) throw new Error(error.message);
+    return { messageId: data?.id || "resend" };
+  } };
+};
+const smtpTransport = () => {
+  if (process.env.SMTP_URL) return require("nodemailer").createTransport(process.env.SMTP_URL);
+  if (process.env.SMTP_USER && (process.env.SMTP_PASS || process.env.SMTP_PASSWORD)) {
     const user = process.env.SMTP_USER.trim();
     const pass = (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || "").replace(/\s+/g, "");
     if (process.env.SMTP_HOST) {
-      transport = require("nodemailer").createTransport({
+      return require("nodemailer").createTransport({
         host: process.env.SMTP_HOST,
         port: Number(process.env.SMTP_PORT) || 587,
         secure: Number(process.env.SMTP_PORT) === 465,
         auth: { user, pass },
       });
-    } else {
-      transport = require("nodemailer").createTransport({
-        host: "smtp.gmail.com",
-        port: 465,
-        secure: true, // SSL
-        auth: { user, pass },
-      });
     }
+    return require("nodemailer").createTransport({
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
+      auth: { user, pass },
+    });
   }
-  return transport;
+  return null;
 };
-
+const getTransport = () =>
+  (transport ??= emailjs.enabled()
+    ? { sendMail: emailjs.sendMail }
+    : smtpTransport() || resendTransport() || null);
 // Tests (or another mail provider) can replace the transport.
 const setTransport = (t) => (transport = t);
 

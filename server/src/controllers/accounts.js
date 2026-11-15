@@ -124,6 +124,7 @@ const create = (isStaff) => async (req, res) => {
   if (role.scope === "hotel") data.phone = v.phone(req.body.phone, true);
   const user = new User({
     roleId: role._id,
+    isVerified: true,
     passwordHash: await hashPassword(req.body.password),
   });
   apply(user, data);

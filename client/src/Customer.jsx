@@ -1,19 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAuth } from './context/Auth.jsx';
-import { AuthShell, AuthTabs, SignIn, Register, ForgotPassword } from './AuthForms.jsx';
-import { Profile } from './AdminPages.jsx';
-import { EXTRAS, OFFERS, REVIEWS, ROOM_TYPES } from './data.js';
+import { AuthShell, AuthTabs, SignIn, Register, ForgotPassword, Captcha } from './AuthForms.jsx';
+import { ChangePassword, Profile } from './AdminPages.jsx';
 import { MyBookings } from './Bookings.jsx';
 import { roomApi } from './api/roomApi.js';
 import { PaymentPage, PaymentResult, SandboxGateway } from './Payments.jsx';
-import { api } from './api/client.js';
+import { api, dateLabel, money } from './api/client.js';
+import './resort.css';
+import NotificationBell, { NotificationsPage } from './Notifications.jsx';
+import { BrandName, Notice } from './ui.jsx';
 
 const NAV = [
   { label: 'Home', href: '#/' },
-  { label: 'Rooms', items: [['#/rooms', 'All rooms', 'Compare every room type'], ['#/rooms?cat=standard', 'Standard rooms', 'Deluxe & Superior'], ['#/rooms?cat=suite', 'Suites', 'Family & Presidential']] },
-  { label: 'Offers', href: '#/offers' },
-  { label: 'My trips', items: [['#/my-bookings', 'My bookings', 'Upcoming & past stays'], ['#/login', 'Sign in / Register', '']] },
-  { label: 'Help', items: [['#/offers', 'Cancellation policy', 'Free cancel up to 48h'], ['#/', 'Contact us', 'hello@grandstay.example']] }
+  { label: 'Rooms', href: '#/rooms' },
+  { label: 'Offers & policies', href: '#/offers' }
 ];
 
 const parse = (route) => {
@@ -21,7 +21,6 @@ const parse = (route) => {
   return [path, Object.fromEntries(new URLSearchParams(q))];
 };
 const route0 = (q) => `${q.in}${q.out}${q.guests}`;
-const money = (n) => `$${Number(n || 0).toFixed(0)}`;
 const nightsBetween = (a, b) => (a && b ? Math.max(0, Math.round((new Date(b) - new Date(a)) / 864e5)) : 0);
 const day = (offset) => new Date(Date.now() + offset * 864e5).toISOString().slice(0, 10);
 const Stars = ({ n }) => <span className="stars" role="img" aria-label={`${n} out of 5`}>{'★'.repeat(Math.round(n))}{'☆'.repeat(5 - Math.round(n))}</span>;
@@ -40,55 +39,60 @@ function SiteHeader({ route }) {
   }, []);
 
   const done = () => { setOpen(null); setMobile(false); };
-
-  const nav = NAV.map((m) => (m.label === 'My trips' ? { ...m, items: m.items.filter(([h]) => (user ? h !== '#/login' : true)).concat(user ? [['#/profile', 'My profile', user.email]] : []) } : m));
+  const name = user?.customerProfile?.fullName || user?.username || '';
 
   return (
     <header className="topbar site" ref={ref}>
       <div className="bar">
-        <a className="brand" href="#/">Grand<span>Stay</span></a>
+        <a className="brand" href="#/"><BrandName /></a>
         <button className="menu-btn" aria-expanded={mobile} aria-controls="nav" onClick={() => setMobile(!mobile)}>{mobile ? 'Close' : 'Menu'}</button>
         <nav id="nav" className={mobile ? 'open' : ''} aria-label="Main">
           <ul>
-            {nav.map((m, i) => m.items ? (
+            {NAV.map((m, i) => m.items ? (
               <li className="dd" key={m.label}>
                 <button aria-expanded={open === i} aria-haspopup="true" onClick={() => setOpen(open === i ? null : i)}>{m.label} <span className="caret" aria-hidden="true">▾</span></button>
                 {open === i && (
                   <ul className="dd-menu">
                     {m.items.map(([h, l, s]) => <li key={l}><a href={h} onClick={done}><strong>{l}</strong>{s && <small>{s}</small>}</a></li>)}
+                    {/* My trips dropdown sign out */ user && m.label === "My trips" && (
+                      <li style={{ borderTop: "1px solid rgba(255,255,255,0.1)", marginTop: 4, paddingTop: 4 }}>
+                        <button type="button" onClick={async () => { done(); await signOut(); location.hash = "#/"; }} style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", padding: ".5rem 1rem", color: "#ff6b6b", cursor: "pointer", fontSize: ".9rem", fontWeight: 600 }}>Sign out</button>
+                      </li>
+                    )}
                   </ul>
                 )}
               </li>
             ) : <li key={m.label}><a className={route.split('?')[0] === m.href ? 'active' : ''} href={m.href} onClick={done}>{m.label}</a></li>)}
           </ul>
           <div className="right">
-            {user ? (
+            {staff ? (
               <>
-                <a
-                  href="#/profile"
-                  className="btn ghost-w"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 7, textDecoration: 'none', padding: '0 .85rem' }}
-                  onClick={done}
-                  title="View Profile"
-                >
-                  <span className="avatar" style={{ width: 24, height: 24, fontSize: '.75rem', background: 'var(--gold)', color: '#1a1205' }}>
-                    {(user.fullName || user.email || 'U')[0].toUpperCase()}
-                  </span>
-                  <span style={{ color: 'var(--gold-ink)', fontWeight: 600 }}>{user.fullName || user.email?.split('@')[0]}</span>
-                </a>
-                {staff && <a className="btn ghost-w" href="#/admin" onClick={done}>Staff portal</a>}
-                <button
-                  className="btn ghost-w"
-                  onClick={async () => { done(); await signOut(); location.hash = '#/'; }}
-                  style={{ border: '1px solid #cbd5e1', color: '#dc2626', background: '#fff', fontWeight: 600, padding: '0.4rem 0.85rem' }}
-                >
-                  Sign out
-                </button>
-                <a className="btn gold" href="#/my-bookings" onClick={done}>My trips</a>
+                <a className="btn gold" href="#/admin" onClick={done}>Staff portal</a>
+                <button className="signin" onClick={async () => { done(); await signOut(); location.hash = '#/'; }}>Sign out</button>
+              </>
+            ) : user ? (
+              <>
+                <a className="btn gold" href="#/rooms" onClick={done}>Book now</a>
+                <NotificationBell bookingHref="#/my-bookings" allHref="#/notifications" />
+                <div className="dd account">
+                  <button className="acct" aria-expanded={open === 'acct'} aria-haspopup="true" onClick={() => setOpen(open === 'acct' ? null : 'acct')}>
+                    <span className="avatar" aria-hidden="true">{(name || 'U')[0].toUpperCase()}</span>
+                    <span className="acct-name">{name}</span>
+                    <span className="caret" aria-hidden="true">▾</span>
+                  </button>
+                  {open === 'acct' && (
+                    <ul className="dd-menu end">
+                      <li className="acct-head"><strong>{name}</strong><small>{user.email}</small></li>
+                      <li><a href="#/my-bookings" onClick={done}><strong>My bookings</strong></a></li>
+                      <li><a href="#/profile" onClick={done}><strong>My profile</strong></a></li>
+                      <li><button className="signout" onClick={async () => { done(); await signOut(); location.hash = '#/'; }}>Sign out</button></li>
+                    </ul>
+                  )}
+                </div>
               </>
             ) : (
               <>
-                <a className="btn ghost-w" href="#/login" onClick={done}>Sign in</a>
+                <a className="signin" href="#/login" onClick={done}>Sign in</a>
                 <a className="btn gold" href="#/rooms" onClick={done}>Book now</a>
               </>
             )}
@@ -124,7 +128,6 @@ function SearchBar({ q = {} }) {
 
   return (
     <form className="c-search" onSubmit={submit}>
-      <label>Destination<input defaultValue="GrandStay Da Nang" readOnly /></label>
       <label>Check-in<input name="in" type="date" min={day(0)} value={inDate} onChange={handleInChange} required /></label>
       <label>Check-out<input name="out" type="date" min={inDate || day(1)} value={outDate} onChange={(e) => setOutDate(e.target.value)} required /></label>
       <label>Guests<select name="guests" value={guests} onChange={(e) => setGuests(e.target.value)}>{[1, 2, 3, 4].map((n) => <option key={n}>{n}</option>)}</select></label>
@@ -133,32 +136,69 @@ function SearchBar({ q = {} }) {
   );
 }
 
+// `q` carries the searched stay ("?in=…&out=…&guests=…"): the card then shows the price of that stay, the rooms left and "Book now" (UC04).
 function RoomCard({ r, q = '' }) {
+  const { user } = useAuth();
+  const canBook = !user || user.scope === 'self'; // staff and Admin accounts do not book online (BR-26)
   return (
     <article className="c-card">
-      <a href={`#/room/${r.id}${q}`}><img src={r.img} alt={`${r.name} room`} loading="lazy" width="900" height="600" /></a>
+      <a className="c-media" href={`#/room/${r.id}${q}`} tabIndex={-1} aria-hidden="true">
+        <Pic src={r.img} alt="" loading="lazy" width="900" height="1125" />
+        <span className="c-price">{r.nights ? <><b>{money(r.stayAmount)}</b> for {r.nights} night{r.nights > 1 ? 's' : ''}</> : <>From <b>{money(r.price)}</b> / night</>}</span>
+      </a>
       <div className="c-body">
-        <div className="between"><h3>{r.name}</h3><Stars n={r.rating} /></div>
-        <p className="muted">{r.bed} · {r.size} m² · up to {r.guests} guests</p>
-        <ul className="tags">{r.amenities.slice(0, 3).map((a) => <li key={a}>{a}</li>)}</ul>
-        <div className="between">
-          <p className="price"><strong>{money(r.price)}</strong> <span className="muted">/ night</span></p>
-          <a className="btn primary" href={`#/room/${r.id}${q}`}>View & book</a>
+        <p className="kicker">{[r.bed, r.size && `${r.size} m²`, `Up to ${r.guests} guests`].filter(Boolean).join(' · ')}</p>
+        <h3><a href={`#/room/${r.id}${q}`}>{r.name}</a></h3>
+        {r.amenities.length > 0 && <ul className="tags">{r.amenities.map((a) => <li key={a}>{a}</li>)}</ul>}
+        {r.nights > 0 && <p className="muted">{r.roomsLeft} room{r.roomsLeft > 1 ? 's' : ''} left for these dates</p>}
+        <div className="promo-actions">
+          {r.nights > 0 && canBook && <a className="btn gold" href={`#/checkout${q}&room=${r.id}`}>Book now</a>}
+          <a className="more-link" href={`#/room/${r.id}${q}`}>View room <span aria-hidden="true">→</span></a>
         </div>
       </div>
     </article>
   );
 }
 
+let hotelReq;
+// The hotel's own name, city and contact details (Hotel & policies screen), fetched once.
+function useHotel() {
+  const [h, setH] = useState(null);
+  useEffect(() => {
+    const load = () => {
+      hotelReq ??= api('/hotel-info').then((x) => x.data).catch(() => { hotelReq = null; return null; });
+      hotelReq.then(setH);
+    };
+    load();
+    // Hotel information saved: drop the cached copy so the hero and footer show the new name.
+    const again = () => { hotelReq = null; load(); };
+    addEventListener('hotel-info-saved', again);
+    return () => removeEventListener('hotel-info-saved', again);
+  }, []);
+  return h;
+}
+function usePromos() {
+  const [list, setList] = useState([]);
+  useEffect(() => { api('/public/promotions').then((x) => setList(x.data)).catch(() => {}); }, []);
+  return list;
+}
+const off = (c) => (c.discountType === 'fixed' ? money(c.discountValue) : `${c.discountValue}%`);
+const Pic = ({ src, ...p }) => (src ? <img src={src} {...p} /> : <div className="img-ph" />);
+
 function Home() {
   const perks = [
-    ['Best price guarantee', 'Coupons and seasonal rates applied automatically.', 'M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z M7 7h.01'],
-    ['Free cancellation', 'Cancel up to 48 hours before check-in.', 'M3 12a9 9 0 1 0 3-6.7 M3 4v5h5 M12 8v4l3 2'],
+    ['Best price guarantee', 'Seasonal rates are applied automatically; enter a promo code at checkout.', 'M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z M7 7h.01'],
     ['Verified reviews', 'Only guests who stayed can review.', 'M12 2l3 6.3 6.9.9-5 4.8 1.2 6.9L12 17.5 5.9 20.9 7.1 14 2.1 9.2l6.9-.9z'],
-    ['Secure payment', 'Pay a deposit or in full, invoice included.', 'M5 11h14v10H5z M8 11V7a4 4 0 0 1 8 0v4']
+    ['Secure payment', 'Pay a deposit online, the rest when you check out.', 'M5 11h14v10H5z M8 11V7a4 4 0 0 1 8 0v4']
   ];
 
-  const [featuredRooms, setFeaturedRooms] = useState(ROOM_TYPES.slice(0, 3));
+  const hotel = useHotel();
+  const promos = usePromos();
+  const policy = usePolicies();
+  const fullRefundHours = Math.max(...(policy?.cancellationTiers || []).filter((t) => t.refundPercent === 100).map((t) => t.minHoursBeforeCheckIn), -1);
+  if (fullRefundHours >= 0) perks.splice(1, 0, ['Free cancellation', `Full deposit back when you cancel ${fullRefundHours ? `at least ${fullRefundHours} hours before check-in` : 'in time'}.`, 'M3 12a9 9 0 1 0 3-6.7 M3 4v5h5 M12 8v4l3 2']);
+  const [featuredRooms, setFeaturedRooms] = useState([]);
+  const [reviews, setReviews] = useState([]);
 
   useEffect(() => {
     roomTypeServiceFetch();
@@ -168,19 +208,10 @@ function Home() {
     try {
       const res = await roomApi.getRoomTypes({ isActive: true });
       if (res.data && res.data.length > 0) {
-        const mapped = res.data.slice(0, 3).map((rt, i) => ({
-          id: rt._id,
-          name: rt.name,
-          price: rt.basePrice,
-          guests: rt.maxOccupancy || 2,
-          bed: rt.bedType || 'King bed',
-          size: rt.roomSizeSqm || 32,
-          rating: 5,
-          amenities: rt.amenities?.length ? rt.amenities : ['WiFi', 'Air conditioning', 'Smart TV'],
-          img: rt.images?.[0] || ROOM_TYPES[i % ROOM_TYPES.length].img,
-          desc: rt.description || 'Spacious and well-appointed luxury room.'
-        }));
+        const mapped = res.data.slice(0, 3).map(toCard);
         setFeaturedRooms(mapped);
+        const lists = await Promise.all(res.data.map((t) => api(`/public/room-types/${t._id}/reviews?limit=2`).then((x) => x.data.map((v) => ({ ...v, room: t.name }))).catch(() => [])));
+        setReviews(lists.flat().slice(0, 3));
       }
     } catch {
       // Fallback
@@ -190,241 +221,258 @@ function Home() {
   return (
     <>
       <section className="c-hero">
-        <div className="c-wrap">
-          <p className="eyebrow">GrandStay · Da Nang</p>
-          <h1>Find your perfect stay</h1>
-          <p className="lead">Five-star comfort by the sea. Compare rooms, book in minutes, manage everything online.</p>
-          <SearchBar />
+        <div className="c-wrap hero-copy">
+          {hotel && <p className="eyebrow">{[hotel.name, hotel.city].filter(Boolean).join(' · ')}</p>}
+          <h1>Where the sea<br />meets stillness</h1>
+          <p className="lead">Ocean-view rooms and suites, a quiet pool above the beach, and a team that takes care of the details.</p>
         </div>
+        <div className="c-wrap"><SearchBar /></div>
       </section>
+
+      <section className="c-wrap c-section intro">
+        <div>
+          <p className="eyebrow ink">Welcome</p>
+          <h2 className="display">A five-star retreat{hotel?.city ? ` in ${hotel.city}` : ''}</h2>
+          <p className="lead-ink">Wake up to the sound of the waves, spend the afternoon by the pool and end the day with dinner by the sea. Book online in a few minutes and manage your stay from your account.</p>
+          <a className="more-link" href="#/rooms">Explore rooms &amp; suites <span aria-hidden="true">→</span></a>
+        </div>
+        <div className="intro-img" role="img" aria-label="Pool surrounded by palm trees" />
+      </section>
+
       <section className="c-wrap c-section">
-        <div className="between"><h2>Our rooms</h2><a href="#/rooms">View all →</a></div>
+        <div className="sec-head">
+          <div><p className="eyebrow ink">Stay</p><h2 className="display">Rooms &amp; suites</h2></div>
+          <a className="more-link" href="#/rooms">View all rooms <span aria-hidden="true">→</span></a>
+        </div>
         <div className="c-grid">{featuredRooms.map((r) => <RoomCard key={r.id} r={r} />)}</div>
       </section>
-      <section className="c-wrap c-section">
-        <div className="promo">
-          <div className="promo-text">
-            <span className="promo-tag">Limited-time offer</span>
-            <h2>Book direct &amp; save up to 15%</h2>
-            <p>Reserve a stay of 5 nights or more and enjoy a complimentary breakfast for two, plus free airport pickup.</p>
+
+      {promos[0] && (
+        <section className="band">
+          <div className="c-wrap band-copy">
+            <p className="eyebrow">Book direct</p>
+            <h2 className="display light">Save {off(promos[0])} when you book with us</h2>
+            <p>{off(promos[0])} off{promos[0].minimumSpend ? ` stays from ${money(promos[0].minimumSpend)}` : ' your stay'}, applied when you enter the code at checkout.</p>
             <div className="promo-actions">
               <a className="btn gold" href="#/rooms">Book your stay</a>
-              <span className="promo-code">Use code <b>LONGSTAY15</b></span>
+              <span className="promo-code">Code <b>{promos[0].code}</b></span>
             </div>
           </div>
-          <div className="promo-img" role="img" aria-label="Resort pool at sunset" />
-        </div>
-      </section>
-      <section className="c-wrap trust">
+        </section>
+      )}
+
+      <section className="c-wrap c-section perks">
         {perks.map(([t, d, p]) => (
           <div key={t}>
-            <span className="trust-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={p} /></svg></span>
-            <div><h3>{t}</h3><p>{d}</p></div>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={p} /></svg>
+            <h3>{t}</h3><p>{d}</p>
           </div>
         ))}
       </section>
-      <section className="c-wrap c-section">
-        <h2>Guests love us</h2>
-        <div className="c-grid">{REVIEWS.map(([n, s, t]) => <blockquote className="quote" key={n}><Stars n={s} /><p>“{t}”</p><footer>— {n}</footer></blockquote>)}</div>
-      </section>
+
+      {reviews.length > 0 && <section className="reviews">
+        <div className="c-wrap c-section">
+          <p className="eyebrow ink center">Guest stories</p>
+          <h2 className="display center">What our guests say</h2>
+          <div className="quotes">{reviews.map((v) => <blockquote key={v._id}><Stars n={v.rating} /><p>“{v.comment || v.title}”</p><footer>Verified guest · {v.room}</footer></blockquote>)}</div>
+        </div>
+      </section>}
     </>
   );
 }
 
-function OfferCard({ o }) {
+function usePolicies() {
+  const [p, setP] = useState(null);
+  useEffect(() => { api('/public/policies').then((x) => setP(x.data)).catch(() => {}); }, []);
+  return p;
+}
+const tierText = (t) => `${t.refundPercent}% of the deposit back when you cancel ${t.minHoursBeforeCheckIn ? `at least ${t.minHoursBeforeCheckIn} hours before check-in` : 'later than that'}`;
+function PolicyText({ p }) {
+  if (!p) return <p className="muted">Loading policies…</p>;
   return (
-    <article className="offer">
-      <span className="pct">{o.pct}%</span>
-      <h3>{o.title}</h3><p>{o.text}</p>
-      <code>{o.code}</code>
-    </article>
+    <ul className="policy-list">
+      {p.depositPercent != null && <li>A deposit of <b>{p.depositPercent}%</b> is paid online to confirm the booking; the rest is paid at the front desk at check-out.</li>}
+      {[...p.cancellationTiers].sort((x, y) => y.minHoursBeforeCheckIn - x.minHoursBeforeCheckIn).map((t) => <li key={t.minHoursBeforeCheckIn}>{tierText(t)}.</li>)}
+      <li>Check-in from <b>{p.checkInTime}</b>{p.checkOutTime && <>, check-out by <b>{p.checkOutTime}</b></>}.</li>
+    </ul>
   );
 }
 
-const Offers = () => (
-  <div className="c-wrap c-section">
-    <h1 className="title">Offers & policies</h1>
-    <div className="c-grid">{OFFERS.map((o) => <OfferCard key={o.code} o={o} />)}</div>
-    <h2 className="mt">Cancellation policy</h2>
-    <p className="muted">Free cancellation up to 48 hours before check-in. A 20% deposit is charged at booking and refunded according to the cancellation window.</p>
-  </div>
-);
+function Offers() {
+  const p = usePolicies();
+  const promos = usePromos();
+  return (
+    <div className="c-wrap c-section narrow">
+      <h1 className="title">Booking policies</h1>
+      <div className="panel"><h2>Deposit &amp; cancellation</h2><PolicyText p={p} /></div>
+      {promos.length > 0 && <div className="panel mt"><h2>Promo codes</h2><ul className="policy-list">{promos.map((c) => <li key={c.code}><b>{c.code}</b>: {off(c)} off{c.minimumSpend ? ` stays from ${money(c.minimumSpend)}` : ''}, valid until {new Date(c.endDate).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}. Enter it at checkout.</li>)}</ul></div>}
+    </div>
+  );
+}
 
-// UC06: Check Room Availability & Search
+// Room-type card shape used by the room list, detail and checkout pages. A search result also has the price of the
+// stay, its nights and the rooms left (GET /public/availability).
+const toCard = (rt) => ({
+  id: rt._id, _id: rt._id, name: rt.name, price: rt.basePrice, guests: rt.maxOccupancy,
+  bed: rt.bedType || '', size: rt.roomSizeSqm || null, amenities: rt.amenities || [],
+  img: rt.images?.[0] || '', desc: rt.description || '',
+  stayAmount: rt.stayAmount, nights: rt.nights, roomsLeft: rt.roomsLeft,
+});
+const availability = (d) => api(`/public/availability?${new URLSearchParams({ checkIn: d.in, checkOut: d.out, guests: d.guests || 1 })}`).then((res) => res.data || []);
+
+// The amenity tags are typed by the Hotel Manager (Room types); the filter groups them without caring about case or spaces.
+const tagKey = (t) => t.trim().toLowerCase();
+const NO_FILTER = { text: '', min: '', max: '', size: '', guests: '', beds: [], tags: [], sort: 'price_asc' };
+const SORTS = { price_asc: ['Price: low to high', (a, b, cost) => cost(a) - cost(b)], price_desc: ['Price: high to low', (a, b, cost) => cost(b) - cost(a)], size_desc: ['Largest first', (a, b) => (b.size || 0) - (a.size || 0)], guests_desc: ['Most guests first', (a, b) => b.guests - a.guests], name: ['Name A-Z', (a, b) => a.name.localeCompare(b.name)] };
 function Rooms({ q }) {
-  const [price, setPrice] = useState(400);
-  const [cat, setCat] = useState(q.cat || 'all');
-  const [isSearchingApi, setIsSearchingApi] = useState(false);
-  const [apiRooms, setApiRooms] = useState(null);
+  const [f, setF] = useState(NO_FILTER);
+  const [state, setState] = useState({ rooms: null, error: '' });
 
-  useEffect(() => setCat(q.cat || 'all'), [q.cat]);
-
-  // Query Backend search API if dates are specified (UC06 / T06)
+  // With dates: only room types that still have a free room for the whole stay (UC04). Without dates: every active room type.
   useEffect(() => {
-    if (q.in && q.out) {
-      setIsSearchingApi(true);
-      roomApi.searchRooms({ checkIn: q.in, checkOut: q.out, guests: q.guests })
-        .then(res => {
-          if (res.data && res.data.length > 0) {
-            const mappedTypes = new Map();
-            for (const r of res.data) {
-              const rt = r.roomTypeId;
-              if (rt && !mappedTypes.has(String(rt._id))) {
-                mappedTypes.set(String(rt._id), {
-                  id: rt._id,
-                  name: rt.name,
-                  price: rt.basePrice,
-                  guests: rt.maxOccupancy || 2,
-                  bed: rt.bedType || 'King bed',
-                  size: rt.roomSizeSqm || 32,
-                  rating: 5,
-                  amenities: rt.amenities?.length ? rt.amenities : ['WiFi', 'Air conditioning', 'Smart TV'],
-                  img: rt.images?.[0] || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=80',
-                  cat: rt.name.toLowerCase().includes('suite') ? 'suite' : 'standard'
-                });
-              }
-            }
-            setApiRooms(Array.from(mappedTypes.values()));
-          } else {
-            setApiRooms(ROOM_TYPES);
-          }
-        })
-        .catch(() => {
-          setApiRooms(ROOM_TYPES);
-        })
-        .finally(() => setIsSearchingApi(false));
-    } else {
-      setApiRooms(null);
-    }
+    setState({ rooms: null, error: '' });
+    (q.in && q.out ? availability(q) : api('/public/room-types').then((res) => res.data || []))
+      .then((types) => setState({ rooms: types.map(toCard), error: '' }))
+      .catch((x) => setState({ rooms: [], error: x.status === 400 ? x.message : 'Rooms could not be loaded. Please try again in a moment.' }));
   }, [q.in, q.out, q.guests]);
 
-  const guests = +q.guests || 2;
-  const sourceList = apiRooms !== null ? apiRooms : ROOM_TYPES;
-  const list = sourceList.filter((r) => r.price <= price && r.guests >= guests && (cat === 'all' || r.cat === cat));
-  const carry = q.in ? `?${new URLSearchParams({ in: q.in, out: q.out, guests: q.guests })}` : '';
+  const rooms = state.rooms || [];
+  const searched = Boolean(q.in && q.out);
+  const cost = (r) => (searched ? r.stayAmount : r.price);
+  const set = (patch) => setF({ ...f, ...patch });
+  const toggle = (key, value) => set({ [key]: f[key].includes(value) ? f[key].filter((x) => x !== value) : [...f[key], value] });
+  // Filter options come from the rooms themselves, so a tag the manager adds shows up here without a code change.
+  const tags = [...new Map(rooms.flatMap((r) => r.amenities).map((t) => [tagKey(t), t.trim()])).values()].sort((x, y) => x.localeCompare(y));
+  const beds = [...new Set(rooms.map((r) => r.bed).filter(Boolean))].sort();
+  const sizes = [...new Set(rooms.map((r) => r.size).filter(Boolean))].sort((x, y) => x - y);
+  const capacities = [...new Set(rooms.map((r) => r.guests))].sort((x, y) => x - y);
+  const text = f.text.trim().toLowerCase();
+  const list = rooms
+    .filter((r) => (!q.guests || r.guests >= +q.guests) && (!f.guests || r.guests >= +f.guests)
+      && (!f.min || cost(r) >= +f.min) && (!f.max || cost(r) <= +f.max)
+      && (!f.size || (r.size || 0) >= +f.size) && (!f.beds.length || f.beds.includes(r.bed))
+      && f.tags.every((t) => r.amenities.some((a) => tagKey(a) === tagKey(t)))
+      && (!text || `${r.name} ${r.desc}`.toLowerCase().includes(text)))
+    .sort((x, y) => SORTS[f.sort][1](x, y, cost));
+  const active = ['text', 'min', 'max', 'size', 'guests'].filter((k) => f[k]).length + f.beds.length + f.tags.length;
+  const carry = searched ? `?${new URLSearchParams({ in: q.in, out: q.out, guests: q.guests || 1 })}` : '';
+  const unit = searched ? 'for the stay' : 'per night';
 
   return (
     <div className="c-wrap c-section">
       <div className="between">
-        <h1 className="title">Available rooms</h1>
-        {isSearchingApi && <small className="muted">Checking room availability live...</small>}
+        <h1 className="title">{searched ? 'Available rooms' : 'Rooms & suites'}</h1>
+        {!state.rooms && <small className="muted">Checking room availability live...</small>}
       </div>
       <SearchBar key={route0(q)} q={q} />
+      {!searched && <p className="muted">Choose your dates and search to see prices, rooms left and book.</p>}
       <div className="c-layout">
-        <aside className="panel filters" aria-label="Filters">
-          <h2>Filters</h2>
-          <label>Max price: {money(price)}<input type="range" min="50" max="400" step="10" value={price} onChange={(e) => setPrice(+e.target.value)} /></label>
-          <label>Category<select value={cat} onChange={(e) => setCat(e.target.value)}><option value="all">All</option><option value="standard">Standard</option><option value="suite">Suites</option></select></label>
-        </aside>
+        {/* On a phone the filters start folded so the rooms come first; on a wide screen they start open. */}
+        <details className="panel filters" open={window.matchMedia('(min-width: 1000px)').matches}>
+          <summary><h2>Filters{active > 0 ? ` (${active})` : ''}</h2></summary>
+          <label>Search by name<input type="search" value={f.text} onChange={(e) => set({ text: e.target.value })} placeholder="e.g. Suite" /></label>
+          <fieldset>
+            <legend>{searched ? 'Stay price' : 'Night price'} (VND)</legend>
+            <div className="price-row">
+              <input type="number" min="0" step="100000" aria-label={`Minimum price ${unit}`} placeholder="From" value={f.min} onChange={(e) => set({ min: e.target.value })} />
+              <input type="number" min="0" step="100000" aria-label={`Maximum price ${unit}`} placeholder="To" value={f.max} onChange={(e) => set({ max: e.target.value })} />
+            </div>
+          </fieldset>
+          <label>Guests<select value={f.guests} onChange={(e) => set({ guests: e.target.value })}><option value="">Any</option>{capacities.map((n) => <option key={n} value={n}>{n}+ guests</option>)}</select></label>
+          {sizes.length > 0 && <label>Room size<select value={f.size} onChange={(e) => set({ size: e.target.value })}><option value="">Any</option>{sizes.map((n) => <option key={n} value={n}>{n} m² or more</option>)}</select></label>}
+          {beds.length > 0 && <fieldset><legend>Bed type</legend>{beds.map((b) => <label className="check" key={b}><input type="checkbox" checked={f.beds.includes(b)} onChange={() => toggle('beds', b)} /> {b}</label>)}</fieldset>}
+          {tags.length > 0 && <fieldset><legend>Amenities</legend>{tags.map((t) => <label className="check" key={t}><input type="checkbox" checked={f.tags.some((x) => tagKey(x) === tagKey(t))} onChange={() => toggle('tags', t)} /> {t}</label>)}</fieldset>}
+          {active > 0 && <button type="button" className="btn" onClick={() => setF({ ...NO_FILTER, sort: f.sort })}>Clear all filters</button>}
+        </details>
         <div>
-          <p className="muted">
-            {list.length} room type(s) available for {guests} guest(s)
-            {apiRooms !== null && <span style={{ marginLeft: 8, color: 'var(--green)' }}>● Live verified from server</span>}
-          </p>
+          <div className="between">
+            <p className="muted" role="status">{state.rooms ? `${list.length} of ${rooms.length} room type${rooms.length === 1 ? '' : 's'}` : ''}</p>
+            <label className="sort">Sort by<select value={f.sort} onChange={(e) => set({ sort: e.target.value })}>{Object.entries(SORTS).map(([k, [label]]) => <option key={k} value={k}>{label}</option>)}</select></label>
+          </div>
           <div className="c-grid g2">{list.map((r) => <RoomCard key={r.id} r={r} q={carry} />)}</div>
-          {!list.length && <p>No rooms match your search dates or criteria. Try adjusting dates or filters.</p>}
+          {state.rooms && !list.length && <p className="empty" role={state.error ? 'alert' : undefined}>{state.error || 'No rooms match your dates or filters. Try other dates, fewer guests or fewer filters.'}{active > 0 && !state.error && <> <button type="button" className="more-link" onClick={() => setF({ ...NO_FILTER, sort: f.sort })}>Clear all filters</button></>}</p>}
         </div>
       </div>
     </div>
   );
 }
 
-function RoomDetail({ id, q }) {
-  // Support both MongoDB ObjectId (24 hex chars) and local data.js numeric IDs
-  const isMongoId = /^[0-9a-f]{24}$/i.test(id);
-  const staticRoom = ROOM_TYPES.find((x) => String(x.id) === String(id)) || (isMongoId ? null : ROOM_TYPES[0]);
-
-  const [apiRoom, setApiRoom] = useState(null);
-  const [roomLoading, setRoomLoading] = useState(isMongoId);
-
+// Room types are public (no staff endpoint), so customers always see the real name, photos and price.
+function useRoomType(id) {
+  const [state, setState] = useState({ room: null, loading: true });
   useEffect(() => {
-    if (!isMongoId) return;
-    setRoomLoading(true);
-    roomApi.getRoomTypeById(id)
-      .then((rt) => {
-        // Map MongoDB fields to the same shape used by data.js ROOM_TYPES
-        setApiRoom({
-          id: rt._id || rt.id,
-          _id: rt._id || rt.id,
-          name: rt.name,
-          price: rt.basePrice || rt.price || 80,
-          guests: rt.maxOccupancy || 2,
-          bed: rt.bedType || 'King bed',
-          size: rt.roomSizeSqm || 32,
-          rating: rt.rating || 5,
-          amenities: rt.amenities?.length ? rt.amenities : ['WiFi', 'Air conditioning', 'Smart TV'],
-          img: rt.images?.[0] || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=80',
-          desc: rt.description || 'Spacious and well-appointed luxury room.',
-          seasonalPricing: rt.seasonalPricing || []
-        });
-      })
-      .catch(() => {
-        // On fetch failure fall back to first static room
-        setApiRoom(ROOM_TYPES[0]);
-      })
-      .finally(() => setRoomLoading(false));
-  }, [id, isMongoId]);
+    setState({ room: null, loading: true });
+    api('/public/room-types')
+      .then((res) => { const rt = (res.data || []).find((t) => t._id === id); setState({ room: rt ? toCard(rt) : null, loading: false }); })
+      .catch(() => setState({ room: null, loading: false }));
+  }, [id]);
+  return state;
+}
 
-  const r = apiRoom || staticRoom || ROOM_TYPES[0];
+function RoomDetail({ id, q }) {
+  const { room: r, loading: roomLoading } = useRoomType(id);
+  const { user: viewer } = useAuth();
+  const staffViewer = viewer && viewer.scope !== 'self';
 
-  const [d, setD] = useState({ in: q.in || day(7), out: q.out || day(10), guests: +q.guests || 2, coupon: '' });
-  const [extras, setExtras] = useState([]);
+  const [d, setD] = useState({ in: q.in || day(7), out: q.out || day(10), guests: +q.guests || 2 });
+  const policies = usePolicies();
   const nights = nightsBetween(d.in, d.out);
-  const offer = OFFERS.find((o) => o.code === d.coupon.trim().toUpperCase());
-  const sub = nights * r.price + extras.reduce((s, i) => s + EXTRAS[i][1], 0);
-  const total = sub * (1 - (offer?.pct || 0) / 100);
   const set = (k) => (e) => setD({ ...d, [k]: e.target.value });
+  // UC05: the price of the selected dates and the rooms left; "Book now" only while the room type is available (BR-10).
+  const [stay, setStay] = useState({ loading: true });
+  useEffect(() => {
+    if (!nights) { setStay({}); return undefined; }
+    let live = true;
+    setStay({ loading: true });
+    availability(d).then((types) => live && setStay({ found: types.find((t) => t._id === id) || null })).catch((x) => live && setStay({ error: x.message }));
+    return () => { live = false; };
+  }, [id, d.in, d.out, d.guests]);
+  const [reviews, setReviews] = useState(null);
+  useEffect(() => { api(`/public/room-types/${id}/reviews?limit=5`).then(setReviews).catch(() => setReviews(null)); }, [id]);
 
   const go = (e) => {
     e.preventDefault();
-    // Use MongoDB _id when available so Checkout can send correct roomTypeId to backend
-    const roomKey = r._id || r.id;
-    location.hash = `#/checkout?${new URLSearchParams({ room: roomKey, in: d.in, out: d.out, guests: d.guests, coupon: offer?.code || '', extras: extras.join(',') })}`;
+    location.hash = `#/checkout?${new URLSearchParams({ room: r._id, in: d.in, out: d.out, guests: d.guests })}`;
   };
 
-  if (roomLoading) {
-    return <div className="c-wrap c-section"><p>Loading room details…</p></div>;
-  }
+  if (roomLoading) return <div className="c-wrap c-section"><p className="muted">Loading room details…</p></div>;
+  if (!r) return <div className="c-wrap c-section"><p className="empty">This room is no longer available. <a href="#/rooms">See all rooms</a></p></div>;
+  const summary = reviews?.meta?.summary;
+  const rated = summary?.count > 0;
 
   return (
     <div className="c-wrap c-section">
-      <a href="#/rooms">← Back to rooms</a>
+      <a className="more-link" href="#/rooms"><span aria-hidden="true">←</span> All rooms</a>
       <div className="c-layout detail">
         <div>
-          <img className="hero-img" src={r.img} alt={`${r.name} room`} width="900" height="600" />
-          <div className="between mt"><h1 className="title">{r.name}</h1><Stars n={r.rating} /></div>
-          <p className="muted">{r.bed} · {r.size} m² · up to {r.guests} guests</p>
+          <Pic className="hero-img" src={r.img} alt={`${r.name} room`} width="900" height="600" />
+          <div className="between mt"><h1 className="title">{r.name}</h1>{rated && <span><Stars n={summary.averageRating} /> <small className="muted">{summary.averageRating.toFixed(1)} · {summary.count} review{summary.count > 1 ? 's' : ''}</small></span>}</div>
+          <p className="kicker">{[r.bed, r.size && `${r.size} m²`, `Up to ${r.guests} guests`].filter(Boolean).join(' · ')}</p>
           <p>{r.desc}</p>
           <h2>Amenities</h2>
           <ul className="tags big">{r.amenities.map((a) => <li key={a}>{a}</li>)}</ul>
           <h2 className="mt">Policies</h2>
-          <p className="muted">Check-in from 14:00, check-out by 12:00. Free cancellation up to 48 hours before arrival. 20% deposit at booking.</p>
+          <PolicyText p={policies} />
+          <h2 className="mt">Guest reviews</h2>
+          {rated
+            ? <ul className="policy-list">{reviews.data.map((v) => <li key={v._id}><Stars n={v.rating} /> <small className="muted">{dateLabel(v.createdAt)}</small>{(v.comment || v.title) && <p>{v.comment || v.title}</p>}</li>)}</ul>
+            : <p className="muted">No reviews yet. Only guests who completed a stay can review.</p>}
         </div>
         <form className="panel book" onSubmit={go}>
           <p className="price"><strong>{money(r.price)}</strong> <span className="muted">/ night</span></p>
           <label>Check-in<input type="date" value={d.in} min={day(0)} onChange={set('in')} required /></label>
           <label>Check-out<input type="date" value={d.out} min={d.in} onChange={set('out')} required /></label>
           <label>Guests<select value={d.guests} onChange={set('guests')}>{Array.from({ length: r.guests }, (_, i) => <option key={i}>{i + 1}</option>)}</select></label>
-          <fieldset>
-            <legend>Add-ons</legend>
-            {EXTRAS.map(([n, p], i) => (
-              <label className="check" key={n}>
-                <input type="checkbox" checked={extras.includes(i)} onChange={() => setExtras(extras.includes(i) ? extras.filter((x) => x !== i) : [...extras, i])} />
-                {n} <span>+{money(p)}</span>
-              </label>
-            ))}
-          </fieldset>
-          <label>Coupon code<input value={d.coupon} onChange={set('coupon')} placeholder="WELCOME10" /></label>
-          {d.coupon && <small className={offer ? 'ok' : 'bad'}>{offer ? `${offer.pct}% discount applied` : 'Invalid code'}</small>}
-          <dl className="sum">
-            <div><dt>{money(r.price)} × {nights} night(s)</dt><dd>{money(nights * r.price)}</dd></div>
-            {extras.map((i) => <div key={i}><dt>{EXTRAS[i][0]}</dt><dd>{money(EXTRAS[i][1])}</dd></div>)}
-            {offer && <div><dt>Discount</dt><dd>−{money(sub - total)}</dd></div>}
-            <div className="tot"><dt>Total</dt><dd>{money(total)}</dd></div>
-          </dl>
-          <button className="btn primary" type="submit" disabled={!nights}>
-            {nights ? 'Continue to checkout' : 'Choose valid dates'}
+          {stay.found && <dl className="sum">
+            <div className="tot"><dt>{nights} night{nights > 1 ? 's' : ''}</dt><dd>{money(stay.found.stayAmount)}</dd></div>
+            <div><dt>Rooms left</dt><dd>{stay.found.roomsLeft}</dd></div>
+          </dl>}
+          {stay.found === null && <p className="note bad-note" role="alert">No room of this type is available for these dates. Try other dates.</p>}
+          {stay.error && <p className="note bad-note" role="alert">{stay.error}</p>}
+          <button className="btn primary" type="submit" disabled={!stay.found || staffViewer}>
+            {staffViewer ? 'Staff accounts do not book online' : !nights ? 'Choose valid dates' : stay.loading ? 'Checking availability…' : stay.found ? 'Book now' : 'Not available'}
           </button>
+          <small className="muted">Promo codes are entered at checkout.</small>
         </form>
       </div>
     </div>
@@ -436,122 +484,52 @@ function Checkout({ q, user }) {
   const { user: authUser } = useAuth();
   const currentUser = user || authUser;
 
-  // q.room may be a MongoDB ObjectId (24 hex) passed from RoomDetail, or a numeric data.js id
-  const isMongoId = /^[0-9a-f]{24}$/i.test(q.room);
-  const staticRoom = ROOM_TYPES.find((x) => String(x.id) === String(q.room)) || (isMongoId ? null : ROOM_TYPES[0]);
-  const [apiRoom, setApiRoom] = useState(null);
-  const [checkoutLoading, setCheckoutLoading] = useState(isMongoId && !staticRoom);
-
-  useEffect(() => {
-    if (!isMongoId || staticRoom) return;
-    setCheckoutLoading(true);
-    roomApi.getRoomTypeById(q.room)
-      .then((rt) => {
-        setApiRoom({
-          id: rt._id || rt.id,
-          _id: rt._id || rt.id,
-          name: rt.name,
-          price: rt.basePrice || rt.price || 80,
-          guests: rt.maxOccupancy || 2,
-          bed: rt.bedType || 'King bed',
-          size: rt.roomSizeSqm || 32,
-          rating: rt.rating || 5,
-          amenities: rt.amenities?.length ? rt.amenities : ['WiFi', 'Air conditioning'],
-          img: rt.images?.[0] || 'https://images.unsplash.com/photo-1590490360182-c33d57733427?auto=format&fit=crop&w=900&q=80',
-          desc: rt.description || ''
-        });
-      })
-      .catch(() => setApiRoom(ROOM_TYPES[0]))
-      .finally(() => setCheckoutLoading(false));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q.room]);
-
-  const r = apiRoom || staticRoom || ROOM_TYPES[0];
+  const { room: r, loading: checkoutLoading } = useRoomType(q.room);
+  const policies = usePolicies();
   const nights = nightsBetween(q.in, q.out);
-  const ex = (q.extras ? q.extras.split(',') : []).map((i) => EXTRAS[+i]);
-  const offer = OFFERS.find((o) => o.code === q.coupon);
-  const sub = nights * r.price + ex.reduce((s, [, p]) => s + p, 0);
-  const total = sub * (1 - (offer?.pct || 0) / 100);
-  const [pay, setPay] = useState('deposit');
   const [saving, setSaving] = useState(false);
+  // UC06 steps 2-4: the server prices the stay (every night at its rate, coupon, deposit). A coupon that is not valid is
+  // reported and the booking continues without the discount (4a).
+  const [typed, setTyped] = useState(q.coupon || ''); const [coupon, setCoupon] = useState(q.coupon || '');
+  const [quote, setQuote] = useState({ loading: true });
+  useEffect(() => {
+    let live = true;
+    setQuote({ loading: true });
+    api('/bookings/quote', { method: 'POST', body: { roomTypeId: q.room, checkInDate: q.in, checkOutDate: q.out, ...(coupon ? { couponCode: coupon } : {}) } })
+      .then((res) => live && setQuote({ data: res.data })).catch((x) => live && setQuote({ error: x.message }));
+    return () => { live = false; };
+  }, [q.room, q.in, q.out, coupon]);
+  const price = quote.data;
   const [error, setError] = useState('');
+  const [token, setToken] = useState(''); const [tries, setTries] = useState(0);
+  // UC06 steps 3-5: contact data (pre-filled from the profile), privacy consent (CR-21) and CAPTCHA (BR-29).
   const confirm = async (e) => {
     e.preventDefault();
-
+    const f = Object.fromEntries(new FormData(e.target));
     setSaving(true);
     setError('');
 
-    const form = e.target;
-    const guestName = form.fullName.value;
-    const guestEmail = form.email.value;
-    const guestPhone = form.phone.value;
-    const specialRequests = form.specialRequests?.value || '';
-
-    const bookingPayload = {
-      customerId: currentUser?._id || currentUser?.id,
-      checkInDate: q.in || day(7),
-      checkOutDate: q.out || day(10),
-      guestName,
-      guestEmail,
-      guestPhone,
-      specialRequests,
-      paymentType: pay,
-      couponCode: q.coupon || undefined,
-      rooms: [
-        {
-          roomTypeId: r._id || r.id?.toString() || undefined,
-          guestCount: +q.guests || 2
-        }
-      ]
-    };
-
-
-
-
     try {
-      let targetRoomTypeId = r._id;
-      if (!targetRoomTypeId || !/^[0-9a-f]{24}$/i.test(targetRoomTypeId)) {
-        const types = await api('/room-types');
-        const list = Array.isArray(types) ? types : (types?.data || []);
-        const matched = list.find((item) => item.name === r.name) || list[0];
-        targetRoomTypeId = matched?._id;
-      }
-      bookingPayload.rooms[0].roomTypeId = targetRoomTypeId;
-      const created = await api('/bookings', { method: 'POST', body: bookingPayload });
-      const bookingData = created?.data || created;
-      const bRef = bookingData?.bookingReference || 'confirmed';
-      const bId = bookingData?._id;
-
-      if (pay === 'deposit' && bId) {
-        location.hash = `#/pay/${bId}?kind=deposit`;
-      } else if (pay === 'full' && bId) {
-        location.hash = `#/pay/${bId}?kind=full`;
-      } else {
-        location.hash = `#/confirmation?${new URLSearchParams({ ref: bRef })}`;
-      }
-      return;
-
-
-
-
-
-
-
-    } catch (err) { setError(err.message || 'Unable to create your booking.'); }
+      const created = await api('/bookings', { method: 'POST', body: {
+        roomTypeId: r._id, checkInDate: q.in, checkOutDate: q.out,
+        guestCount: Number(q.guests), couponCode: coupon && !price?.couponError ? coupon : undefined,
+        fullName: f.fullName, email: f.email, phone: f.phone, consent: f.consent === 'on', captchaToken: token || undefined,
+      } });
+      // A pending booking goes straight to the deposit payment (UC10); one with nothing to pay is already confirmed.
+      location.hash = created.data.status === 'pending' ? `#/pay/${created.data._id}?kind=deposit` : `#/confirmation?${new URLSearchParams({ ref: created.data.bookingReference })}`;
+    } catch (err) { setError(err.message || 'Unable to create your booking.'); setTries((t) => t + 1); }
     finally { setSaving(false); }
   };
 
 
-  if (checkoutLoading) {
-    return <div className="c-wrap c-section"><p>Loading room details…</p></div>;
-  }
+  if (checkoutLoading) return <div className="c-wrap c-section"><p className="muted">Loading room details…</p></div>;
+  if (!r) return <div className="c-wrap c-section"><p className="empty">This room is no longer available. <a href="#/rooms">See all rooms</a></p></div>;
 
 
 
   return (
     <div className="c-wrap c-section">
       <h1 className="title">Checkout</h1>
-
       <div className="c-layout detail">
         <form className="panel form" onSubmit={confirm} id="co">
           {currentUser && (
@@ -562,27 +540,35 @@ function Checkout({ q, user }) {
           <h2 className="full">Guest details</h2>
           <label>Full name<input name="fullName" required autoComplete="name" defaultValue={currentUser?.customerProfile?.fullName || currentUser?.fullName || ''} /></label>
           <label>Email<input name="email" type="email" required autoComplete="email" defaultValue={currentUser?.email || ''} /></label>
-          <label>Phone<input name="phone" type="tel" required autoComplete="tel" defaultValue={currentUser?.phone || ''} /></label>
-          <label>Special requests<input name="specialRequests" placeholder="Late arrival, high floor, quiet room…" /></label>
+          <label>Phone<input name="phone" type="tel" required autoComplete="tel" pattern="([0-9]{10,11}|\+[0-9]{8,15})" title="10–11 digits, or + and 8–15 digits with the country code." defaultValue={currentUser?.phone || ''} /></label>
           <fieldset className="full">
             <legend>Payment</legend>
-            {[['deposit', `Pay 20% deposit now (${money(total * 0.2)})`], ['full', `Pay in full (${money(total)})`], ['hotel', 'Pay at the hotel']].map(([v, l]) => (
-              <label className="check" key={v}><input type="radio" name="pay" checked={pay === v} onChange={() => setPay(v)} />{l}</label>
-            ))}
+            <p className="muted">Pay the deposit online now to confirm your booking. The room is held for 15 minutes while you pay. The rest is paid at the front desk when you check out.</p>
           </fieldset>
+          <div className="full"><h2>Cancellation &amp; refund policy</h2><PolicyText p={policies} /></div>
+          <label className="check full"><input type="checkbox" name="consent" required /><span className="consent-text">I agree to the processing of my personal data (<a href="#/offers" target="_blank" rel="noreferrer">privacy notice</a>) *</span></label>
+          <div className="full"><Captcha onToken={setToken} resetKey={tries} /></div>
           {error && <p className="note bad-note full" role="alert">{error}</p>}
-          <button className="btn primary" type="submit" disabled={saving}>{saving ? 'Creating booking…' : 'Confirm booking'}</button>
+          <button className="btn primary" type="submit" disabled={saving || !price?.available}>{saving ? 'Creating booking…' : 'Continue to deposit payment'}</button>
         </form>
         <aside className="panel book">
-          <img className="thumb" src={r.img} alt="" />
+          <Pic className="thumb" src={r.img} alt="" />
           <h2>{r.name}</h2>
-          <p className="muted">{q.in} → {q.out} · {nights} night(s) · {q.guests} guest(s)</p>
-          <dl className="sum">
-            <div><dt>Room</dt><dd>{money(nights * r.price)}</dd></div>
-            {ex.map(([n, p]) => <div key={n}><dt>{n}</dt><dd>{money(p)}</dd></div>)}
-            {offer && <div><dt>{offer.code}</dt><dd>−{money(sub - total)}</dd></div>}
-            <div className="tot"><dt>Total</dt><dd>{money(total)}</dd></div>
-          </dl>
+          <p className="muted">{dateLabel(q.in)} → {dateLabel(q.out)} · {nights} night(s) · {q.guests} guest(s)</p>
+          <div className="promo-actions">
+            <input aria-label="Promo code" placeholder="Promo code" value={typed} onChange={(e) => setTyped(e.target.value)} autoCapitalize="characters" />
+            <button type="button" className="btn" onClick={() => setCoupon(typed.trim().toUpperCase())} disabled={quote.loading}>Apply</button>
+          </div>
+          {price?.couponError && <p className="note bad-note" role="alert">{price.couponError} The booking continues without the discount.</p>}
+          {quote.error && <p className="note bad-note" role="alert">{quote.error}</p>}
+          {price && !price.available && <p className="note bad-note" role="alert">This room type is no longer available for these dates. <a href={`#/rooms?${new URLSearchParams({ in: q.in, out: q.out, guests: q.guests })}`}>See what is available</a></p>}
+          {quote.loading ? <p className="muted">Calculating the price…</p> : price && <dl className="sum">
+            {price.nights.map((n) => <div key={n.date}><dt>Night of {dateLabel(n.date)}</dt><dd>{money(n.price)}</dd></div>)}
+            {price.discountAmount > 0 && <div><dt>Promo code {coupon}</dt><dd>−{money(price.discountAmount)}</dd></div>}
+            <div className="tot"><dt>Total</dt><dd>{money(price.totalAmount)}</dd></div>
+            <div><dt>Deposit to pay now ({price.depositPercent}%)</dt><dd>{money(price.depositRequired)}</dd></div>
+            <div><dt>Pay at check-out</dt><dd>{money(price.totalAmount - price.depositRequired)}</dd></div>
+          </dl>}
         </aside>
       </div>
     </div>
@@ -601,9 +587,20 @@ const Confirmation = ({ q }) => (
 function Auth({ note }) {
   const [mode, setMode] = useState('login');
   const [resetSuccess, setResetSuccess] = useState(null);
-  const { user } = useAuth();
+  const { user, signOut } = useAuth();
   const done = () => { location.hash = sessionStorage.getItem('next') || '#/my-bookings'; sessionStorage.removeItem('next'); };
-  if (user) { if (user.scope === 'self') done(); else location.hash = '#/admin'; return null; }
+  if (user) {
+    return (
+      <AuthShell>
+        <h1>Already signed in</h1>
+        <p className="muted">You are currently signed in as <strong>{user.customerProfile?.fullName || user.fullName || user.email}</strong>.</p>
+        <div style={{ display: "flex", gap: "0.75rem", marginTop: "1.5rem", flexWrap: "wrap" }}>
+          <button className="btn primary" onClick={done}>Go to My bookings</button>
+          <button className="btn" style={{ color: "#d32f2f", borderColor: "#d32f2f", background: "transparent" }} onClick={async () => { await signOut(); location.hash = "#/login"; }}>Sign out</button>
+        </div>
+      </AuthShell>
+    );
+  }
   return (
     <AuthShell>
       <h1>{mode === 'login' ? 'Welcome back' : mode === 'register' ? 'Create your account' : 'Reset password'}</h1>
@@ -614,7 +611,7 @@ function Auth({ note }) {
       {resetSuccess && <p role="status" className="note ok-note">{resetSuccess}</p>}
       {note && <p className="note">{note}</p>}
       {mode === 'login' && <SignIn onDone={done} onForgot={() => { setMode('forgot'); setResetSuccess(null); }} />}
-      {mode === 'register' && <Register onDone={done} />}
+      {mode === 'register' && <Register onDone={(email) => { setMode('login'); setResetSuccess(`Account created. We sent a verification link to ${email}. Open it, then sign in.`); }} />}
       {mode === 'forgot' && (
         <ForgotPassword
           onDone={() => {
@@ -628,30 +625,65 @@ function Auth({ note }) {
   );
 }
 
+// Target of the link in the verification email: #/verify-email?token=…&email=…
+function VerifyEmail({ token, email }) {
+  const [state, setState] = useState({ busy: true });
+  useEffect(() => {
+    api('/auth/verify-email', { method: 'POST', body: { token: token || '', ...(email ? { email } : {}) } })
+      .then((r) => setState({ ok: r.data.message }))
+      .catch((x) => setState({ error: x }));
+  }, [token, email]);
+  return (
+    <AuthShell>
+      <h1>Email verification</h1>
+      {state.busy ? <p className="muted">Verifying your email…</p> : <Notice error={state.error} ok={state.ok} />}
+      {state.error && <p className="muted">If the link expired, try signing in and choose "Resend verification email".</p>}
+      <p><a className="btn primary" href="#/login">Go to sign in</a></p>
+    </AuthShell>
+  );
+}
+
+// Target of the link in the password-reset e-mail: #/reset-password?token=…&email=…
+function ResetPassword({ token, email }) {
+  return (
+    <AuthShell>
+      <h1>Choose a new password</h1>
+      <ForgotPassword link={{ token: token || '', email: email || '' }} onDone={() => { location.hash = '#/login'; }} onCancel={() => { location.hash = '#/login'; }} />
+    </AuthShell>
+  );
+}
+
 function SiteFooter() {
+  const hotel = useHotel();
   return (
     <footer className="site-foot">
       <div className="c-wrap c-grid g4">
-        <div><a className="brand" href="#/">Grand<span>Stay</span></a><p>Simple, transparent hotel booking.</p></div>
-        <div><h4>Explore</h4><a href="#/rooms">Rooms</a><a href="#/offers">Offers</a><a href="#/my-bookings">My bookings</a></div>
-        <div><h4>Support</h4><a href="#/offers">Cancellation policy</a><a href="#/login">Account</a></div>
-        <div><h4>Contact</h4><p>hello@grandstay.example</p><p>+84 000 000 000</p><a href="#/admin">Staff portal</a></div>
+        <div><a className="brand" href="#/"><BrandName /></a>{hotel?.description && <p>{hotel.description}</p>}</div>
+        <div><h4>Explore</h4><a href="#/rooms">Rooms &amp; suites</a><a href="#/offers">Booking policies</a><a href="#/my-bookings">My bookings</a></div>
+        <div><h4>Guests</h4><a href="#/login">Sign in or register</a><a href="#/profile">My profile</a></div>
+        <div><h4>Contact</h4>{hotel?.address && <p>{hotel.address}</p>}{hotel?.email && <p>{hotel.email}</p>}{hotel?.phone && <p>{hotel.phone}</p>}<a href="#/admin">Staff portal</a></div>
       </div>
-      <p className="copy">© 2026 GrandStay · WDP301</p>
+      {hotel?.name && <p className="copy">© {new Date().getFullYear()} {hotel.name}</p>}
     </footer>
   );
 }
 
-const PROTECTED = ['#/checkout', '#/confirmation', '#/my-bookings', '#/profile'];
+const PROTECTED = ['#/checkout', '#/confirmation', '#/my-bookings', '#/profile', '#/profile/password', '#/notifications'];
 
 export default function Customer({ route }) {
   const { user, loading } = useAuth();
   const [path, q] = parse(route);
 
   let page;
+  const customerPage = PROTECTED.includes(path) || path.startsWith('#/pay/');
   if (loading) page = <p className="muted c-wrap c-section">Loading…</p>;
-  else if ((PROTECTED.includes(path) || path.startsWith('#/pay/')) && !user) { sessionStorage.setItem('next', route); page = <Auth note="Please sign in to continue." />; }
-  else if (path === '#/profile') page = <div className="c-wrap c-section"><Profile /></div>;
+  else if (customerPage && user && user.scope !== 'self') {
+    location.replace('#/admin');
+    page = <p className="muted c-wrap c-section">This page is for customers. Opening the staff portal…</p>;
+  } else if (customerPage && !user) { sessionStorage.setItem('next', route); page = <Auth note="Please sign in to continue." />; }
+  else if (path === '#/notifications') page = <div className="c-wrap c-section acct"><NotificationsPage bookingHref="#/my-bookings" /></div>;
+  else if (path === '#/profile') page = <div className="c-wrap c-section acct"><Profile base="#/profile" /></div>;
+  else if (path === '#/profile/password') page = <div className="c-wrap c-section acct"><ChangePassword base="#/profile" /></div>;
   else
   if (path === '#/pay/result') page = <PaymentResult paymentId={q.payment} back={q.r} />;
   else if (path.startsWith('#/pay/sandbox/')) page = <SandboxGateway orderId={path.split('/')[3]} paymentId={q.payment} />;
@@ -663,14 +695,16 @@ export default function Customer({ route }) {
   else if (path === '#/confirmation') page = <Confirmation q={q} />;
   else if (path === '#/my-bookings') page = <MyBookings />;
   else if (path === '#/login') page = <Auth />;
+  else if (path === '#/reset-password') page = <ResetPassword token={q.token} email={q.email} />;
+  else if (path === '#/verify-email') page = <VerifyEmail token={q.token} email={q.email} />;
   else page = <Home />;
 
   return (
-    <>
+    <div className="cx">
       <a className="skip" href="#main">Skip to content</a>
       <SiteHeader route={route} />
       <main id="main">{page}</main>
       <SiteFooter />
-    </>
+    </div>
   );
 }

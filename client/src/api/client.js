@@ -15,7 +15,7 @@ export async function api(path, { body, method = "GET", signal } = {}) {
     .catch(() => ({
       error: {
         message: res.status >= 500
-          ? "Server connection error. Please make sure the backend server is running on port 5000."
+          ? "Server connection error. Please make sure the backend server is running on port 3001."
           : "The server returned an unexpected response.",
       },
     }));
@@ -26,6 +26,7 @@ export async function api(path, { body, method = "GET", signal } = {}) {
       result.error?.message || "Request failed. Please try again.",
     );
     error.fields = result.error?.fields;
+    error.code = result.error?.code;
     error.status = res.status;
     throw error;
   }

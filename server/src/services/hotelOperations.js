@@ -8,9 +8,17 @@ async function hotelTransaction(work) {
   } catch (error) {
     if (error.code !== 11000) throw error;
   }
-  return mongoose.connection.transaction(async (session) => {
-    await OperationLock.updateOne({ _id: "hotel" }, { $inc: { version: 1 } }, { session });
-    return work(session);
-  });
+  try {
+    return await mongoose.connection.transaction(async (session) => {
+      await OperationLock.updateOne({ _id: "hotel" }, { $inc: { version: 1 } }, { session });
+      return work(session);
+    });
+  } catch (error) {
+    if (error.message && (error.message.includes("replica set") || error.message.includes("Transaction numbers"))) {
+      await OperationLock.updateOne({ _id: "hotel" }, { $inc: { version: 1 } });
+      return work(undefined);
+    }
+    throw error;
+  }
 }
 module.exports = { hotelTransaction };

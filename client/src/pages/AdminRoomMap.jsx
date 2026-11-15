@@ -1,22 +1,22 @@
 import { useState, useEffect } from 'react';
-import { ROOMS as INITIAL_ROOMS, ROOM_TYPES as STATIC_ROOM_TYPES } from '../data.js';
 import { roomApi } from '../api/roomApi.js';
+import { Screen, WaitScreen, useScreen } from '../ui.jsx';
 
 const STATUS_CONFIG = {
-  available: { label: 'Available', color: '#2e9e63', desc: 'Ready for guest check-in' },
+  available: { label: 'Available', color: '#1f7a4c', desc: 'Ready for guest check-in' },
   occupied: { label: 'Occupied', color: '#0f2742', desc: 'Guest is currently staying' },
   cleaning: { label: 'Cleaning', color: '#e0a030', desc: 'Housekeeping in progress' },
   maintenance: { label: 'Maintenance', color: '#d32f2f', desc: 'Out of order / repair' }
 };
 
 export default function AdminRoomMap() {
-  const [rooms, setRooms] = useState(INITIAL_ROOMS);
-  const [roomTypes, setRoomTypes] = useState(STATIC_ROOM_TYPES);
+  const [rooms, setRooms] = useState([]);
+  const [roomTypes, setRoomTypes] = useState([]);
   const [filterStatus, setFilterStatus] = useState('all');
-  const [selectedRoom, setSelectedRoom] = useState(null);
-  const [showAddModal, setShowAddModal] = useState(false);
+  const sc = useScreen();
+  const selectedRoom = sc.name === 'room' ? rooms.find((r) => r._id === sc.id) : null;
   const [newRoomNumber, setNewRoomNumber] = useState('');
-  const [newRoomFloor, setNewRoomFloor] = useState('2');
+  const [newRoomFloor, setNewRoomFloor] = useState('');
   const [newRoomTypeId, setNewRoomTypeId] = useState('');
   const [toastMessage, setToastMessage] = useState('');
   const [loading, setLoading] = useState(true);
@@ -30,7 +30,7 @@ export default function AdminRoomMap() {
     setLoading(true);
     try {
       const [roomsRes, typesRes] = await Promise.allSettled([
-        roomApi.getRooms(),
+        roomApi.getRooms({ limit: 100 }), // the API pages by 10 by default
         roomApi.getRoomTypes()
       ]);
 
@@ -41,7 +41,7 @@ export default function AdminRoomMap() {
             id: t._id || t.id,
             _id: t._id || t.id,
             name: t.name,
-            price: t.basePrice || t.price || 80
+            price: t.basePrice
           })));
           setNewRoomTypeId(rawTypes[0]._id || rawTypes[0].id);
         }
@@ -49,13 +49,13 @@ export default function AdminRoomMap() {
 
       if (roomsRes.status === 'fulfilled') {
         const rawRooms = Array.isArray(roomsRes.value) ? roomsRes.value : (roomsRes.value?.data || []);
-        if (rawRooms.length > 0) {
-          const mapped = rawRooms.map(r => ({
+        {
+          const mapped = rawRooms.filter(r => r.isActive !== false).map(r => ({
             _id: r._id || r.id,
             no: r.roomNumber || r.no,
-            floor: r.floor || (r.roomNumber ? parseInt(r.roomNumber[0], 10) : 1),
+            floor: r.floor,
             status: r.status || 'available',
-            typeName: r.roomTypeId?.name || 'Standard Room',
+            typeName: r.roomTypeId?.name || '',
             roomTypeId: r.roomTypeId?._id || r.roomTypeId
           })).sort((a, b) => a.no.localeCompare(b.no));
           setRooms(mapped);
@@ -75,16 +75,17 @@ export default function AdminRoomMap() {
   // Change room status (UC30, lifecycle)
   const handleStatusChange = async (targetRoom, newStatus) => {
     const roomKey = targetRoom._id || targetRoom.no;
-    setRooms(prev => prev.map(r => (r._id === roomKey || r.no === targetRoom.no) ? { ...r, status: newStatus } : r));
-    if (selectedRoom && (selectedRoom._id === roomKey || selectedRoom.no === targetRoom.no)) {
-      setSelectedRoom(prev => ({ ...prev, status: newStatus }));
+    if (newStatus !== 'maintenance' && targetRoom.status !== 'maintenance') {
+      alert('Occupied, cleaning and available follow check-in, check-out and housekeeping. You can only put a room into Maintenance or take it out.');
+      return;
     }
-    showToast(`Room ${targetRoom.no} status updated to "${STATUS_CONFIG[newStatus]?.label}"`);
-
     try {
-      await roomApi.updateRoomStatus(roomKey, newStatus);
+      const res = await roomApi.updateRoomStatus(roomKey, newStatus);
+      const saved = res?.data?.status || newStatus;
+      setRooms(prev => prev.map(r => (r._id === roomKey || r.no === targetRoom.no) ? { ...r, status: saved } : r));
+      showToast(`Room ${targetRoom.no} is now "${STATUS_CONFIG[saved]?.label || saved}"`);
     } catch (err) {
-      console.warn('Backend updateRoomStatus failed, kept local state:', err);
+      alert(err.message);
     }
   };
 
@@ -95,44 +96,43 @@ export default function AdminRoomMap() {
     if (!trimmedNo) return;
 
     if (rooms.some(r => r.no === trimmedNo)) {
-      alert(`Phòng số ${trimmedNo} đã tồn tại!`);
+      alert(`Room ${trimmedNo} already exists.`);
       return;
     }
 
     const payload = {
       roomNumber: trimmedNo,
-      floor: parseInt(newRoomFloor, 10) || 1,
-      roomTypeId: newRoomTypeId || roomTypes[0]?.id || roomTypes[0]?._id,
-      status: 'available'
-    };
+      floor: parseInt(newRoomFloor, 10),
+      roomTypeId: newRoomTypeId || roomTypes[0]?.id || roomTypes[0]?._id
+    }; // the server starts every new room as Available and refuses a status field
 
     try {
       await roomApi.createRoom(payload);
-      showToast(`Phòng ${payload.roomNumber} đã được tạo thành công!`);
-      setShowAddModal(false);
+      showToast(`Room ${payload.roomNumber} created`);
+      sc.close();
       setNewRoomNumber('');
       loadData();
     } catch (err) {
-      alert(`Lỗi khi tạo phòng: ${err.message}`);
+      alert(err.message);
     }
   };
 
   // Delete room (UC30)
   const handleDeleteRoom = async (targetRoom) => {
-    if (!window.confirm(`Bạn có chắc muốn xóa phòng ${targetRoom.no}?`)) return;
+    if (!window.confirm(`Deactivate room ${targetRoom.no}? It will no longer be sold; past bookings keep it.`)) return;
     try {
       if (targetRoom._id) {
         await roomApi.deleteRoom(targetRoom._id);
       }
       setRooms(prev => prev.filter(r => r.no !== targetRoom.no));
-      setSelectedRoom(null);
-      showToast(`Đã xóa phòng ${targetRoom.no}`);
+      sc.close();
+      showToast(`Room ${targetRoom.no} deactivated`);
     } catch (err) {
-      alert(`Lỗi khi xóa phòng: ${err.message}`);
+      alert(err.message);
     }
   };
 
-  const floors = [...new Set(rooms.map(r => String(r.no)[0]))].sort();
+  const floors = [...new Set(rooms.map(r => String(r.floor ?? '?')))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const filteredRooms = filterStatus === 'all' ? rooms : rooms.filter(r => r.status === filterStatus);
 
   const counts = {
@@ -143,6 +143,66 @@ export default function AdminRoomMap() {
     maintenance: rooms.filter(r => r.status === 'maintenance').length
   };
 
+  if (sc.name === 'room') return selectedRoom ? (
+        <Screen title={`Room ${selectedRoom.no}`} onClose={sc.close}>
+          <p className="muted" style={{ marginTop: 0 }}>Floor {selectedRoom.floor}{selectedRoom.typeName ? ` · ${selectedRoom.typeName}` : ''}</p>
+          <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '10px', marginBottom: '1.25rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+              <span className="muted">Current status</span>
+              <span className={`badge b-${selectedRoom.status}`}>{STATUS_CONFIG[selectedRoom.status]?.label}</span>
+            </div>
+            <p className="muted" style={{ margin: 0 }}>{STATUS_CONFIG[selectedRoom.status]?.desc}</p>
+          </div>
+          <h3 style={{ margin: '0 0 0.5rem', fontSize: '1rem' }}>Change status</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.5rem', marginBottom: '1.25rem' }}>
+            {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
+              <button
+                key={key}
+                disabled={selectedRoom.status === key}
+                onClick={() => handleStatusChange(selectedRoom, key)}
+                style={{
+                  minHeight: 44, padding: '10px 12px', borderRadius: '8px', border: `1.5px solid ${cfg.color}`,
+                  background: selectedRoom.status === key ? cfg.color : '#fff', color: selectedRoom.status === key ? '#fff' : cfg.color,
+                  fontWeight: 600, cursor: selectedRoom.status === key ? 'default' : 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
+                }}
+              >
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: selectedRoom.status === key ? '#fff' : cfg.color }} />
+                {cfg.label}
+              </button>
+            ))}
+          </div>
+          <div className="modal-actions">
+            <button className="btn danger" onClick={() => handleDeleteRoom(selectedRoom)}>Deactivate room</button>
+            <button className="btn primary" onClick={sc.close}>Done</button>
+          </div>
+        </Screen>
+  ) : <WaitScreen loading={loading} onClose={sc.close} />;
+  if (sc.name === 'new') return (
+        <Screen title="Add room" onClose={sc.close}>
+          <form onSubmit={handleAddRoom} className="form">
+            <p className="muted" style={{ marginTop: 0 }}>A new room starts as Available.</p>
+            <label>
+              Room number
+              <input type="text" placeholder="e.g. 305" value={newRoomNumber} onChange={e => setNewRoomNumber(e.target.value)} required />
+            </label>
+            <label>
+              Floor
+              <input type="number" min="0" step="1" required placeholder="e.g. 3" value={newRoomFloor} onChange={e => setNewRoomFloor(e.target.value)} />
+            </label>
+            <label>
+              Room type
+              <select value={newRoomTypeId} onChange={e => setNewRoomTypeId(e.target.value)}>
+                {roomTypes.map(rt => <option key={rt.id || rt._id} value={rt.id || rt._id}>{rt.name}</option>)}
+              </select>
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="btn" onClick={sc.close}>Cancel</button>
+              <button type="submit" className="btn primary">Create room</button>
+            </div>
+          </form>
+        </Screen>
+  );
   return (
     <div className="room-map-page">
       {toastMessage && (
@@ -157,77 +217,48 @@ export default function AdminRoomMap() {
 
       <div className="page-head">
         <div>
-          <h1>Sơ Đồ Phòng Trực Quan (Interactive Room Map)</h1>
-          <p>Giám sát tình trạng phòng theo thời gian thực và quản lý vòng đời phòng (UC30, UC05)</p>
+          <h1>Room map</h1>
+          <p>Live status of every room. Put a room into Maintenance, add or deactivate rooms.</p>
         </div>
         <div className="head-actions">
-          <button className="btn primary" onClick={() => setShowAddModal(true)}>+ Thêm Phòng Mới</button>
+          <button className="btn primary" onClick={() => sc.go('new')}>+ Add room</button>
         </div>
       </div>
 
-      {/* Real-time KPI Status Bar */}
-      <div style={{
-        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-        gap: '0.75rem', marginBottom: '1.25rem'
-      }}>
-        <div style={{ background: '#fff', padding: '12px 16px', borderRadius: '12px', border: '1px solid var(--line)' }}>
-          <span style={{ fontSize: '0.78rem', color: 'var(--muted)' }}>Tổng số phòng</span>
-          <strong style={{ display: 'block', fontSize: '1.5rem', color: 'var(--navy)' }}>{counts.total}</strong>
-        </div>
+      {/* One row of filters: each count is a button, its dot is the colour key of the map (no colour-only meaning: the label is there too). */}
+      <div className="room-filters" role="group" aria-label="Filter rooms by status">
+        <button type="button" className={`room-filter ${filterStatus === 'all' ? 'on' : ''}`} aria-pressed={filterStatus === 'all'} onClick={() => setFilterStatus('all')}>
+          <span>All rooms</span><strong>{counts.total}</strong>
+        </button>
         {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-          <div key={key}
-            onClick={() => setFilterStatus(filterStatus === key ? 'all' : key)}
-            style={{
-              background: filterStatus === key ? cfg.color : '#fff',
-              color: filterStatus === key ? '#fff' : 'var(--text)',
-              padding: '12px 16px', borderRadius: '12px', border: `1px solid ${filterStatus === key ? cfg.color : 'var(--line)'}`,
-              cursor: 'pointer', transition: 'all 0.15s'
-            }}>
-            <span style={{ fontSize: '0.78rem', opacity: 0.85 }}>{cfg.label}</span>
-            <strong style={{ display: 'block', fontSize: '1.5rem' }}>{counts[key]}</strong>
-          </div>
+          <button key={key} type="button" className={`room-filter ${filterStatus === key ? 'on' : ''}`} aria-pressed={filterStatus === key} onClick={() => setFilterStatus(filterStatus === key ? 'all' : key)}>
+            <span><i className={`dot s-${key}`} aria-hidden="true" />{cfg.label}</span><strong>{counts[key]}</strong>
+          </button>
         ))}
-      </div>
-
-      {/* Legend & Filter Bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
-        <div className="legend" style={{ margin: 0 }}>
-          {Object.entries(STATUS_CONFIG).map(([s, cfg]) => (
-            <span key={s} style={{ cursor: 'pointer', opacity: filterStatus === 'all' || filterStatus === s ? 1 : 0.4 }} onClick={() => setFilterStatus(filterStatus === s ? 'all' : s)}>
-              <i style={{ background: cfg.color }} /> {cfg.label} ({counts[s]})
-            </span>
-          ))}
-        </div>
-        <div className="chips" style={{ margin: 0 }}>
-          <button className={`chip ${filterStatus === 'all' ? 'on' : ''}`} onClick={() => setFilterStatus('all')}>Tất cả</button>
-          {Object.entries(STATUS_CONFIG).map(([s, cfg]) => (
-            <button key={s} className={`chip ${filterStatus === s ? 'on' : ''}`} onClick={() => setFilterStatus(s)}>{cfg.label}</button>
-          ))}
-        </div>
       </div>
 
       {/* Floors grid */}
       {floors.map(fl => {
-        const floorRooms = filteredRooms.filter(r => String(r.no)[0] === fl);
+        const floorRooms = filteredRooms.filter(r => String(r.floor ?? '?') === fl);
         if (floorRooms.length === 0) return null;
         return (
           <section key={fl} className="floor" style={{ background: '#fff', padding: '1.25rem', borderRadius: '14px', border: '1px solid var(--line)', marginBottom: '1.25rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-              <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Tầng {fl}</h2>
-              <span className="muted" style={{ fontSize: '0.85rem' }}>{floorRooms.length} phòng</span>
+              <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Floor {fl}</h2>
+              <span className="muted" style={{ fontSize: '0.85rem' }}>{floorRooms.length} room{floorRooms.length === 1 ? "" : "s"}</span>
             </div>
             <div className="rooms">
               {floorRooms.map(r => (
                 <button
                   key={r.no}
-                  onClick={() => setSelectedRoom(r)}
+                  onClick={() => sc.go('room', r._id)}
                   className={`room s-${r.status}`}
                   style={{
                     position: 'relative',
                     cursor: 'pointer',
                     outline: selectedRoom?.no === r.no ? '3px solid #ffd700' : 'none'
                   }}
-                  title={`Phòng ${r.no} (${STATUS_CONFIG[r.status]?.label})`}
+                  title={`Room ${r.no} (${STATUS_CONFIG[r.status]?.label})`}
                 >
                   <b>{r.no}</b>
                   <small>{STATUS_CONFIG[r.status]?.label || r.status}</small>
@@ -238,134 +269,6 @@ export default function AdminRoomMap() {
         );
       })}
 
-      {/* Room Detail & Status Switcher Modal */}
-      {selectedRoom && (
-        <div className="scrim" onClick={() => setSelectedRoom(null)} style={{ display: 'grid', placeItems: 'center', zIndex: 100 }}>
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              background: '#fff', borderRadius: '16px', padding: '1.75rem', width: 'min(440px, 92vw)',
-              boxShadow: '0 24px 60px rgba(0,0,0,0.3)', animation: 'pop 0.2s ease-out'
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <div>
-                <h2 style={{ margin: 0, fontSize: '1.3rem' }}>Phòng {selectedRoom.no}</h2>
-                <span className="muted">Tầng {String(selectedRoom.no)[0]} · {selectedRoom.typeName || 'Standard Room'}</span>
-              </div>
-              <button onClick={() => setSelectedRoom(null)} style={{ border: 0, background: '#eee', borderRadius: '99px', width: '32px', height: '32px', cursor: 'pointer' }}>✕</button>
-            </div>
-
-            <div style={{ background: '#f8fafc', padding: '1rem', borderRadius: '10px', marginBottom: '1.25rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-                <span style={{ fontSize: '0.85rem', color: 'var(--muted)' }}>Trạng thái hiện tại:</span>
-                <span className={`badge b-${selectedRoom.status}`}>{STATUS_CONFIG[selectedRoom.status]?.label}</span>
-              </div>
-              <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--muted)' }}>
-                {STATUS_CONFIG[selectedRoom.status]?.desc}
-              </p>
-            </div>
-
-            <h4 style={{ margin: '0 0 0.5rem', fontSize: '0.9rem', color: 'var(--muted)', textTransform: 'uppercase' }}>
-              Chuyển Trạng Thái Vận Hành:
-            </h4>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginBottom: '1.25rem' }}>
-              {Object.entries(STATUS_CONFIG).map(([key, cfg]) => (
-                <button
-                  key={key}
-                  disabled={selectedRoom.status === key}
-                  onClick={() => handleStatusChange(selectedRoom, key)}
-                  style={{
-                    padding: '10px 12px',
-                    borderRadius: '8px',
-                    border: `1.5px solid ${cfg.color}`,
-                    background: selectedRoom.status === key ? cfg.color : '#fff',
-                    color: selectedRoom.status === key ? '#fff' : cfg.color,
-                    fontWeight: 600,
-                    fontSize: '0.85rem',
-                    cursor: selectedRoom.status === key ? 'default' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: selectedRoom.status === key ? '#fff' : cfg.color }} />
-                  {cfg.label}
-                </button>
-              ))}
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button
-                className="btn"
-                style={{ color: 'var(--red)', borderColor: 'var(--red)', fontSize: '0.85rem' }}
-                onClick={() => handleDeleteRoom(selectedRoom)}
-              >
-                Xóa phòng này
-              </button>
-              <button className="btn primary" style={{ flex: 1 }} onClick={() => setSelectedRoom(null)}>
-                Đóng
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Add Room Modal (UC30) */}
-      {showAddModal && (
-        <div className="scrim" onClick={() => setShowAddModal(false)} style={{ display: 'grid', placeItems: 'center', zIndex: 100 }}>
-          <form
-            onSubmit={handleAddRoom}
-            onClick={e => e.stopPropagation()}
-            style={{
-              background: '#fff', borderRadius: '16px', padding: '1.75rem', width: 'min(420px, 92vw)',
-              boxShadow: '0 24px 60px rgba(0,0,0,0.3)'
-            }}
-          >
-            <h2 style={{ margin: '0 0 0.25rem' }}>Thêm Phòng Vật Lý Mới</h2>
-            <p className="muted" style={{ margin: '0 0 1.25rem' }}>Đăng ký phòng vào sơ đồ khách sạn (UC30)</p>
-
-            <div style={{ display: 'grid', gap: '1rem', marginBottom: '1.5rem' }}>
-              <label>
-                Số Phòng
-                <input
-                  type="text"
-                  placeholder="Ví dụ: 305, 401..."
-                  value={newRoomNumber}
-                  onChange={e => setNewRoomNumber(e.target.value)}
-                  required
-                />
-              </label>
-
-              <label>
-                Tầng
-                <select value={newRoomFloor} onChange={e => setNewRoomFloor(e.target.value)}>
-                  {[1, 2, 3, 4, 5, 6, 7].map(f => (
-                    <option key={f} value={f}>Tầng {f}</option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                Hạng Phòng
-                <select value={newRoomTypeId} onChange={e => setNewRoomTypeId(e.target.value)}>
-                  {roomTypes.map(rt => (
-                    <option key={rt.id || rt._id} value={rt.id || rt._id}>
-                      {rt.name} (${rt.price}/đêm)
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
-              <button type="button" className="btn" onClick={() => setShowAddModal(false)}>Hủy</button>
-              <button type="submit" className="btn primary">Tạo Phòng Mới</button>
-            </div>
-          </form>
-        </div>
-      )}
     </div>
   );
 }

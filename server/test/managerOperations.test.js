@@ -172,6 +172,9 @@ test("UC23 requires resolving all issues and returns to Cleaning while an open t
   const room = await makeRoom(type._id);
   await send(manager, "patch", `/api/rooms/${room._id}/maintenance`, { enabled: true }).expect(200);
   const issues = await RoomIssue.create(["Leak", "Broken lock"].map((title) => ({ roomId: room._id, reportedBy: actor._id, title })));
+  // Danh sách sự cố cho quản lý phải kèm số phòng.
+  const listed = (await manager.get("/api/room-issues?limit=100").expect(200)).body.data.find((i) => i._id === issues[0].id);
+  assert.equal(listed.roomNumber, room.roomNumber);
   await Task.create({ roomId: room._id, status: "pending", type: "turnover" });
   await send(manager, "patch", `/api/rooms/${room._id}/maintenance`, { enabled: false }).expect(409);
   await send(manager, "patch", `/api/room-issues/${issues[0].id}/resolve`).expect(200);

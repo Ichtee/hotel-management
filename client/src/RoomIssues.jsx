@@ -13,7 +13,6 @@ export default function RoomIssues() {
   const [msg, setMsg] = useState(null);
   const rooms = useApi('/room-issues/options', canReport);
   const list = useApi(`/room-issues?limit=100${filter ? `&status=${filter}` : ''}`, manager);
-  const roomNo = (id) => (rooms.data || []).find((r) => r._id === id)?.roomNumber || '—';
   const resolve = async (issue) => {
     if (!window.confirm(`Close "${issue.title}" as resolved?`)) return;
     try { await api(`/room-issues/${issue._id}/resolve`, { method: 'PATCH', body: {} }); setMsg('Issue resolved. The room leaves Maintenance once no open issue remains.'); list.reload(); }
@@ -28,8 +27,8 @@ export default function RoomIssues() {
       </div>
       <Notice error={list.error} ok={msg} />
       {list.loading ? <p className="muted">Loading…</p> : !list.data?.length ? <p className="empty">No issues here.</p> : (
-        <DataTable cols={['Reported', 'Room', 'Issue', 'Severity', 'Status', '']} rows={list.data.map((i) => [
-          dateLabel(i.createdAt), roomNo(i.roomId), <span key="t"><b>{i.title}</b>{i.description ? <small className="muted"><br />{i.description}</small> : null}</span>, i.severity, i.status,
+        <DataTable cols={['Reported', 'Room', 'Issue', 'Status', '']} rows={list.data.map((i) => [
+          dateLabel(i.createdAt), i.roomNumber ? `Room ${i.roomNumber}` : '—', <span key="t"><b>{i.title}</b>{i.description ? <small className="muted"><br />{i.description}</small> : null}</span>, i.status,
           i.status !== 'resolved' ? <button key="r" className="btn sm" onClick={() => resolve(i)}>Resolve</button> : '',
         ])} />
       )}
@@ -52,7 +51,7 @@ export function ReportIssue({ rooms, roomId, onClose }) {
     if (!item && !other && !unusable) { setError({ message: 'Choose a damaged or missing item, "Other", or tick "The room cannot be used".' }); return; }
     if (unusable && !f.description.trim()) { setError({ message: 'Describe why the room cannot be used.', fields: { description: 'Required.' } }); return; }
     const label = item ? item.name : other;
-    const body = { roomId: roomId || f.roomId, severity: unusable ? 'high' : other ? 'medium' : 'low', description: f.description.trim(),
+    const body = { roomId: roomId || f.roomId, unusable, description: f.description.trim(),
       title: unusable ? `Room cannot be used${label ? ` (${label})` : ''}` : item ? `Damaged / missing: ${item.name}` : other };
     if (item) { body.chargeItemId = item._id; body.quantity = Number(f.quantity) || 1; }
     setSaving(true); setError(null); setOk(null);

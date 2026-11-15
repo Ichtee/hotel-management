@@ -6,7 +6,6 @@ const schema = new Schema({
   reportedBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
   title: { type: String, required: true, trim: true },
   description: String,
-  severity: { type: String, enum: ['low', 'medium', 'high'], default: 'medium' },
   status: { type: String, enum: ['open', 'in_progress', 'resolved'], default: 'open' },
   resolvedBy: { type: Schema.Types.ObjectId, ref: 'User' },
   resolvedAt: Date

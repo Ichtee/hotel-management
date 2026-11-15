@@ -436,6 +436,8 @@ function CheckOutBooking({ booking, onClose }) {
     <form className="form" onSubmit={submit}>
       {!inspected && <label className="check full"><input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} /> The guest cannot wait: skip the inspection (closed as "Skipped at check-out"; damage found later is handled with the guest)</label>}
       <div className="full"><Notice error={error} /></div>
+      {/* Hiện rõ lý do nút hoàn tất bị khóa thay vì chỉ có tooltip. */}
+      {(bill.balance > 0 || bill.proposedPenalties > 0 || (!inspected && !skip)) && <p className="full muted" role="status">{bill.balance > 0 ? `Record payment of ${money(bill.balance)} first: check-out needs a zero balance.` : bill.proposedPenalties > 0 ? 'Confirm or waive the reported damage in Penalties first.' : 'Wait for the room inspection, or tick skip above.'}</p>}
       <div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || bill.balance > 0 || bill.proposedPenalties > 0 || (!inspected && !skip)} title={bill.balance > 0 ? 'Record the payments first' : undefined}>{saving ? 'Checking out…' : 'Complete check-out'}</button></div>
     </form>
   </Screen>;

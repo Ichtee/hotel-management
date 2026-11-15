@@ -73,15 +73,14 @@ async function testMember2Logic() {
   });
   assert.equal(validTask.validateSync(), undefined);
 
-  // Kiểm tra mức độ và trạng thái sự cố phòng.
+  // Kiểm tra sự cố phòng hợp lệ, mặc định ở trạng thái mở.
   const validIssue = new RoomIssue({
     roomId: id(),
     reportedBy: id(),
-    title: 'Water pipe leak',
-    severity: 'high'
+    title: 'Water pipe leak'
   });
   assert.equal(validIssue.validateSync(), undefined);
-  assert.equal(validIssue.severity, 'high');
+  assert.equal(validIssue.status, 'open');
 
   // Kiểm tra phòng trống, ngày giao nhau và phòng bị đặt trùng.
   console.log('[Test Member 2] Testing T06: Room Availability & Validation rules...');
@@ -276,7 +275,7 @@ async function testMember2Logic() {
     ...mockBooking,
     status: 'confirmed',
     // Còn hơn 48 giờ trước nhận phòng.
-    checkInDate: new Date('2026-11-15T14:00:00Z'),
+    checkInDate: new Date(Date.now() + 5 * 24 * 3600 * 1000),
     events: [],
     save: async function() { return this; }
   };

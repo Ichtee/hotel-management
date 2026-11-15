@@ -17,6 +17,8 @@ const Refund = require("../src/models/Refund");
 const { validateCoupon } = require("../src/services/promotions");
 // scripts/setup loads server/.env; never let a local PAYMENT_PROVIDER=sepay switch the gateway under the tests.
 process.env.PAYMENT_PROVIDER = "sandbox";
+// Nor send real e-mail: dotenv keeps a variable that is already set, even empty.
+for (const k of ["EMAILJS_SERVICE_ID", "EMAILJS_TEMPLATE_ID", "EMAILJS_PUBLIC_KEY", "EMAILJS_PRIVATE_KEY", "SMTP_URL", "RESEND_API_KEY"]) process.env[k] = "";
 const origin = "http://localhost:5173";
 const password = "StrongPass123!";
 let db,
@@ -1669,4 +1671,18 @@ test("BR-26: staff and Admin accounts cannot use the customer self-service funct
   await send(staff, "post", `/api/bookings/${booking.id}/cancel`, {}).expect(404);
   await (await srsUser("br26guest", "customer")).get("/api/bookings").expect(200); // a customer still can (own account: earlier tests changed the shared one)
   await staff.get("/api/bookings/search").expect(200); // front-desk screens are unaffected
+});
+
+test("sign in with the e-mail or the username", async () => {
+  await srsUser("loginbyname", "customer");
+  const agent = request.agent(app);
+  await send(agent, "post", "/api/auth/login", { login: "LoginByName", password }).expect(200);
+  assert.equal((await agent.get("/api/auth/me").expect(200)).body.data.email, "loginbyname@example.com");
+  await send(request.agent(app), "post", "/api/auth/login", { login: "loginbyname@example.com", password }).expect(200);
+  const wrong = await send(request.agent(app), "post", "/api/auth/login", { login: "nobody_here", password }).expect(401);
+  assert.match(wrong.body.error.message, /Invalid email, username or password/);
+  await send(request.agent(app), "post", "/api/auth/login", { login: "", password }).expect(400);
+  // An older or generated username that breaks today's sign-up rules (capitals, "+") still signs in, in any case.
+  await User.create({ username: "Old.Guest+1", email: "oldguest@example.com", passwordHash: await hashPassword(password), roleId: await roleId("customer"), phone: "0912345678", customerProfile: { fullName: "Old Guest" }, isVerified: true });
+  await send(request.agent(app), "post", "/api/auth/login", { login: "old.guest+1", password }).expect(200);
 });

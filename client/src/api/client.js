@@ -23,6 +23,7 @@ export async function api(path, { body, method = "GET", signal } = {}) {
     );
     error.fields = result.error?.fields;
     error.code = result.error?.code;
+    error.details = result.error?.details;
     error.status = res.status;
     throw error;
   }

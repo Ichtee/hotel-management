@@ -94,9 +94,9 @@ export function SignIn({ onDone, hint, onForgot }) {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
     setBusy(true); setResent(null);
-    try { await signIn({ email: f.email, password: f.password, captchaToken: token || undefined }); setErr(null); onDone(); }
-    // Mỗi token CAPTCHA chỉ dùng một lần.
-    catch (x) { setErr(x); setUnverified(x.code === 'EMAIL_NOT_VERIFIED' ? f.email : null); setBusy(false); setTries((t) => t + 1); }
+    try { await signIn({ login: f.login, password: f.password, captchaToken: token || undefined }); setErr(null); onDone(); }
+    // Mỗi token CAPTCHA chỉ dùng một lần; gửi lại xác minh luôn dùng email của tài khoản.
+    catch (x) { setErr(x); setUnverified(x.code === 'EMAIL_NOT_VERIFIED' ? x.details?.email || f.login : null); setBusy(false); setTries((t) => t + 1); }
   };
   const resend = async () => {
     try { setResent({ ok: (await api('/auth/resend-verification', { method: 'POST', body: { email: unverified } })).data.message }); }
@@ -104,7 +104,7 @@ export function SignIn({ onDone, hint, onForgot }) {
   };
   return (
     <form className="form one" onSubmit={submit}>
-      <Field label="Email" error={err?.fields?.email}><input name="email" type="email" autoComplete="email" placeholder="you@example.com" autoFocus required /></Field>
+      <Field label="Email or username" error={err?.fields?.email || err?.fields?.username}><input name="login" autoComplete="username" placeholder="you@example.com or username" autoCapitalize="none" spellCheck="false" autoFocus required /></Field>
       <PasswordField label="Password" name="password" autoComplete="current-password" error={err?.fields?.password} />
       {onForgot && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-0.35rem', marginBottom: '0.25rem' }}>

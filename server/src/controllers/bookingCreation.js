@@ -434,14 +434,32 @@ async function postLateCharge(booking, now = new Date()) {
   );
   return done.modifiedCount ? line.amount : 0;
 }
+// Các dòng tạo nên tổng tiền, dùng chung cho màn trả phòng và hóa đơn để hai nơi luôn khớp nhau.
+function billLines(booking, penalties) {
+  const lines = [
+    ...storedNights(booking).map((n) => ({ group: "room", name: `Night of ${iso(n.date)}`, amount: n.price })),
+    ...booking.feeLines.map((f) => ({ group: "fee", name: FEE_NAMES[f.type], amount: f.amount })),
+    ...booking.services.filter((s) => s.status !== "voided").map((s) => ({ group: "service", name: `${s.name} x${s.quantity}`, amount: s.amount })),
+    ...(booking.discountAmount ? [{ group: "discount", name: `Discount${booking.couponCode ? ` (${booking.couponCode})` : ""}`, amount: -booking.discountAmount }] : []),
+    ...penalties.map((p) => ({ group: "penalty", name: `Damage / loss: ${p.itemName}`, amount: p.amount })),
+  ];
+  // Nếu dữ liệu cũ lệch tổng, hiện phần chênh thay vì để các dòng cộng không ra tổng.
+  const diff = booking.totalAmount - lines.reduce((sum, l) => sum + l.amount, 0);
+  if (diff) lines.push({ group: "other", name: "Other adjustment", amount: diff });
+  return lines;
+}
+const chargedPenalties = (bookingId) => Penalty.find({ bookingId, status: { $in: ["confirmed", "paid"] }, afterCheckout: { $ne: true } }).lean();
 async function checkOutBill(booking) {
-  const [paid, task, proposed] = await Promise.all([
+  const [paid, task, proposed, penalties, payments] = await Promise.all([
     paidAmount(booking._id),
     Task.findOne({ bookingId: booking._id, type: "inspection" }).sort({ createdAt: -1 }).populate("assignedTo", "customerProfile.fullName username"),
-    Penalty.countDocuments({ bookingId: booking._id, status: "proposed" }),
+    Penalty.find({ bookingId: booking._id, status: "proposed" }).select("itemName proposedAmount").lean(),
+    chargedPenalties(booking._id),
+    Payment.find({ bookingId: booking._id, status: "success" }).select("kind method amount paidAt").sort({ paidAt: 1 }).lean(),
   ]);
   return {
-    totalAmount: booking.totalAmount, paidAmount: paid, balance: Math.max(0, booking.totalAmount - paid), feeLines: booking.feeLines, proposedPenalties: proposed,
+    totalAmount: booking.totalAmount, paidAmount: paid, balance: Math.max(0, booking.totalAmount - paid), feeLines: booking.feeLines,
+    lines: billLines(booking, penalties), payments, proposedPenalties: proposed.length, proposed,
     inspection: task && { _id: task._id, status: task.status, notes: task.notes, assignedTo: task.assignedTo?.customerProfile?.fullName || task.assignedTo?.username || null },
   };
 }
@@ -497,16 +515,10 @@ async function issueInvoice(booking, issuedBy) {
   if (existing) return existing;
   const [hotel, penalties, paid] = await Promise.all([
     HotelInfo.findOne({ key: "main" }).lean(),
-    Penalty.find({ bookingId: booking._id, status: { $in: ["confirmed", "paid"] }, afterCheckout: { $ne: true } }).lean(),
+    chargedPenalties(booking._id),
     paidAmount(booking._id),
   ]);
-  const lines = [
-    ...storedNights(booking).map((n) => ({ name: `Night of ${iso(n.date)}`, amount: n.price })),
-    ...booking.feeLines.map((f) => ({ name: FEE_NAMES[f.type], amount: f.amount })),
-    ...booking.services.filter((s) => s.status !== "voided").map((s) => ({ name: `${s.name} x${s.quantity}`, amount: s.amount })),
-    ...(booking.discountAmount ? [{ name: `Discount${booking.couponCode ? ` (${booking.couponCode})` : ""}`, amount: -booking.discountAmount }] : []),
-    ...penalties.map((p) => ({ name: `Damage / loss: ${p.itemName}`, amount: p.amount })),
-  ];
+  const lines = billLines(booking, penalties).map(({ name, amount }) => ({ name, amount }));
   const day = vnDate().replace(/-/g, "");
   // Mã hóa đơn theo số thứ tự có thể trùng khi chạy đồng thời; chỉ mục chặn trùng và cho tạo lại.
   const seq = (await Invoice.countDocuments({ invoiceNumber: new RegExp(`^INV-${day}-`) })) + 1;

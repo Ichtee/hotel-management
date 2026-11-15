@@ -404,9 +404,30 @@ function SettleBalance({ booking, balance, onPaid }) {
   </form>;
 }
 
-const FEE_LABEL = { early_check_in: 'Early check-in fee', late_check_out: 'Late check-out fee', extra_night: 'Extra night (after 18:00)' };
+// Nhóm dòng hóa đơn để lễ tân thấy tổng được cộng từ đâu.
+const BILL_GROUPS = [['room', 'Room charges'], ['fee', 'Check-in / check-out fees'], ['service', 'Services'], ['penalty', 'Damage / loss (confirmed)'], ['discount', 'Discount'], ['other', 'Other']];
+const PAY_LABEL = { deposit: 'Deposit', final: 'Front desk payment' };
+const METHOD_LABEL = { credit_card: 'card', e_wallet: 'e-wallet', bank_transfer: 'bank transfer', cash: 'cash', pos: 'card (POS)' };
+function FinalBill({ bill }) {
+  const groups = BILL_GROUPS.map(([g, title]) => [title, bill.lines.filter((l) => l.group === g)]).filter(([, rows]) => rows.length);
+  return <dl className="sum">
+    {groups.flatMap(([title, rows]) => [
+      <div key={title} className="bill-head"><dt>{title}</dt><dd>{money(rows.reduce((a, l) => a + l.amount, 0))}</dd></div>,
+      ...rows.map((l, i) => <div key={`${title}${i}`} className="bill-line"><dt>{l.name}</dt><dd>{money(l.amount)}</dd></div>),
+    ])}
+    <div className="tot"><dt>Total</dt><dd><strong>{money(bill.totalAmount)}</strong></dd></div>
+    {bill.payments.map((p) => <div key={p._id}><dt>Less: {PAY_LABEL[p.kind]} ({METHOD_LABEL[p.method] || p.method}){p.paidAt ? ` · ${dateLabel(p.paidAt)}` : ''}</dt><dd>−{money(p.amount)}</dd></div>)}
+    {!bill.payments.length && <div><dt>Paid so far</dt><dd>{money(0)}</dd></div>}
+    <div className="tot"><dt>Balance due</dt><dd><strong>{money(bill.balance)}</strong></dd></div>
+    {bill.proposed.length > 0 && <>
+      <div className="bill-head bill-pending"><dt>Reported by Housekeeping, not in the total until you confirm</dt><dd /></div>
+      {bill.proposed.map((p) => <div key={p._id} className="bill-line bill-pending"><dt>{p.itemName}</dt><dd>+{money(p.proposedAmount)}?</dd></div>)}
+    </>}
+  </dl>;
+}
 // Tính phí trả muộn và yêu cầu kiểm tra phòng; chỉ trả phòng khi đủ tiền và đã xử lý kiểm tra.
 function CheckOutBooking({ booking, onClose }) {
+  const [penalties, setPenalties] = useState(false);
   const [bill, setBill] = useState(null); const [error, setError] = useState(null); const [saving, setSaving] = useState(false); const [skip, setSkip] = useState(false); const [done, setDone] = useState(null);
   const load = () => api(`/front-desk/bookings/${booking._id}/check-out/start`, { method: 'POST' }).then((r) => setBill(r.data)).catch(setError);
   useEffect(() => { load(); }, [booking._id]);
@@ -421,17 +442,15 @@ function CheckOutBooking({ booking, onClose }) {
     {done.data.invoice && <p>Invoice <strong>{done.data.invoice.invoiceNumber}</strong> · {money(done.data.invoice.totalAmount)}. Print it from Invoices.</p>}
     <div className="modal-actions"><button className="btn primary" onClick={onClose}>Close</button></div>
   </Screen>;
+  // Xử lý bồi thường ngay trong luồng trả phòng rồi tính lại hóa đơn.
+  if (penalties) return <Penalties booking={booking} onClose={() => { setPenalties(false); load(); }} />;
   if (!bill) return <Screen title="Check out customer" onClose={onClose}>{error ? <Notice error={error} /> : <p className="muted">Requesting the room inspection and preparing the final bill…</p>}</Screen>;
   const inspected = bill.inspection?.status === 'completed';
   return <Screen title={`Check out · ${booking.bookingReference}`} onClose={onClose}>
-    <dl className="sum">
-      {bill.feeLines.map((f, i) => <div key={i}><dt>{FEE_LABEL[f.type]}</dt><dd>{money(f.amount)}</dd></div>)}
-      <div><dt>Total</dt><dd>{money(bill.totalAmount)}</dd></div>
-      <div><dt>Paid (deposit and front desk)</dt><dd>{money(bill.paidAmount)}</dd></div>
-      <div className="tot"><dt>Balance due</dt><dd><strong>{money(bill.balance)}</strong></dd></div>
-    </dl>
+    <h2 className="bill-title">Final bill</h2>
+    <FinalBill bill={bill} />
     <p role="status">Room inspection: <Badge v={bill.inspection?.status || 'pending'} />{bill.inspection?.assignedTo ? ` · ${bill.inspection.assignedTo}` : ' · no staff responsible yet'} <button type="button" className="btn sm" onClick={load}>Refresh</button></p>
-    {bill.proposedPenalties > 0 && <p className="note bad-note">{bill.proposedPenalties} damage / loss item(s) reported by Housekeeping: confirm or waive them in Penalties first.</p>}
+    {bill.proposedPenalties > 0 && <p className="note bad-note">{bill.proposedPenalties} damage / loss item(s) reported by Housekeeping. Confirm (adds to the total) or waive each one first. <button type="button" className="btn sm" onClick={() => setPenalties(true)}>Open penalties</button></p>}
     {bill.balance > 0 && <SettleBalance booking={booking} balance={bill.balance} onPaid={load} />}
     <form className="form" onSubmit={submit}>
       {!inspected && <label className="check full"><input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} /> The guest cannot wait: skip the inspection (closed as "Skipped at check-out"; damage found later is handled with the guest)</label>}

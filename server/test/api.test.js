@@ -1393,6 +1393,18 @@ test("SRS v2.5 UC20 / BR-47 / BR-22: check-out needs the balance paid and the in
   const bill = (await send(staff, "post", `/api/front-desk/bookings/${stay.id}/check-out/start`).expect(200)).body.data;
   assert.equal(bill.balance, 2800);
   assert.ok(bill.inspection, "an inspection task is requested");
+  // Final bill shows how the total is built: lines add up to the total, payments are listed, reported damage waits outside the total.
+  const Penalty = require("../src/models/Penalty");
+  const sum = (b) => b.lines.reduce((a, l) => a + l.amount, 0);
+  assert.equal(sum(bill), bill.totalAmount);
+  assert.deepEqual(bill.payments.map((p) => [p.kind, p.amount]), [["deposit", 1200]]);
+  const damage = await Penalty.create({ bookingId: stay._id, itemName: "Towel", proposedAmount: 300, status: "proposed" });
+  const pending = (await send(staff, "post", `/api/front-desk/bookings/${stay.id}/check-out/start`).expect(200)).body.data;
+  assert.deepEqual([pending.totalAmount, pending.proposed.map((p) => p.itemName)], [4000, ["Towel"]]);
+  await send(staff, "patch", `/api/frontdesk/penalties/${damage.id}`, { action: "confirm", amount: 300 }).expect(200);
+  const charged = (await send(staff, "post", `/api/front-desk/bookings/${stay.id}/check-out/start`).expect(200)).body.data;
+  assert.deepEqual([charged.totalAmount, charged.balance, sum(charged), charged.proposed.length], [4300, 3100, 4300, 0]);
+  assert.ok(charged.lines.some((l) => l.group === "penalty" && l.name === "Damage / loss: Towel" && l.amount === 300));
   const url = `/api/front-desk/bookings/${stay.id}/check-out`;
   assert.match((await send(staff, "post", url).expect(409)).body.error.message, /unpaid/); // BR-20
   await send(staff, "post", `/api/frontdesk/bookings/${stay.id}/payments`, { method: "cash" }).expect(201);

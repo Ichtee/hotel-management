@@ -530,7 +530,7 @@ function WalkInBooking({ onClose, onCreated }) {
     setQuote(null);
     if (!stay.roomTypeId || !valid) return undefined;
     let live = true;
-    api('/bookings/quote', { method: 'POST', body: { roomTypeId: stay.roomTypeId, checkInDate: today, checkOutDate: stay.checkOutDate, ...(coupon ? { couponCode: coupon } : {}) } })
+    api('/bookings/quote', { method: 'POST', body: { roomTypeId: stay.roomTypeId, checkInDate: today, checkOutDate: stay.checkOutDate, walkIn: true, ...(coupon ? { couponCode: coupon } : {}) } })
       .then((r) => live && setQuote(r.data)).catch(() => {});
     return () => { live = false; };
   }, [stay.roomTypeId, stay.checkOutDate, coupon]);

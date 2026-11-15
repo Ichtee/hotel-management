@@ -1128,7 +1128,6 @@ test("UC34 catalogs, UC31 -> UC38 proposed penalty, supplementary invoice after 
   const unusable = (await send(staff, "post", "/api/room-issues", { roomId: room.id, title: "Room cannot be used (Lamp shade)", description: "Glass everywhere", severity: "high", chargeItemId: shade._id }).expect(201)).body.data;
   assert.deepEqual([Boolean(unusable.issue), unusable.maintenanceApplied, unusable.penalty.status], [true, true, "proposed"]);
   await Room.updateOne({ _id: room._id }, { status: "available" });
-
   // M2 room writes are no longer public
   const anon = request(app);
   await anon.patch(`/api/rooms/${room.id}/status`).set("Origin", origin).send({ status: "maintenance" }).expect(401);
@@ -1604,7 +1603,7 @@ test("UC06 quote and UC14 walk-in coupon: the server prices every night, a bad c
   const today = vnDay(), tomorrow = vnDay(1), after = vnDay(2);
   await RoomType.updateOne({ _id: Q._id }, { seasonalPricing: [{ startDate: tomorrow, endDate: tomorrow, price: 3000 }] });
   await Coupon.create({ code: "QUOTE10", discountType: "percentage", discountValue: 10, usageLimit: 5, minimumSpend: 0, startDate: new Date(Date.now() - 864e5), endDate: new Date(Date.now() + 30 * 864e5), isActive: true });
-  const ask = (agent, couponCode) => send(agent, "post", "/api/bookings/quote", { roomTypeId: Q.id, checkInDate: today, checkOutDate: after, couponCode });
+  const ask = (agent, couponCode) => send(agent, "post", "/api/bookings/quote", { roomTypeId: Q.id, checkInDate: today, checkOutDate: after, couponCode, ...(agent === staff ? { walkIn: true } : {}) });
   const q = (await ask(guest, "QUOTE10").expect(200)).body.data;
   assert.deepEqual([q.roomAmount, q.discountAmount, q.totalAmount, q.depositPercent, q.depositRequired, q.available], [4000, 400, 3600, 50, 1800, true]);
   assert.deepEqual(q.nights.map((n) => n.price), [1000, 3000]);
@@ -1651,15 +1650,23 @@ test("BR-26: staff and Admin accounts cannot use the customer self-service funct
   const booking = await payBooking();
   const stay = { roomTypeId: String(booking.rooms[0].roomTypeId), checkInDate: "2030-01-10", checkOutDate: "2030-01-12", guestCount: 1, consent: true };
   for (const who of [staff, manager, admin]) {
-    await send(who, "post", "/api/bookings", stay).expect(403);
-    await who.get("/api/bookings").expect(403);
+    if (who !== staff) await send(who, "post", "/api/bookings", stay).expect(403);
+    if (who !== staff) await who.get("/api/bookings").expect(403);
     await who.get("/api/reviews/my").expect(403);
     await send(who, "post", "/api/reviews", { bookingId: booking.id, rating: 5, comment: "x" }).expect(403);
-    await send(who, "post", `/api/bookings/${booking.id}/payments/deposit`, { method: "bank_transfer" }).expect(403);
-    await send(who, "post", `/api/bookings/${booking.id}/cancel`, {}).expect(403);
-    await send(who, "post", `/api/bookings/${booking.id}/modify`, { guestCount: 1 }).expect(403);
+    if (who !== staff) await send(who, "post", `/api/bookings/${booking.id}/payments/deposit`, { method: "bank_transfer" }).expect(403);
+    if (who !== staff) await send(who, "post", `/api/bookings/${booking.id}/cancel`, {}).expect(403);
+    if (who !== staff) await send(who, "post", `/api/bookings/${booking.id}/modify`, { guestCount: 1 }).expect(403);
     await send(who, "post", `/api/bookings/${booking.id}/requests`, {}).expect(403);
   }
+  // The Receptionist books for a guest with their own account, like a Customer: the booking is the receptionist's, other accounts' bookings stay out of reach.
+  const made = (await send(staff, "post", "/api/bookings", { ...stay, fullName: "Phone Guest", phone: "0912345678", email: "phoneguest@example.com" }).expect(201)).body.data;
+  assert.equal(made.status, "pending");
+  assert.equal(String(made.customerId), String((await User.findOne({ username: "staff" }))._id));
+  assert.deepEqual((await staff.get("/api/bookings").expect(200)).body.data.map((b) => b.id || b._id), [made._id]);
+  await send(staff, "post", `/api/bookings/${made._id}/payments/deposit`, { method: "bank_transfer" }).expect(201);
+  await send(staff, "post", `/api/bookings/${booking.id}/payments/deposit`, { method: "bank_transfer" }).expect(404); // not the receptionist's booking
+  await send(staff, "post", `/api/bookings/${booking.id}/cancel`, {}).expect(404);
   await (await srsUser("br26guest", "customer")).get("/api/bookings").expect(200); // a customer still can (own account: earlier tests changed the shared one)
   await staff.get("/api/bookings/search").expect(200); // front-desk screens are unaffected
 });

@@ -122,8 +122,8 @@ function SearchBar({ q = {} }) {
 // Dùng ngày và số khách trong URL để hiện giá, phòng trống và nút đặt phòng.
 function RoomCard({ r, q = '' }) {
   const { user } = useAuth();
-  // Nhân viên và Admin không được đặt phòng trực tuyến.
-  const canBook = !user || user.scope === 'self';
+  // Lễ tân được đặt hộ khách bằng tài khoản của mình; nhân viên khác và Admin không đặt phòng trực tuyến (BR-26).
+  const canBook = !user || user.scope === 'self' || user.role === 'receptionist';
   return (
     <article className="c-card">
       <a className="c-media" href={`#/room/${r.id}${q}`} tabIndex={-1} aria-hidden="true">
@@ -395,7 +395,7 @@ function useRoomType(id) {
 function RoomDetail({ id, q }) {
   const { room: r, loading: roomLoading } = useRoomType(id);
   const { user: viewer } = useAuth();
-  const staffViewer = viewer && viewer.scope !== 'self';
+  const staffViewer = viewer && viewer.scope !== 'self' && viewer.role !== 'receptionist';
 
   const [d, setD] = useState({ in: q.in || day(7), out: q.out || day(10), guests: +q.guests || 2 });
   const policies = usePolicies();
@@ -520,9 +520,9 @@ function Checkout({ q, user }) {
             </div>
           )}
           <h2 className="full">Guest details</h2>
-          <label>Full name<input name="fullName" required autoComplete="name" defaultValue={currentUser?.customerProfile?.fullName || currentUser?.fullName || ''} /></label>
-          <label>Email<input name="email" type="email" required autoComplete="email" defaultValue={currentUser?.email || ''} /></label>
-          <label>Phone<input name="phone" type="tel" required autoComplete="tel" pattern="([0-9]{10,11}|\+[0-9]{8,15})" title="10–11 digits, or + and 8–15 digits with the country code." defaultValue={currentUser?.phone || ''} /></label>
+          <label>Full name<input name="fullName" required autoComplete="name" defaultValue={currentUser?.role === 'receptionist' ? '' : currentUser?.customerProfile?.fullName || currentUser?.fullName || ''} /></label>
+          <label>Email<input name="email" type="email" required autoComplete="email" defaultValue={currentUser?.role === 'receptionist' ? '' : currentUser?.email || ''} /></label>
+          <label>Phone<input name="phone" type="tel" required autoComplete="tel" pattern="([0-9]{10,11}|\+[0-9]{8,15})" title="10–11 digits, or + and 8–15 digits with the country code." defaultValue={currentUser?.role === 'receptionist' ? '' : currentUser?.phone || ''} /></label>
           <fieldset className="full">
             <legend>Payment</legend>
             <p className="muted">Pay the deposit online now to confirm your booking. The room is held for 15 minutes while you pay. The rest is paid at the front desk when you check out.</p>
@@ -659,7 +659,7 @@ export default function Customer({ route }) {
   let page;
   const customerPage = PROTECTED.includes(path) || path.startsWith('#/pay/');
   if (loading) page = <p className="muted c-wrap c-section">Loading…</p>;
-  else if (customerPage && user && user.scope !== 'self') {
+  else if (customerPage && user && user.scope !== 'self' && user.role !== 'receptionist') {
     location.replace('#/admin');
     page = <p className="muted c-wrap c-section">This page is for customers. Opening the staff portal…</p>;
   } else if (customerPage && !user) { sessionStorage.setItem('next', route); page = <Auth note="Please sign in to continue." />; }

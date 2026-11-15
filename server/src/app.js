@@ -43,6 +43,11 @@ const customerOnly = (req, res, next) => {
   if (req.role.key !== "customer") throw new HttpError(403, "Only a customer account can use this function.");
   next();
 };
+// The Receptionist books, pays the deposit for, changes and cancels bookings for guests with their own account, like a Customer (BR-26).
+const bookingUser = (req, res, next) => {
+  if (!["customer", "receptionist"].includes(req.role.key)) throw new HttpError(403, "Only a customer or receptionist account can use this function.");
+  next();
+};
 const GATEWAY_CALLBACK = "/api/payments/gateway/callback";
 const PUBLIC_HOOKS = [GATEWAY_CALLBACK, "/api/payments/sepay/ipn"];
 // Khởi tạo API với xác thực và kiểm soát quyền tại backend.
@@ -150,9 +155,9 @@ function createApp({
     next();
   };
   // Rút yêu cầu hủy như API DELETE /cancel.
-  app.post("/api/bookings/:id/withdraw-cancellation", customerOnly, cancellations.withdraw);
-  app.post("/api/bookings/:id/modify", customerOnly, bookingCreation.modifyOwn);
-  app.patch("/api/bookings/:id/modify", customerOnly, bookingCreation.modifyOwn);
+  app.post("/api/bookings/:id/withdraw-cancellation", bookingUser, cancellations.withdraw);
+  app.post("/api/bookings/:id/modify", bookingUser, bookingCreation.modifyOwn);
+  app.patch("/api/bookings/:id/modify", bookingUser, bookingCreation.modifyOwn);
   app.get("/api/bookings/search", staffSearch, bookings.search);
   // Báo giá dùng chung cho đặt phòng trực tuyến và tại quầy.
   app.post("/api/bookings/quote", bookingCreation.quote);
@@ -220,10 +225,10 @@ function createApp({
   app.delete("/api/promotions/:id", promotions.remove);
 
   // Lấy lịch sử booking của người đang đăng nhập.
-  app.get("/api/bookings", customerOnly, bookings.listing);
+  app.get("/api/bookings", bookingUser, bookings.listing);
   // Giới hạn đặt phòng theo IP, vẫn cho phép nhiều khách dùng chung mạng.
   const bookingLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: "draft-8", legacyHeaders: false, message: { error: { message: "Too many requests. Please try again later." } } });
-  app.post("/api/bookings", customerOnly, bookingLimit, bookingCreation.create);
+  app.post("/api/bookings", bookingUser, bookingLimit, bookingCreation.create);
   // Áp dụng quyền đã cấu hình cho từng thao tác tại quầy.
   app.post("/api/front-desk/bookings", permit("bookings.walk_in.create"), bookingCreation.createWalkIn);
   app.patch("/api/front-desk/bookings/:id", permit("bookings.managed.update"), bookingCreation.modifyWalkIn);
@@ -246,15 +251,15 @@ function createApp({
   app.get("/api/bookings/:id/id-photo-upload", customerOnly, stayRequests.photoUploadParams);
   app.post("/api/bookings/:id/reviews", customerOnly, reviews.create);
 
-  app.post("/api/bookings/:id/payments/deposit", customerOnly, payments.deposit);
+  app.post("/api/bookings/:id/payments/deposit", bookingUser, payments.deposit);
   app.get("/api/payments/methods", payments.methods);
   app.get("/api/payments/:id", payments.show);
   // Cổng giả lập chỉ dùng cho demo, không chuyển tiền thật.
   if (!production || process.env.ENABLE_SANDBOX_GATEWAY === "true") app.post("/api/sandbox-gateway/orders/:orderId", payments.sandbox);
-  app.get("/api/bookings/:id/refund-estimate", customerOnly, cancellations.estimate);
-  app.post("/api/bookings/:id/cancel", customerOnly, cancellations.requestOnline);
-  app.delete("/api/bookings/:id/cancel", customerOnly, cancellations.withdraw);
-  app.post("/api/bookings/:id/cancel-payment", customerOnly, cancellations.cancelPayment);
+  app.get("/api/bookings/:id/refund-estimate", bookingUser, cancellations.estimate);
+  app.post("/api/bookings/:id/cancel", bookingUser, cancellations.requestOnline);
+  app.delete("/api/bookings/:id/cancel", bookingUser, cancellations.withdraw);
+  app.post("/api/bookings/:id/cancel-payment", bookingUser, cancellations.cancelPayment);
 
   // Kiểm tra quyền trước các thao tác thanh toán, hủy và hoàn tiền tại quầy.
   const settle = permit("payments.settle"), cancel = permit("bookings.managed.cancel"), review = permit("cancellations.review"), refund = permit("refunds.handle");

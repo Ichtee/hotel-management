@@ -131,13 +131,13 @@ async function availability(req, res) {
 }
 // Báo giá trước khi tạo booking; bỏ giảm giá nếu mã sai và không yêu cầu cọc với khách tại quầy.
 async function quote(req, res) {
-  v.keys(req.body, ["roomTypeId", "checkInDate", "checkOutDate", "couponCode"]);
+  v.keys(req.body, ["roomTypeId", "checkInDate", "checkOutDate", "couponCode", "walkIn"]);
   const { roomTypeId, checkInDate, checkOutDate } = req.body;
   v.id(roomTypeId, "roomTypeId"); stayDates(checkInDate, checkOutDate);
   const type = await RoomType.findOne({ _id: roomTypeId, isActive: true });
   if (!type) throw new v.HttpError(404, "This room type is no longer available.");
   const nightlyRates = priceNights(type, checkInDate, checkOutDate), roomAmount = sumNights(nightlyRates);
-  const isCustomer = req.role.key === "customer";
+  const isCustomer = ["customer", "receptionist"].includes(req.role.key) && req.body.walkIn !== true; // the UC14 walk-in form sends walkIn: no deposit
   let discountAmount = 0, couponError;
   if (req.body.couponCode?.trim()) {
     try { ({ discountAmount } = await validateCoupon({ code: req.body.couponCode, customerId: isCustomer ? req.user._id : undefined, subtotal: roomAmount })); }

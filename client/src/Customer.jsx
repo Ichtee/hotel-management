@@ -658,8 +658,10 @@ export default function Customer({ route }) {
 
   let page;
   const customerPage = PROTECTED.includes(path) || path.startsWith('#/pay/');
+  // Lễ tân chỉ dùng các trang đặt phòng hộ khách; hồ sơ và thông báo vẫn chỉ dành cho khách.
+  const bookingPage = ['#/checkout', '#/confirmation', '#/my-bookings'].includes(path) || path.startsWith('#/pay/');
   if (loading) page = <p className="muted c-wrap c-section">Loading…</p>;
-  else if (customerPage && user && user.scope !== 'self' && user.role !== 'receptionist') {
+  else if (customerPage && user && user.scope !== 'self' && !(user.role === 'receptionist' && bookingPage)) {
     location.replace('#/admin');
     page = <p className="muted c-wrap c-section">This page is for customers. Opening the staff portal…</p>;
   } else if (customerPage && !user) { sessionStorage.setItem('next', route); page = <Auth note="Please sign in to continue." />; }

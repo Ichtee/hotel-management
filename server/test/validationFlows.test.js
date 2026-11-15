@@ -11,6 +11,8 @@ const User = require("../src/models/User");
 const Role = require("../src/models/Role");
 
 process.env.PAYMENT_PROVIDER = "sandbox";
+// Nor send real e-mail: dotenv keeps a variable that is already set, even empty.
+for (const k of ["EMAILJS_SERVICE_ID", "EMAILJS_TEMPLATE_ID", "EMAILJS_PUBLIC_KEY", "EMAILJS_PRIVATE_KEY", "SMTP_URL", "RESEND_API_KEY"]) process.env[k] = "";
 const origin = "http://localhost:5173";
 const password = "StrongPass123!";
 let db, app, store, manager, customer, reception;

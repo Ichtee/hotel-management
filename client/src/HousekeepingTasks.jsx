@@ -3,7 +3,10 @@ import { api, dateLabel } from './api/client.js';
 import { ReportIssue } from './RoomIssues.jsx';
 import { Badge, DataTable, Notice, PageHead, useApi } from './ui.jsx';
 
-const taskName = (task) => `${task.type.replace('_', ' ')}${task.requestContent ? ` - ${task.requestContent}` : ''}`;
+// Tên dễ hiểu cho từng loại nhiệm vụ; chỉ dọn hằng ngày và theo yêu cầu được bỏ qua (BR server).
+export const TASK_TYPES = { routine: 'Daily cleaning', ad_hoc: 'Guest request', turnover: 'Checkout cleaning', inspection: 'Room inspection' };
+export const SKIPPABLE = ['routine', 'ad_hoc'];
+export const taskName = (task) => `${TASK_TYPES[task.type] || task.type}${task.requestContent ? ` - ${task.requestContent}` : ''}`;
 
 export default function HousekeepingTasks() {
   const tasks = useApi('/housekeeping/tasks/mine');
@@ -24,7 +27,7 @@ export default function HousekeepingTasks() {
 
   return (
     <>
-      <PageHead title="My cleaning tasks" sub="Start, complete or skip only tasks assigned to you. A completed turnover task releases the room for the next guest." />
+      <PageHead title="My cleaning tasks" sub="Start, then complete each task. Daily cleaning and guest requests can be skipped with a reason (e.g. Do not disturb). Checkout cleaning and room inspections cannot be skipped: the next guest needs the room." />
       <Notice error={tasks.error} />
       {tasks.loading ? <p className="muted">Loading tasks...</p> : (
         <DataTable
@@ -38,7 +41,9 @@ export default function HousekeepingTasks() {
             <span className="row-actions">
               {task.status === 'assigned' && <button className="btn sm" onClick={() => changeStatus(task, 'in_progress')}>Start</button>}
               {task.status === 'in_progress' && <><button className="btn sm primary" onClick={() => changeStatus(task, 'completed')}>Complete</button></>}
-              {['assigned', 'in_progress'].includes(task.status) && ['routine', 'ad_hoc'].includes(task.type) && <button className="btn sm" onClick={() => changeStatus(task, 'skipped')}>Skip</button>}
+              {['assigned', 'in_progress'].includes(task.status) && (SKIPPABLE.includes(task.type)
+                ? <button className="btn sm" onClick={() => changeStatus(task, 'skipped')}>Skip</button>
+                : <button className="btn sm" disabled title={`${TASK_TYPES[task.type]} cannot be skipped`} aria-label={`Skip unavailable: ${TASK_TYPES[task.type]} cannot be skipped`}>Skip</button>)}
               {task.roomId && task.status !== 'skipped' && <button className="btn sm" onClick={() => setReporting(task.roomId._id)}>Report damage / issue</button>}
             </span>,
           ])}

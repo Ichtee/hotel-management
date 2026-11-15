@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { MENU } from './data.js';
 import AdminRoomMap from './pages/AdminRoomMap.jsx';
 import AdminRoomTypes from './pages/AdminRoomTypes.jsx';
-import HousekeepingTasks from './HousekeepingTasks.jsx';
+import HousekeepingTasks, { taskName } from './HousekeepingTasks.jsx';
 import HousekeepingAssignments from './HousekeepingAssignments.jsx';
 import RoomIssues from './RoomIssues.jsx';
 import AdHocCleaningRequest from './AdHocCleaningRequest.jsx';
@@ -194,13 +194,41 @@ function Dashboard() {
           </section>
         )}
       </div>
-      {!desk && !canRev && (
+      {mine.data && <CleaningOverview tasks={mine.data} />}
+      {!desk && !canRev && !mine.data && (
         <div className="kpis">
           {MENU.flatMap((g) => g.items || []).filter((item) => allowed(item, user.permissions, user.role)).map(([href, label, hint]) => <Stat key={href} label={label} value={cardValue(href)} hint={hint || ''} href={href} />)}
         </div>
       )}
     </>
   );
+}
+
+// Tổng quan cho housekeeping: việc còn lại, việc xong hôm nay và danh sách cần làm theo thứ tự ưu tiên.
+const PRIORITY_RANK = { urgent: 0, high: 1, normal: 2 };
+function CleaningOverview({ tasks }) {
+  const today = vnDay(0);
+  const open = tasks.filter((t) => ['assigned', 'in_progress'].includes(t.status))
+    .sort((a, b) => (PRIORITY_RANK[a.priority] ?? 3) - (PRIORITY_RANK[b.priority] ?? 3) || new Date(a.scheduledDate || a.createdAt) - new Date(b.scheduledDate || b.createdAt));
+  const doneToday = tasks.filter((t) => t.status === 'completed' && t.completedAt && new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(t.completedAt)) === today).length;
+  return <>
+    <div className="kpis">
+      <Stat label="To do" value={open.filter((t) => t.status === 'assigned').length} hint="Assigned, not started" href="#/admin/cleaning" />
+      <Stat label="In progress" value={open.filter((t) => t.status === 'in_progress').length} hint="Started, not completed" href="#/admin/cleaning" />
+      <Stat label="Urgent / high" value={open.filter((t) => t.priority !== 'normal').length} hint="Do these first" href="#/admin/cleaning" />
+      <Stat label="Completed today" value={doneToday} hint="Finished since midnight" href="#/admin/cleaning" />
+    </div>
+    <section className="panel">
+      <div className="phead"><h2>What to do next</h2><span className="pill">{open.length}</span></div>
+      {!open.length ? <p className="empty">All tasks are done. New tasks appear here when they are assigned to you.</p> : (
+        <ul className="queue">{open.map((t) => <li key={t._id}>
+          <div><strong>Room {t.roomId?.roomNumber || '—'}</strong><small>{taskName(t)} · Floor {t.roomId?.floor ?? '—'} · {dateLabel(t.scheduledDate || t.createdAt)}</small></div>
+          <span className="row-actions"><Badge v={t.priority} /><Badge v={t.status} /></span>
+        </li>)}</ul>
+      )}
+      <a className="more" href="#/admin/cleaning">Open my cleaning tasks →</a>
+    </section>
+  </>;
 }
 
 // Ưu tiên bộ lọc công việc trong ngày trước bộ lọc trạng thái.

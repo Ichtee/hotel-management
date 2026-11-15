@@ -1,3 +1,5 @@
+const { hotelTransaction } = require('./hotelOperations');
+const { allocatedFilter } = require("./paymentBalance");
 const { createHash, randomInt, timingSafeEqual } = require("node:crypto");
 const Booking = require("../models/Booking");
 const Payment = require("../models/Payment");
@@ -24,7 +26,7 @@ const WRONG_OTP = "The verification code is incorrect or has expired. Please req
 const reference = (b) => b.bookingReference || String(b._id).slice(-8).toUpperCase();
 
 // Lấy các khoản cọc đã thu nhưng chưa hoàn, mới nhất trước.
-const deposits = (bookingId) => Payment.find({ bookingId, kind: "deposit", status: "success" }).sort({ paidAt: -1 });
+const deposits = (bookingId) => Payment.find({ bookingId, kind: "deposit", ...allocatedFilter }).sort({ paidAt: -1 });
 const held = (p) => p.amount;
 
 // Tính số tiền được hoàn tại thời điểm yêu cầu.
@@ -64,6 +66,8 @@ async function cancelNow(booking, actorId, reason) {
 
 // Chốt tiền hoàn và giữ phòng trong lúc chờ duyệt; khách sạn chủ động hủy thì hoàn toàn bộ ngay.
 async function request(booking, { actorId, channel, verifyMethod, reason, hotelCaused = false }) {
+  booking = await Booking.findById(booking._id);
+  if (!booking) throw new v.HttpError(404, "Booking not found.");
   if (booking.status === "cancellation_requested") throw new v.HttpError(409, "A cancellation request for this booking is already waiting for review.");
   if (booking.status === "pending")
     throw new v.HttpError(409, "This booking is not booked yet: cancel the payment instead and the held room is released at once.");
@@ -209,4 +213,5 @@ async function verifyOtp(bookingId, code) {
   await Booking.updateOne({ _id: bookingId }, { $unset: { cancellationOtp: 1 } });
 }
 
-module.exports = { estimate, request, withdraw, approve, autoApprove, cancelPayment, expireHolds, sendOtp, verifyOtp, reference, HOTEL_REASON };
+const atomic = (work) => (...args) => hotelTransaction(() => work(...args));
+module.exports = { estimate, request: atomic(request), withdraw: atomic(withdraw), approve: atomic(approve), autoApprove: atomic(autoApprove), cancelPayment: atomic(cancelPayment), expireHolds: atomic(expireHolds), sendOtp, verifyOtp, reference, HOTEL_REASON };

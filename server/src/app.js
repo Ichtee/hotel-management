@@ -1,7 +1,7 @@
 const express = require("express");
 const { rateLimit } = require("express-rate-limit");
 const helmet = require("helmet");
-const { authenticate, permit, requireManager, requirePasswordChanged } = require("./middleware/auth");
+const { authenticate, permit, permitAny, requireManager, requirePasswordChanged } = require("./middleware/auth");
 const staff = require("./controllers/staff");
 const staffRoles = require("./controllers/staffRoles");
 const rooms = require("./controllers/rooms");
@@ -30,11 +30,9 @@ const { HttpError } = require("./utils/validation");
 const RoomType = require("./models/RoomType");
 
 // Bộ xử lý khách hàng, loại phòng và tìm phòng.
-const roomTypeController = require("./controllers/roomTypeController");
 const catalog = require("./controllers/catalog");
 const notifications = require("./controllers/notifications");
 const auditLogs = require("./controllers/auditLogs");
-const roomController = require("./controllers/roomController");
 
 const customerRoutes = require("./routes/customer.routes");
 
@@ -143,8 +141,9 @@ function createApp({
 
   app.get("/api/auth/me", auth.profile);
   // Mỗi người dùng chỉ đọc thông báo của chính mình.
-  app.get("/api/notifications", notifications.listing);
-  app.post("/api/notifications/read", notifications.markRead);
+  const notificationAccess = (req, res, next) => ['receptionist', 'housekeeping'].includes(req.role.key) ? permit('notifications.read')(req, res, next) : next();
+  app.get("/api/notifications", notificationAccess, notifications.listing);
+  app.post("/api/notifications/read", notificationAccess, notifications.markRead);
   app.get("/api/audit-logs", auditLogs.listing);
   app.get("/api/profile", auth.profile);
   app.put("/api/profile/password", authLimit, auth.changePassword);
@@ -162,13 +161,13 @@ function createApp({
   // Báo giá dùng chung cho đặt phòng trực tuyến và tại quầy.
   app.post("/api/bookings/quote", bookingCreation.quote);
   // Phòng cụ thể chỉ dành cho nhân viên có quyền tìm phòng.
-  app.get("/api/rooms/search", permit("rooms.search"), roomController.search);
+  app.get("/api/rooms/search", permit("rooms.search"), rooms.search);
   app.patch("/api/profile", auth.updateProfile);
   // Khách đã đăng nhập gửi đánh giá booking của mình.
   app.post("/api/reviews", customerOnly, roomTypes.submitReview);
   app.get("/api/reviews/my", customerOnly, roomTypes.customerReviews);
-  app.get("/api/room-issues/options", permit("room_issues.report"), roomIssues.options);
-  app.post("/api/room-issues", permit("room_issues.report"), roomIssues.create);
+  app.get("/api/room-issues/options", permitAny("room_issues.report", "damages.report"), roomIssues.options);
+  app.post("/api/room-issues", permitAny("room_issues.report", "damages.report"), roomIssues.create);
   app.get("/api/room-issues", requireManager, roomIssues.listing);
   // Housekeeping chỉ xem và cập nhật nhiệm vụ được giao cho mình.
   app.get("/api/housekeeping/tasks/mine", permit("cleaning_tasks.own.read"), housekeepingTasks.mine);
@@ -190,14 +189,16 @@ function createApp({
   app.get("/api/staff/:id", staff.detail);
   app.patch("/api/staff/:id", staff.update);
   app.delete("/api/staff/:id", staff.deactivate);
+  const managerOr = (permission) => (req, res, next) => req.role.key === "manager" ? next() : permit(permission)(req, res, next);
+  app.get("/api/rooms/:id", managerOr("rooms.details.read"), rooms.detail);
   app.use("/api/rooms", requireManager);
   app.get("/api/rooms", rooms.listing);
   app.post("/api/rooms", rooms.create);
-  app.get("/api/rooms/:id", rooms.detail);
   app.patch("/api/rooms/:id", rooms.update);
   app.patch("/api/rooms/:id/maintenance", rooms.maintenance);
   app.get("/api/rooms/:id/issues", rooms.issues);
   app.patch("/api/room-issues/:id/resolve", requireManager, rooms.resolveIssue);
+  app.get("/api/room-types/:id/reviews", managerOr("reviews.read"), roomTypes.reviews);
   app.use("/api/room-types", requireManager);
   app.get("/api/room-types", roomTypes.listing);
   app.post("/api/room-types", roomTypes.create);
@@ -205,8 +206,7 @@ function createApp({
   app.get("/api/room-types/:id", roomTypes.detail);
   app.patch("/api/room-types/:id", roomTypes.update);
   app.delete("/api/room-types/:id", roomTypes.remove);
-  app.get("/api/room-types/:id/reviews", roomTypes.reviews);
-  app.put("/api/room-types/:id/pricing", roomTypeController.updatePricing);
+  app.put("/api/room-types/:id/pricing", roomTypes.updatePricing);
   app.patch("/api/reviews/:id/visibility", requireManager, roomTypes.visibility);
   // Quản lý danh mục dịch vụ và vật phẩm bồi thường.
   app.get("/api/catalog/:catalog", requireManager, catalog.listing);
@@ -233,8 +233,8 @@ function createApp({
   app.post("/api/front-desk/bookings", permit("bookings.walk_in.create"), bookingCreation.createWalkIn);
   app.patch("/api/front-desk/bookings/:id", permit("bookings.managed.update"), bookingCreation.modifyWalkIn);
   app.post("/api/front-desk/bookings/:id/cancel", permit("bookings.managed.cancel"), cancellations.recordAtDesk);
-  app.get("/api/front-desk/bookings/:id/available-rooms", permit("stays.check_in"), bookingCreation.availableRooms);
-  app.post("/api/front-desk/bookings/:id/check-in", permit("stays.check_in"), bookingCreation.checkIn);
+  app.get("/api/front-desk/bookings/:id/available-rooms", permit("stays.check_in"), permit("rooms.assign"), bookingCreation.availableRooms);
+  app.post("/api/front-desk/bookings/:id/check-in", permit("stays.check_in"), permit("rooms.assign"), bookingCreation.checkIn);
   app.get("/api/front-desk/bookings/:id/change-room-options", permit("rooms.change"), bookingCreation.changeRoomOptions);
   app.post("/api/front-desk/bookings/:id/change-room", permit("rooms.change"), bookingCreation.changeRoom);
   app.get("/api/front-desk/services", permit("booking_services.record"), bookingCreation.services);
@@ -242,7 +242,7 @@ function createApp({
   app.post("/api/front-desk/bookings/:id/services/:serviceLineId/void", permit("booking_services.record"), bookingCreation.voidService);
   app.post("/api/front-desk/bookings/:id/check-out/start", permit("stays.check_out"), bookingCreation.startCheckOut);
   app.post("/api/front-desk/bookings/:id/check-out", permit("stays.check_out"), bookingCreation.checkOut);
-  app.post("/api/front-desk/bookings/:id/invoice", permit("stays.check_out"), bookingCreation.generateInvoice);
+  app.post("/api/front-desk/bookings/:id/invoice", permit("invoices.print"), bookingCreation.generateInvoice);
   // Xem chi tiết booking theo quyền của người gọi.
   app.get("/api/bookings/:id", bookings.detail);
   app.get("/api/bookings/:bookingId/invoice", invoices.customerDetail);
@@ -264,11 +264,12 @@ function createApp({
   // Kiểm tra quyền trước các thao tác thanh toán, hủy và hoàn tiền tại quầy.
   const settle = permit("payments.settle"), cancel = permit("bookings.managed.cancel"), review = permit("cancellations.review"), refund = permit("refunds.handle");
   app.post("/api/frontdesk/bookings/:id/payments", settle, payments.finalPayment);
-  // Lễ tân có quyền thu tiền và quản lý có quyền doanh thu được xem danh sách thanh toán.
-  const billing = (req, res, next) => (req.role.permissions.includes("revenue.read") ? next() : settle(req, res, next));
+  // Quyền xem thanh toán và hóa đơn độc lập với quyền thu tiền.
+  const billing = permitAny("revenue.read", "payments.status.read");
+  const invoiceRead = permitAny("revenue.read", "invoices.print");
   app.get("/api/frontdesk/payments", billing, payments.listing);
-  app.get("/api/frontdesk/invoices", billing, invoices.listing);
-  app.get("/api/frontdesk/invoices/:id", billing, invoices.detail);
+  app.get("/api/frontdesk/invoices", invoiceRead, invoices.listing);
+  app.get("/api/frontdesk/invoices/:id", invoiceRead, invoices.detail);
   app.get("/api/frontdesk/requests", permit("stay_requests.manage"), stayRequests.listing);
   app.patch("/api/frontdesk/requests/:id", permit("stay_requests.manage"), stayRequests.handle);
   app.get("/api/frontdesk/requests/:id/id-photo", permit("stays.check_in"), stayRequests.photoLink);

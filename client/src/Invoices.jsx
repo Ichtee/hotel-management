@@ -1,15 +1,17 @@
+import { useAuth } from './context/Auth.jsx';
 import { useState } from 'react';
 import { dateLabel, money } from './api/client.js';
-import { DataTable, Notice, PageHead, Screen, useApi, useScreen } from './ui.jsx';
+import { DataTable, Notice, PageHead, Screen, useApi, useScreen, usePagedApi, Pagination } from './ui.jsx';
 
 export default function Invoices() {
-  const list = useApi('/frontdesk/invoices?limit=100'); const sc = useScreen();
+  const list = usePagedApi('/frontdesk/invoices?limit=100'); const sc = useScreen();
   if (sc.name === 'view') return <InvoiceDetail id={sc.id} onClose={sc.close} />;
-  return <><PageHead title="Invoices" sub="Invoices generated at checkout. Open an invoice to review or print it." /><Notice error={list.error} />
+  return <><PageHead title="Invoices" sub="Invoices generated at checkout. Open an invoice to review or print it." /><Notice error={list.error} /><Pagination list={list} />
     {list.loading ? <p className="muted">Loading invoices...</p> : <DataTable cols={['Invoice', 'Booking', 'Guest', 'Amount', 'Issued', '']} rows={(list.data || []).map((invoice) => [invoice.kind === 'supplementary' ? `${invoice.invoiceNumber} (supplementary)` : invoice.invoiceNumber, invoice.bookingId?.bookingReference || '—', invoice.bookingId?.guestName || 'Guest', money(invoice.totalAmount), dateLabel(invoice.issuedAt), <button className="btn sm" onClick={() => sc.go('view', invoice._id)}>View / print</button>])} />}
   </>;
 }
 function InvoiceDetail({ id, onClose }) {
+  const { user } = useAuth();
   const invoice = useApi(`/frontdesk/invoices/${id}`); const i = invoice.data; const b = i?.bookingId;
   return <Screen title="Invoice" onClose={onClose}><div id="invoice-print">
     {invoice.loading ? <p>Loading invoice...</p> : invoice.error ? <Notice error={invoice.error} /> : <>
@@ -20,5 +22,5 @@ function InvoiceDetail({ id, onClose }) {
         ? [...i.lines.map((l) => [i.kind === 'supplementary' ? `Damage / loss: ${l.name}` : l.name.replace(/Night of (\d{4}-\d{2}-\d{2})/, (_, d) => `Night of ${dateLabel(d)}`), money(l.amount)]), ['Total', money(i.totalAmount)], ...(i.kind === 'supplementary' ? [] : [['Paid (deposit and front desk)', money(i.paidAmount ?? i.totalAmount)], ['Balance', money(i.balance ?? 0)]])]
         : [['Room charges', money(b?.roomAmount)], ['Additional services', money(b?.serviceAmount)], ...(b?.feeAmount ? [['Fees', money(b.feeAmount)]] : []), ...(b?.services || []).map((s) => [`${s.name} x${s.quantity}`, money(s.amount)]), ['Total paid', money(i.totalAmount)]]} />
     </>}
-  </div><div className="modal-actions"><button className="btn" onClick={onClose}>Close</button><button className="btn primary" onClick={() => window.print()} disabled={!i}>Print</button></div></Screen>;
+  </div><div className="modal-actions"><button className="btn" onClick={onClose}>Close</button>{user.permissions.includes("invoices.print") && <button className="btn primary" onClick={() => window.print()} disabled={!i}>Print</button>}</div></Screen>;
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useAuth } from './context/Auth.jsx';
 import { api, dateLabel } from './api/client.js';
 import { ReportIssue } from './RoomIssues.jsx';
 import { Badge, DataTable, Notice, PageHead, useApi } from './ui.jsx';
@@ -13,8 +14,11 @@ const hotelDay = (d) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Ch
 const STATUS_FILTERS = [['', 'All'], ['open', 'Not finished'], ['assigned', 'Assigned'], ['in_progress', 'In progress'], ['completed', 'Completed'], ['skipped', 'Skipped']];
 
 export default function HousekeepingTasks() {
+  const { user } = useAuth();
+  const canUpdate = user.permissions.includes('cleaning_tasks.status.update');
+  const canReport = user.permissions.some((p) => ['room_issues.report', 'damages.report'].includes(p));
   const tasks = useApi('/housekeeping/tasks/mine');
-  const rooms = useApi('/room-issues/options');
+  const rooms = useApi('/room-issues/options', canReport);
   const [reporting, setReporting] = useState(null);
   const [f, setF] = useState({ status: '', priority: '', date: '', room: '' });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -59,12 +63,12 @@ export default function HousekeepingTasks() {
             dateLabel(task.scheduledDate || task.createdAt),
             <Badge v={task.status} />,
             <span className="row-actions">
-              {task.status === 'assigned' && <button className="btn sm" onClick={() => changeStatus(task, 'in_progress')}>Start</button>}
-              {task.status === 'in_progress' && <><button className="btn sm primary" onClick={() => changeStatus(task, 'completed')}>Complete</button></>}
-              {['assigned', 'in_progress'].includes(task.status) && (SKIPPABLE.includes(task.type)
+              {canUpdate && task.status === 'assigned' && <button className="btn sm" onClick={() => changeStatus(task, 'in_progress')}>Start</button>}
+              {canUpdate && task.status === 'in_progress' && <><button className="btn sm primary" onClick={() => changeStatus(task, 'completed')}>Complete</button></>}
+              {canUpdate && ['assigned', 'in_progress'].includes(task.status) && (SKIPPABLE.includes(task.type)
                 ? <button className="btn sm" onClick={() => changeStatus(task, 'skipped')}>Skip</button>
                 : <button className="btn sm" disabled title={`${TASK_TYPES[task.type]} cannot be skipped`} aria-label={`Skip unavailable: ${TASK_TYPES[task.type]} cannot be skipped`}>Skip</button>)}
-              {task.roomId && task.status !== 'skipped' && <button className="btn sm" onClick={() => setReporting(task.roomId._id)}>Report damage / issue</button>}
+              {canReport && task.roomId && task.status !== 'skipped' && <button className="btn sm" onClick={() => setReporting(task.roomId._id)}>Report damage / issue</button>}
             </span>,
           ])}
         />

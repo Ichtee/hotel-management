@@ -1,7 +1,9 @@
+import { useAuth } from './context/Auth.jsx';
 import { useEffect, useRef, useState } from 'react';
 import { api } from './api/client.js';
-import { PageHead, useApi } from './ui.jsx';
+import { PageHead, useApi, usePagedApi, Pagination } from './ui.jsx';
 
+const permitted = (user) => !['receptionist', 'housekeeping'].includes(user?.role) || user.permissions.includes('notifications.read');
 const ago = (iso) => {
   const m = Math.round((Date.now() - new Date(iso)) / 60000);
   if (m < 1) return 'just now';
@@ -12,7 +14,9 @@ const ago = (iso) => {
 
 // Hiện thông báo của người đăng nhập và đánh dấu đã đọc khi mở.
 export default function NotificationBell({ bookingHref, allHref }) {
-  const list = useApi('/notifications');
+  const { user } = useAuth();
+  const allowed = permitted(user);
+  const list = useApi('/notifications', allowed);
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const { reload } = list;
@@ -26,6 +30,7 @@ export default function NotificationBell({ bookingHref, allHref }) {
   // Giữ trạng thái chưa đọc nếu cập nhật thất bại.
   const read = async (body) => { try { await api('/notifications/read', { method: 'POST', body }); reload(); } catch {} };
   const openOne = (n) => { if (!n.isRead) read({ id: n._id }); if (n.bookingId && bookingHref) { location.hash = bookingHref; setOpen(false); } };
+  if (!allowed) return null;
   return (
     <div className="bell" ref={ref}>
       <button type="button" className="bell-btn" aria-label={`Notifications${unread ? `, ${unread} unread` : ''}`} aria-expanded={open} onClick={() => { setOpen(!open); if (!open) reload(); }}>
@@ -56,8 +61,9 @@ export default function NotificationBell({ bookingHref, allHref }) {
 }
 
 export function NotificationsPage({ bookingHref }) {
-  const list = useApi('/notifications');
+  const { user } = useAuth();
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const list = usePagedApi(`/notifications?unread=${unreadOnly}`, permitted(user));
   // Giữ trạng thái chưa đọc nếu cập nhật thất bại.
   const read = async (body) => { try { await api('/notifications/read', { method: 'POST', body }); list.reload(); } catch {} };
   const unread = list.meta?.unread || 0;
@@ -66,6 +72,7 @@ export function NotificationsPage({ bookingHref }) {
   return (
     <>
       <PageHead title="Notifications" sub={unread ? `${unread} unread` : 'You are all caught up'} extra={unread > 0 ? <button className="btn" onClick={() => read({})}>Mark all as read</button> : null} />
+      <Pagination list={list} />
       <div className="chips" role="group" aria-label="Filter notifications">
         {[[false, 'All'], [true, 'Unread']].map(([v, l]) => <button key={l} className={unreadOnly === v ? 'chip on' : 'chip'} aria-pressed={unreadOnly === v} onClick={() => setUnreadOnly(v)}>{l}</button>)}
       </div>

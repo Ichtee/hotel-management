@@ -17,12 +17,18 @@ function holdingFilter(now = new Date()) {
 // Giữ thêm 15 phút sau hạn cho thanh toán đến muộn; hiện áp dụng cho mọi booking chờ cọc.
 const sellingFilter = (now = new Date()) => holdingFilter(new Date(now.getTime() - 15 * 60000));
 
+async function busyRooms(ids, from, to, ignoredBookingId) {
+  const filter = { ...sellingFilter(), checkInDate: { $lt: new Date(`${new Date(to).toISOString().slice(0, 10)}T00:00:00Z`) }, checkOutDate: { $gt: new Date(`${new Date(from).toISOString().slice(0, 10)}T00:00:00Z`) }, "rooms.roomId": { $in: ids } };
+  if (ignoredBookingId) filter._id = { $ne: ignoredBookingId };
+  return new Set((await Booking.distinct("rooms.roomId", filter)).map(String));
+}
+
 // Quét các mốc đổi số lượng để phát hiện thiếu phòng mà không duyệt từng ngày.
 async function capacityImpact(typeId, excludedRoomId, session, now = new Date()) {
   const today = hotelDay(now);
   const capacity = await Room.countDocuments({ roomTypeId: typeId, isActive: true, status: { $ne: "maintenance" },
     ...(excludedRoomId ? { _id: { $ne: excludedRoomId } } : {}) }).session(session);
-  const bookings = await Booking.find({ ...holdingFilter(now), "rooms.roomTypeId": typeId,
+  const bookings = await Booking.find({ ...sellingFilter(now), "rooms.roomTypeId": typeId,
     checkOutDate: { $gt: new Date(`${today}T00:00:00Z`) } })
     .select("bookingReference checkInDate checkOutDate status rooms.roomTypeId").session(session).lean();
   const events = new Map();
@@ -60,4 +66,4 @@ async function assertCapacity(typeId, excludedRoomId, session, now = new Date())
   }
   return impact;
 }
-module.exports = { hotelDay, holdingFilter, sellingFilter, capacityImpact, assertCapacity };
+module.exports = { busyRooms, hotelDay, holdingFilter, sellingFilter, capacityImpact, assertCapacity };

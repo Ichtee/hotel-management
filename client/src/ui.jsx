@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { api } from './api/client.js';
+import { api, apiAll } from './api/client.js';
 
 // Dùng tên khách sạn đã lưu cho logo và bản quyền; tạm dùng GrandStay khi đang tải.
 let hotelNameReq;
@@ -155,16 +155,49 @@ export function Modal({ title, onClose, children }) {
 }
 
 // Tải lại dữ liệu khi đường dẫn hoặc tham số API thay đổi.
-export function useApi(path, enabled = true) {
+export function useApi(path, enabled = true, allPages = false) {
   const [state, setState] = useState({ data: null, meta: null, error: null, loading: true });
+  const pending = useRef(null);
   const load = useCallback(() => {
-    if (!enabled || !path) return;
+    pending.current?.abort();
+    if (!enabled || !path) { setState({ data: null, meta: null, error: null, loading: false }); return; }
+    const controller = new AbortController();
+    pending.current = controller;
     setState((s) => ({ ...s, loading: true }));
-    api(path).then((r) => setState({ data: r.data, meta: r.meta, error: null, loading: false }))
-      .catch((error) => setState({ data: null, meta: null, error, loading: false }));
-  }, [path, enabled]);
-  useEffect(load, [load]);
+    // Bỏ kết quả cũ khi bộ lọc đổi hoặc màn hình đã đóng.
+    (allPages ? apiAll : api)(path, { signal: controller.signal }).then((r) => {
+      if (!controller.signal.aborted) setState({ data: r.data, meta: r.meta, error: null, loading: false });
+    }).catch((error) => {
+      if (!controller.signal.aborted) setState({ data: null, meta: null, error, loading: false });
+    });
+  }, [path, enabled, allPages]);
+  useEffect(() => { load(); return () => pending.current?.abort(); }, [load]);
   return { ...state, reload: load };
+}
+
+export const useAllApi = (path, enabled = true) => useApi(path, enabled, true);
+
+// Đổi bộ lọc trở về trang đầu; mỗi lần chỉ tải trang đang xem.
+export function usePagedApi(path, enabled = true) {
+  const [paging, setPaging] = useState({ path, page: 1 });
+  const page = paging.path === path ? paging.page : 1;
+  const [pathname, search] = (path || '').split('?');
+  const query = new URLSearchParams(search);
+  query.set('page', page);
+  query.set('limit', 20);
+  const state = useApi(path ? `${pathname}?${query}` : null, enabled);
+  return { ...state, page, setPage: (next) => setPaging({ path, page: next }) };
+}
+
+export function Pagination({ list }) {
+  if (!list.meta || list.meta.pages <= 1) return null;
+  return <nav className="between" aria-label="Pagination" style={{ marginBlock: '1rem' }}>
+    <span className="muted">{list.meta.total} results · page {list.page} of {list.meta.pages}</span>
+    <span className="row-actions">
+      <button className="btn sm" disabled={list.loading || list.page <= 1} onClick={() => list.setPage(list.page - 1)}>Previous</button>
+      <button className="btn sm" disabled={list.loading || list.page >= list.meta.pages} onClick={() => list.setPage(list.page + 1)}>Next</button>
+    </span>
+  </nav>;
 }
 
 export function DataTable({ cols, rows }) {

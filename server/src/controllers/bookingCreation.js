@@ -1,4 +1,6 @@
+const { allocatedFilter } = require("../services/paymentBalance");
 const { randomBytes } = require("node:crypto");
+const { setRoomStatus, beginRoomStay } = require('../services/roomHistory');
 const Booking = require("../models/Booking");
 const Room = require("../models/Room");
 const RoomType = require("../models/RoomType");
@@ -7,12 +9,10 @@ const Payment = require("../models/Payment");
 const Penalty = require("../models/Penalty");
 const Task = require("../models/CleaningTask");
 const Request = require("../models/CheckInOutRequest");
-const CouponUsage = require("../models/CouponUsage");
-const Coupon = require("../models/Coupon");
 const Service = require("../models/Service");
 const Invoice = require("../models/Invoice");
 const HotelInfo = require("../models/HotelInfo");
-const { validateCoupon, recheckCoupon } = require("../services/promotions");
+const { validateCoupon, recheckCoupon, redeemCoupon } = require("../services/promotions");
 const { currentDepositPolicy, currentCancellationPolicy } = require("../services/policies");
 const { createCleaningTask } = require("../services/housekeepingTasks");
 const { paidAmount } = require("../services/payments");
@@ -24,8 +24,8 @@ const { DAY, iso, priceAt, nightsOf, priceNights, sumNights, stayAmount, storedN
 const { closeForBooking } = require("./stayRequests");
 const v = require("../utils/validation");
 
-const { hotelTransaction } = require("../services/hotelOperations");
-const { sellingFilter } = require("../services/roomInventory");
+const { hotelTransaction, transactional } = require("../services/hotelOperations");
+const { busyRooms } = require("../services/roomInventory");
 
 const OPEN_ISSUE = ["open", "in_progress"];
 const NOT_AVAILABLE = "The selected room is not available for the selected dates. Please choose another room or date.";
@@ -49,28 +49,30 @@ async function assignRoom(roomTypeId, checkInDate, checkOutDate, ignoredBookingI
   const busy = await busyRooms(candidates.map((r) => r._id), checkInDate, checkOutDate, ignoredBookingId);
   return { roomId: candidates.find((r) => !busy.has(String(r._id)))?._id || null };
 }
-async function busyRooms(ids, from, to, ignoredBookingId) {
-  const filter = { ...sellingFilter(), checkInDate: { $lt: new Date(`${iso(to)}T00:00:00Z`) }, checkOutDate: { $gt: new Date(`${iso(from)}T00:00:00Z`) }, "rooms.roomId": { $in: ids } };
-  if (ignoredBookingId) filter._id = { $ne: ignoredBookingId };
-  return new Set((await Booking.distinct("rooms.roomId", filter)).map(String));
-}
+
 // Khóa thao tác chọn và lưu phòng để hai yêu cầu không cùng lấy phòng cuối.
-const locked = (work) => hotelTransaction(() => work());
+const locked = hotelTransaction;
 const reserve = (roomTypeId, from, to, save) => locked(async () => {
   const { roomId } = await assignRoom(roomTypeId, from, to);
   if (!roomId) throw new v.HttpError(409, NOT_AVAILABLE);
   return save(roomId);
 });
+function requireCouponPermission(req) {
+  if (req.body.couponCode !== undefined && req.body.couponCode !== '') req.body.couponCode = v.couponCode(req.body.couponCode, 'couponCode');
+  if (req.body.couponCode && req.role.key !== 'customer' && !req.role.permissions.includes('coupons.apply'))
+    throw new v.HttpError(403, 'You do not have permission to apply coupons.');
+}
 const depositsPaid = async (bookingId) =>
-  (await Payment.find({ bookingId, kind: "deposit", status: "success" }).select("amount").lean()).reduce((s, p) => s + p.amount, 0);
+  (await Payment.find({ bookingId, kind: "deposit", ...allocatedFilter }).select("amount").lean()).reduce((s, p) => s + p.amount, 0);
 const totalOf = (b) => b.roomAmount - (b.discountAmount || 0) + (b.serviceAmount || 0) + (b.feeAmount || 0) + (b.penaltyAmount || 0);
 
 // Khách đăng nhập đặt loại phòng còn trống; giữ phòng 15 phút để trả cọc.
-async function create(req, res) {
+async function create(req) {
+  requireCouponPermission(req);
   v.keys(req.body, ["roomTypeId", "checkInDate", "checkOutDate", "guestCount", "couponCode", "paymentOption", "fullName", "phone", "email", "consent", "captchaToken"]);
   const { roomTypeId, checkInDate, checkOutDate } = req.body;
   v.id(roomTypeId, "roomTypeId"); stayDates(checkInDate, checkOutDate);
-  const guestCount = v.number(req.body.guestCount, "guestCount", 1, 20);
+  const guestCount = v.number(req.body.guestCount, "guestCount", 1, 100);
   // Booking trực tuyến phải trả cọc qua mạng, không chọn trả tại quầy hoặc trả toàn bộ.
   v.choice(req.body.paymentOption || "deposit", "paymentOption", ["deposit"]);
   // Yêu cầu đồng ý chính sách và điền sẵn liên hệ từ hồ sơ để khách chỉnh sửa.
@@ -79,7 +81,6 @@ async function create(req, res) {
   const guestName = req.body.fullName !== undefined ? v.name(req.body.fullName) : req.user.customerProfile?.fullName || req.user.username;
   const guestPhone = req.body.phone === undefined ? req.user.phone : v.phone(req.body.phone, true);
   const guestEmail = req.body.email === undefined ? req.user.email : v.email(req.body.email);
-  await assertCaptcha(req.body.captchaToken, req.ip);
   if ((await Booking.countDocuments({ customerId: req.user._id, status: "pending", holdExpiresAt: { $gt: new Date() } })) >= 3)
     throw new v.HttpError(409, "You already have 3 unpaid bookings. Please pay, cancel the payment or wait for one of them to expire.");
   const type = await RoomType.findOne({ _id: roomTypeId, isActive: true });
@@ -91,7 +92,8 @@ async function create(req, res) {
   const coupon = req.body.couponCode?.trim() ? await validateCoupon({ code: req.body.couponCode, customerId: req.user._id, subtotal: roomAmount }) : null;
   const discountAmount = coupon?.discountAmount || 0;
   const totalAmount = roomAmount - discountAmount;
-  const [policy, cancellation] = await Promise.all([currentDepositPolicy(), currentCancellationPolicy()]);
+  const policy = await currentDepositPolicy();
+  const cancellation = await currentCancellationPolicy();
   if (!policy) throw new v.HttpError(409, "Online booking is not available yet: the hotel has not set a deposit policy.");
   const depositRequired = percentOf(totalAmount, policy.deposit.value);
   // Giữ phòng 15 phút để trả cọc; xác nhận ngay nếu không có tiền phải trả.
@@ -110,17 +112,17 @@ async function create(req, res) {
     },
     bookingSource: "online", events: [{ actorId: req.user._id, type: "created", note: "Booking created online" }],
   }));
-  if (coupon) { await CouponUsage.create({ couponId: coupon.couponId, bookingId: booking._id, customerId: req.user._id }); await Coupon.updateOne({ _id: coupon.couponId }, { $inc: { usageCount: 1 } }); }
+  if (coupon) await redeemCoupon(coupon, booking);
   if (!held) await tell("booking_confirmed", booking.customerId, { reference: booking.bookingReference }, { bookingId: booking._id });
   // Chỉ tạo đơn trả cọc khi mở trang thanh toán, không tạo bản ghi tạm ở đây.
-  res.status(201).json({ data: booking });
+  return { data: booking };
 }
 // Trả loại phòng đủ sức chứa và còn trống suốt kỳ, kèm giá; không lộ phòng cụ thể.
 async function availability(req, res) {
   v.keys(req.query, ["checkIn", "checkOut", "guests"]);
   const { checkIn, checkOut } = req.query;
   stayDates(checkIn, checkOut);
-  const guests = req.query.guests === undefined ? 1 : v.number(Number(req.query.guests), "guests", 1, 20);
+  const guests = req.query.guests === undefined ? 1 : v.number(Number(req.query.guests), "guests", 1, 100);
   const types = await RoomType.find({ isActive: true, maxOccupancy: { $gte: guests } }).select("name description basePrice maxOccupancy amenities images bedType roomSizeSqm seasonalPricing").sort({ basePrice: 1 }).lean();
   const rooms = await Room.find({ roomTypeId: { $in: types.map((t) => t._id) }, isActive: true, status: { $ne: "maintenance" } }).select("roomTypeId").lean();
   const busy = await busyRooms(rooms.map((r) => r._id), checkIn, checkOut);
@@ -132,6 +134,7 @@ async function availability(req, res) {
 }
 // Báo giá trước khi tạo booking; bỏ giảm giá nếu mã sai và không yêu cầu cọc với khách tại quầy.
 async function quote(req, res) {
+  requireCouponPermission(req);
   v.keys(req.body, ["roomTypeId", "checkInDate", "checkOutDate", "couponCode", "walkIn"]);
   const { roomTypeId, checkInDate, checkOutDate } = req.body;
   v.id(roomTypeId, "roomTypeId"); stayDates(checkInDate, checkOutDate);
@@ -154,12 +157,13 @@ async function quote(req, res) {
 async function roomTypes(_req, res) { res.json({ data: await RoomType.find({ isActive: true }).select("name description basePrice maxOccupancy amenities images bedType roomSizeSqm seasonalPricing").sort({ basePrice: 1 }).lean() }); }
 
 // Đặt tại quầy bắt đầu hôm nay và không yêu cầu cọc.
-async function createWalkIn(req, res) {
+async function createWalkIn(req) {
+  requireCouponPermission(req);
   v.keys(req.body, ["roomTypeId", "checkInDate", "checkOutDate", "guestCount", "fullName", "phone", "email", "idDocumentNo", "couponCode"]);
   const b = req.body;
   v.id(b.roomTypeId, "roomTypeId"); stayDates(b.checkInDate, b.checkOutDate);
   if (b.checkInDate !== vnDate()) v.fail("A booking without a deposit can only be created for today's check-in date.", "checkInDate", 409);
-  const guestCount = v.number(b.guestCount, "guestCount", 1, 20);
+  const guestCount = v.number(b.guestCount, "guestCount", 1, 100);
   const fullName = v.name(b.fullName), phone = v.phone(b.phone, true), idDocumentNo = v.idNumber(b.idDocumentNo);
   const email = b.email ? v.email(b.email) : undefined;
   const type = await RoomType.findOne({ _id: b.roomTypeId, isActive: true });
@@ -170,8 +174,8 @@ async function createWalkIn(req, res) {
   const coupon = b.couponCode?.trim() ? await validateCoupon({ code: b.couponCode, subtotal: roomAmount }) : null;
   const discountAmount = coupon?.discountAmount || 0;
   const booking = await reserve(type._id, b.checkInDate, b.checkOutDate, (roomId) => Booking.create({ bookingReference: reference(), nightlyRates, createdBy: req.user._id, checkInDate: b.checkInDate, checkOutDate: b.checkOutDate, status: "confirmed", rooms: [{ roomId, roomTypeId: type._id, priceAtBooking: Math.round(roomAmount / nightsOf(b.checkInDate, b.checkOutDate)), guestCount }], guestName: fullName, guestPhone: phone, guestEmail: email, guestIdDocumentNo: idDocumentNo, roomAmount, couponCode: coupon?.code, discountAmount, totalAmount: roomAmount - discountAmount, depositRequired: 0, bookingSource: "front_desk", events: [{ actorId: req.user._id, type: "created", note: "Walk-in booking created by receptionist" }] }));
-  if (coupon) await Coupon.updateOne({ _id: coupon.couponId }, { $inc: { usageCount: 1 } });
-  res.status(201).json({ data: booking, message: "Booking created successfully." });
+  if (coupon) await redeemCoupon(coupon, booking);
+  return { data: booking, message: "Booking created successfully." };
 }
 
 // Giữ giá đêm cũ, tính giá đêm thêm và kiểm tra lại mã giảm giá.
@@ -183,7 +187,7 @@ async function changeStay(booking, input, { byCustomer, dropCoupon = false }) {
   const oldIn = iso(booking.checkInDate), oldOut = iso(booking.checkOutDate);
   const checkInDate = input.checkInDate || oldIn, checkOutDate = input.checkOutDate || oldOut;
   if (input.guestCount !== undefined) {
-    const guests = v.number(input.guestCount, "guestCount", 1, 20);
+    const guests = v.number(input.guestCount, "guestCount", 1, 100);
     if (guests > type.maxOccupancy) v.fail(`This room accommodates up to ${type.maxOccupancy} guests.`, "guestCount");
     line.guestCount = guests;
   }
@@ -220,7 +224,7 @@ async function changeStay(booking, input, { byCustomer, dropCoupon = false }) {
 }
 
 // Lễ tân sửa lịch lưu trú và liên hệ trên booking, không sửa thông tin đăng nhập.
-async function modifyWalkIn(req, res) {
+async function modifyWalkIn(req) {
   v.keys(req.body, ["checkInDate", "checkOutDate", "guestCount", "fullName", "phone", "idDocumentNo", "dropCoupon"]);
   const booking = await Booking.findById(v.id(req.params.id)).select("+guestIdDocumentNo");
   if (!booking) throw new v.HttpError(404, "Booking not found.");
@@ -238,11 +242,11 @@ async function modifyWalkIn(req, res) {
     await booking.save();
   });
   if (booking.customerId) await tell("booking_modified", booking.customerId, { reference: booking.bookingReference }, { bookingId: booking._id });
-  res.json({ data: booking, message: "Updated successfully." });
+  return { data: booking, message: "Updated successfully." };
 }
 
 // Khách chỉ sửa lịch và liên hệ booking của mình; giữ loại phòng, thu giấy tờ khi nhận phòng.
-async function modifyOwn(req, res) {
+async function modifyOwn(req) {
   v.keys(req.body, ["checkInDate", "checkOutDate", "guestCount", "fullName", "phone", "email", "specialRequests"]);
   const booking = await Booking.findOne({ _id: v.id(req.params.id), customerId: req.user._id });
   if (!booking) throw new v.HttpError(404, "Booking not found.");
@@ -254,7 +258,7 @@ async function modifyOwn(req, res) {
   booking.events.push({ actorId: req.user._id, type: "modified", note: "Booking modified by the customer" });
   await locked(async () => { await changeStay(booking, b, { byCustomer: true }); await booking.save(); });
   await tell("booking_modified", booking.customerId, { reference: booking.bookingReference }, { bookingId: booking._id });
-  res.json({ data: booking, message: "Updated successfully." });
+  return { data: booking, message: "Updated successfully." };
 }
 
 // Lấy phòng trống đúng loại và thông tin yêu cầu đã duyệt để điền sẵn khi nhận phòng.
@@ -267,7 +271,7 @@ async function availableRooms(req, res) {
   res.json({ data: candidates.filter((r) => !busy.has(String(r._id))), meta: { request: request && { _id: request._id, hasIdPhoto: request.hasIdPhoto, guestCount: request.numberOfGuests, idDocumentNo: request.mainGuestIdNumber, requestedTime: request.requestedTime } } });
 }
 // Cho nhận phòng đúng ngày hoặc sau nửa đêm trước mốc vắng mặt 06:00.
-async function checkIn(req, res) {
+async function checkIn(req) {
   v.keys(req.body, ["roomId", "guestCount", "idDocumentNo"]);
   const booking = await Booking.findById(v.id(req.params.id)).select("+guestIdDocumentNo");
   if (!booking) throw new v.HttpError(404, "Booking not found.");
@@ -275,8 +279,9 @@ async function checkIn(req, res) {
   if (booking.status !== "confirmed" || now < at(booking.checkInDate, "00:00") || now >= new Date(at(booking.checkInDate, "06:00").getTime() + DAY))
     throw new v.HttpError(409, NO_CHECK_IN);
   const room = await Room.findOne({ _id: v.id(req.body.roomId, "roomId"), roomTypeId: booking.rooms[0].roomTypeId, isActive: true, status: "available" });
-  if (!room) throw new v.HttpError(409, NOT_AVAILABLE);
-  const guestCount = v.number(req.body.guestCount, "guestCount", 1, 20);
+  if (!room || (await busyRooms([room._id], booking.checkInDate, booking.checkOutDate, booking._id)).size)
+    throw new v.HttpError(409, NOT_AVAILABLE);
+  const guestCount = v.number(req.body.guestCount, "guestCount", 1, 100);
   const type = await RoomType.findById(booking.rooms[0].roomTypeId);
   if (!type || guestCount > type.maxOccupancy) v.fail("Invalid guest count.", "guestCount");
   booking.rooms[0].roomId = room._id; booking.rooms[0].guestCount = guestCount; booking.guestIdDocumentNo = v.idNumber(req.body.idDocumentNo);
@@ -287,11 +292,12 @@ async function checkIn(req, res) {
     booking.feeLines.push({ type: "early_check_in", amount: earlyFee, postedAt: now });
     booking.feeAmount += earlyFee; booking.totalAmount += earlyFee;
   }
+  beginRoomStay(booking, room._id, now);
   booking.status = "checked_in"; booking.actualCheckInAt = now; booking.checkedInBy = req.user._id;
   booking.events.push({ actorId: req.user._id, type: "checked_in", note: `Checked in to room ${room.roomNumber}` });
   room.status = "occupied"; await room.save(); await booking.save();
   await closeForBooking(booking._id);
-  res.json({ data: booking, message: "Check-in completed successfully." });
+  return { data: booking, message: "Check-in completed successfully." };
 }
 
 // Tìm lựa chọn đổi phòng cho các đêm còn lại; chỉ cho hạ hạng khi hết phòng cùng hoặc cao hơn.
@@ -323,7 +329,7 @@ async function changeRoomOptions(req, res) {
     meta: { mode: booking.status === "checked_in" ? "room" : "room_type", currentAmount: base, onlyLower },
   });
 }
-async function changeRoom(req, res) {
+async function changeRoom(req) {
   v.keys(req.body, ["newRoomId", "newRoomTypeId", "guestAgrees", "dropCoupon"]);
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking || !["confirmed", "checked_in"].includes(booking.status)) throw new v.HttpError(409, "Only a confirmed or checked-in booking can change rooms.");
@@ -365,8 +371,9 @@ async function changeRoom(req, res) {
     line.roomId = pick.room._id;
     // Phòng vừa rời chuyển sang bảo trì nếu có sự cố, nếu không thì chờ dọn.
     const broken = oldRoom && (await RoomIssue.exists({ roomId: oldRoom._id, status: { $in: OPEN_ISSUE } }));
-    if (oldRoom) await Room.updateOne({ _id: oldRoom._id }, { $set: { status: broken ? "maintenance" : "cleaning" } });
-    await Room.updateOne({ _id: pick.room._id }, { $set: { status: "occupied" } });
+    if (oldRoom) await setRoomStatus(oldRoom._id, broken ? "maintenance" : "cleaning");
+    await setRoomStatus(pick.room._id, "occupied");
+    beginRoomStay(booking, pick.room._id);
     if (oldRoom) turnover = (await createCleaningTask({ roomId: String(oldRoom._id), type: "turnover" })).data;
     await booking.save();
   // Khóa việc chọn và lưu phòng mới để tránh hai booking lấy cùng phòng.
@@ -378,13 +385,13 @@ async function changeRoom(req, res) {
   booking.events.push({ actorId: req.user._id, type: "room_changed", note: `${checkedIn ? `Moved to room ${pick.room.roomNumber}` : `Room type changed to ${pick.roomType.name}`}${pick.lower ? " (lower-priced, guest agreed)" : ""}`, oldValue: before, newValue: { roomId: line.roomId, roomTypeId: line.roomTypeId, roomAmount: booking.roomAmount } });
   await booking.save();
   await audit(req.user._id, "booking.room_changed", "booking", booking._id, { before, after: { roomId: line.roomId, roomTypeId: line.roomTypeId, roomAmount: booking.roomAmount }, guestAgreedLower: pick.lower });
-  res.json({ data: booking, meta: { difference: booking.roomAmount - before.roomAmount, turnoverTask: turnover }, message: "Room assigned successfully." });
+  return { data: booking, meta: { difference: booking.roomAmount - before.roomAmount, turnoverTask: turnover }, message: "Room assigned successfully." };
 }
 
 async function services(_req, res) {
   res.json({ data: await Service.find({ isActive: true }).select("name category unitPrice").sort({ name: 1 }).lean() });
 }
-async function addService(req, res) {
+async function addService(req) {
   v.keys(req.body, ["serviceId", "quantity"]);
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking) throw new v.HttpError(404, "Booking not found.");
@@ -395,9 +402,10 @@ async function addService(req, res) {
   booking.services.push({ serviceId: service._id, name: service.name, quantity, unitPrice: service.unitPrice, amount, recordedBy: req.user._id });
   booking.serviceAmount += amount; booking.totalAmount += amount;
   booking.events.push({ actorId: req.user._id, type: "service_added", note: `Added ${quantity} × ${service.name}`, newValue: { serviceId: service._id, quantity, amount } });
-  await booking.save(); res.status(201).json({ data: booking, message: "Saved successfully." });
+  await booking.save();
+  return { data: booking, message: "Saved successfully." };
 }
-async function voidService(req, res) {
+async function voidService(req) {
   v.keys(req.body, ["reason"]);
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking) throw new v.HttpError(404, "Booking not found.");
@@ -411,16 +419,17 @@ async function voidService(req, res) {
   booking.events.push({ actorId: req.user._id, type: "modified", note: `Voided service: ${line.name}` });
   await booking.save();
   await audit(req.user._id, "booking_service.voided", "booking", booking._id, { service: line.name, amount: line.amount, reason: line.voidReason });
-  res.json({ data: booking });
+  return { data: booking };
 }
 
 // Tính phí trả muộn một lần; sau 18:00 thay bằng giá thêm một đêm, không đổi ngày trả.
 // Hàm chỉ tính tiền, không ghi dữ liệu; trả sớm không tính thêm phí.
 async function lateCharge(booking, now = new Date()) {
-  if (booking.feeLines.some((l) => l.type === "late_check_out" || l.type === "extra_night")) return null;
+  if (booking.feeLines.some((line) => line.type === "extra_night")) return null;
   const policy = await currentCancellationPolicy();
   if (now <= at(booking.checkOutDate, policy?.checkOutTime || "12:00")) return null;
   const extraNight = now > at(booking.checkOutDate, "18:00");
+  if (!extraNight && booking.feeLines.some((line) => line.type === "late_check_out")) return null;
   const amount = extraNight ? priceAt(await RoomType.findById(booking.rooms[0].roomTypeId), booking.checkOutDate) : policy?.lateCheckOutFee || 0;
   return amount ? { type: extraNight ? "extra_night" : "late_check_out", amount, postedAt: now } : null;
 }
@@ -428,11 +437,14 @@ async function lateCharge(booking, now = new Date()) {
 async function postLateCharge(booking, now = new Date()) {
   const line = await lateCharge(booking, now);
   if (!line) return 0;
-  const done = await Booking.updateOne(
-    { _id: booking._id, "feeLines.type": { $nin: ["late_check_out", "extra_night"] } },
-    { $push: { feeLines: line }, $inc: { feeAmount: line.amount, totalAmount: line.amount } },
-  );
-  return done.modifiedCount ? line.amount : 0;
+  const previous = booking.feeLines.filter((fee) => ["late_check_out", "extra_night"].includes(fee.type));
+  const delta = line.amount - previous.reduce((sum, fee) => sum + fee.amount, 0);
+  // Sau 18:00 thay phí trả muộn bằng phí một đêm; chỉ cộng phần chênh lệch.
+  booking.feeLines = [...booking.feeLines.filter((fee) => !["late_check_out", "extra_night"].includes(fee.type)), line];
+  booking.feeAmount += delta;
+  booking.totalAmount += delta;
+  await booking.save();
+  return delta;
 }
 // Các dòng tạo nên tổng tiền, dùng chung cho màn trả phòng và hóa đơn để hai nơi luôn khớp nhau.
 function billLines(booking, penalties) {
@@ -449,22 +461,22 @@ function billLines(booking, penalties) {
   return lines;
 }
 const chargedPenalties = (bookingId) => Penalty.find({ bookingId, status: { $in: ["confirmed", "paid"] }, afterCheckout: { $ne: true } }).lean();
-async function checkOutBill(booking) {
-  const [paid, task, proposed, penalties, payments] = await Promise.all([
-    paidAmount(booking._id),
-    Task.findOne({ bookingId: booking._id, type: "inspection" }).sort({ createdAt: -1 }).populate("assignedTo", "customerProfile.fullName username"),
-    Penalty.find({ bookingId: booking._id, status: "proposed" }).select("itemName proposedAmount").lean(),
-    chargedPenalties(booking._id),
-    Payment.find({ bookingId: booking._id, status: "success" }).select("kind method amount paidAt").sort({ paidAt: 1 }).lean(),
-  ]);
+const canReadPayments = (req) => req.role.permissions.some(p => ['payments.status.read', 'revenue.read'].includes(p));
+async function checkOutBill(booking, req) {
+  const canRead = canReadPayments(req);
+  const paid = canRead ? await paidAmount(booking._id) : 0;
+  const task = await Task.findOne({ bookingId: booking._id, type: "inspection" }).sort({ createdAt: -1 }).populate("assignedTo", "customerProfile.fullName username");
+  const proposed = await Penalty.find({ bookingId: booking._id, status: "proposed" }).select("itemName proposedAmount").lean();
+  const penalties = await chargedPenalties(booking._id);
+  const payments = canRead ? await Payment.find({ bookingId: booking._id, ...allocatedFilter }).select("kind method amount paidAt").sort({ paidAt: 1 }).lean() : undefined;
   return {
-    totalAmount: booking.totalAmount, paidAmount: paid, balance: Math.max(0, booking.totalAmount - paid), feeLines: booking.feeLines,
-    lines: billLines(booking, penalties), payments, proposedPenalties: proposed.length, proposed,
+    totalAmount: booking.totalAmount, ...(canRead ? { paidAmount: paid, balance: Math.max(0, booking.totalAmount - paid), payments } : {}), feeLines: booking.feeLines,
+    lines: billLines(booking, penalties), proposedPenalties: proposed.length, proposed,
     inspection: task && { _id: task._id, status: task.status, notes: task.notes, assignedTo: task.assignedTo?.customerProfile?.fullName || task.assignedTo?.username || null },
   };
 }
 // Yêu cầu kiểm tra phòng, ghi phí trả muộn nếu có và lập bảng thanh toán cuối.
-async function startCheckOut(req, res) {
+async function startCheckOut(req) {
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking) throw new v.HttpError(404, "Booking not found.");
   if (booking.status !== "checked_in") throw new v.HttpError(409, "Only a checked-in booking can be checked out.");
@@ -474,10 +486,10 @@ async function startCheckOut(req, res) {
     catch (error) { if (error.code !== 11000) throw error; }
   }
   await postLateCharge(booking);
-  res.json({ data: await checkOutBill(await Booking.findById(booking._id)) });
+  return { data: await checkOutBill(await Booking.findById(booking._id), req) };
 }
 // Chỉ trả phòng khi đủ tiền, đã quyết định bồi thường và đã xử lý kiểm tra phòng.
-async function checkOut(req, res) {
+async function checkOut(req) {
   v.keys(req.body, ["skipInspection"]);
   let booking = await Booking.findById(v.id(req.params.id));
   if (!booking) throw new v.HttpError(404, "Booking not found.");
@@ -487,7 +499,7 @@ async function checkOut(req, res) {
   booking = await Booking.findById(booking._id);
   if (await Penalty.exists({ bookingId: booking._id, status: "proposed" })) throw new v.HttpError(409, "Confirm or waive the damage / loss items reported by Housekeeping first.");
   const balance = Math.max(0, booking.totalAmount - (await paidAmount(booking._id)));
-  if (balance) throw new v.HttpError(409, `Check-out cannot be completed while ${balance.toLocaleString("en-US")} VND is unpaid. Record the payment first.`);
+  if (balance) throw new v.HttpError(409, canReadPayments(req) ? `Check-out cannot be completed while ${balance.toLocaleString("en-US")} VND is unpaid. Record the payment first.` : 'Payment must be completed before check-out. Ask an employee with payment permission.');
   const task = await Task.findOne({ bookingId: booking._id, type: "inspection" }).sort({ createdAt: -1 });
   if (task?.status !== "completed") {
     if (req.body.skipInspection !== true) throw new v.HttpError(409, "The room inspection is not finished. Wait for the result or skip it.");
@@ -497,30 +509,32 @@ async function checkOut(req, res) {
   }
   const roomIds = booking.rooms.map((room) => room.roomId).filter(Boolean);
   const broken = new Set((await RoomIssue.distinct("roomId", { roomId: { $in: roomIds }, status: { $in: OPEN_ISSUE } })).map(String));
-  for (const id of roomIds) await Room.updateOne({ _id: id }, { $set: { status: broken.has(String(id)) ? "maintenance" : "cleaning" } });
+  for (const id of roomIds) await setRoomStatus(id, broken.has(String(id)) ? "maintenance" : "cleaning");
   booking.status = "checked_out"; booking.actualCheckOutAt = new Date(); booking.checkedOutBy = req.user._id;
+  for (const stay of booking.roomStays) if (!stay.to) stay.to = booking.actualCheckOutAt;
   booking.events.push({ actorId: req.user._id, type: "checked_out", note: "Checked out" });
   await booking.save();
   await closeForBooking(booking._id);
-  const turnovers = await Promise.all(roomIds.map((roomId) => createCleaningTask({ roomId: String(roomId), bookingId: String(booking._id), type: "turnover" })));
+  const turnovers = [];
+  for (const roomId of roomIds) turnovers.push(await createCleaningTask({ roomId: String(roomId), bookingId: String(booking._id), type: "turnover" }));
   let invoice, warning;
   try { invoice = await issueInvoice(booking, req.user._id); }
   catch (error) { console.error("Invoice generation failed:", error.message); warning = "The invoice could not be generated. Please try again."; }
-  res.json({ data: { booking, invoice, turnoverTasks: turnovers.map((item) => item.data) }, message: "Check-out completed successfully.", ...(warning ? { warning } : {}) });
+  // Tự phát hành hóa đơn khi trả phòng, nhưng chỉ trả nội dung cho người có quyền xem.
+  const canReadInvoice = req.role.permissions.some(p => ['invoices.print', 'revenue.read'].includes(p));
+  return { data: { booking, ...(canReadInvoice ? { invoice } : {}), turnoverTasks: turnovers.map((item) => item.data) }, message: "Check-out completed successfully.", ...(warning ? { warning } : {}) };
 }
 const FEE_NAMES = { early_check_in: "Early check-in fee", late_check_out: "Late check-out fee", extra_night: "Extra night (check-out after 18:00)" };
 // Chụp các dòng tiền, tên và địa chỉ khách sạn vào hóa đơn khi phát hành.
 async function issueInvoice(booking, issuedBy) {
   const existing = await Invoice.findOne({ bookingId: booking._id, kind: "checkout" });
   if (existing) return existing;
-  const [hotel, penalties, paid] = await Promise.all([
-    HotelInfo.findOne({ key: "main" }).lean(),
-    chargedPenalties(booking._id),
-    paidAmount(booking._id),
-  ]);
+  const hotel = await HotelInfo.findOne({ key: "main" }).lean();
+  const penalties = await chargedPenalties(booking._id);
+  const paid = await paidAmount(booking._id);
   const lines = billLines(booking, penalties).map(({ name, amount }) => ({ name, amount }));
   const day = vnDate().replace(/-/g, "");
-  // Mã hóa đơn theo số thứ tự có thể trùng khi chạy đồng thời; chỉ mục chặn trùng và cho tạo lại.
+  // Số thứ tự hóa đơn được cấp trong giao dịch đã khóa thao tác khách sạn.
   const seq = (await Invoice.countDocuments({ invoiceNumber: new RegExp(`^INV-${day}-`) })) + 1;
   const invoice = await Invoice.create({
     bookingId: booking._id, kind: "checkout", invoiceNumber: `INV-${day}-${String(seq).padStart(4, "0")}`, issuedBy, issuedAt: new Date(),
@@ -532,9 +546,9 @@ async function issueInvoice(booking, issuedBy) {
   return invoice;
 }
 // Cho tạo lại hóa đơn sau khi lần phát hành trước thất bại.
-async function generateInvoice(req, res) {
+async function generateInvoice(req) {
   const booking = await Booking.findById(v.id(req.params.id));
   if (!booking || booking.status !== "checked_out") throw new v.HttpError(409, "An invoice is generated only after check-out.");
-  res.status(201).json({ data: await issueInvoice(booking, req.user._id) });
+  return { data: await issueInvoice(booking, req.user._id) };
 }
-module.exports = { create, availability, quote, roomTypes, createWalkIn, modifyWalkIn, modifyOwn, availableRooms, checkIn, changeRoomOptions, changeRoom, services, addService, voidService, startCheckOut, checkOut, generateInvoice, lateCharge };
+module.exports = { create: transactional(create, 201, (req) => assertCaptcha(req.body?.captchaToken, req.ip)), availability, quote, roomTypes, createWalkIn: transactional(createWalkIn, 201), modifyWalkIn: transactional(modifyWalkIn, 200), modifyOwn: transactional(modifyOwn, 200), availableRooms, checkIn: transactional(checkIn, 200), changeRoomOptions, changeRoom: transactional(changeRoom, 200), services, addService: transactional(addService, 201), voidService: transactional(voidService, 200), startCheckOut: transactional(startCheckOut, 200), checkOut: transactional(checkOut, 200), generateInvoice: transactional(generateInvoice, 201), lateCharge };

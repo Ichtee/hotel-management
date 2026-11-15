@@ -472,7 +472,7 @@ async function verifyEmail(req, res) {
 async function resendVerification(req, res) {
   v.keys(req.body, ["email"]);
   const email = v.email(req.body.email);
-  const user = await User.findOne({ email }).select(
+  const user = await User.findOne({ $or: [{ email }, { pendingEmail: email }] }).select(
     "+emailVerification.tokenHash +emailVerification.expiresAt +emailVerification.lastSentAt +emailVerification.sentAt"
   );
 
@@ -484,7 +484,8 @@ async function resendVerification(req, res) {
     });
   }
 
-  if (user.isVerified) {
+  const changingEmail = user.pendingEmail === email;
+  if (user.isVerified && !changingEmail) {
     return res.json({
       data: { message: "This email address is already verified. You can sign in directly." },
     });
@@ -518,7 +519,7 @@ async function resendVerification(req, res) {
 
   try {
     await sendVerificationEmail({
-      email: user.email,
+      email: changingEmail ? user.pendingEmail : user.email,
       fullName: user.customerProfile?.fullName || user.username,
       token: rawToken,
     });

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, dateLabel, inputDate, money } from './api/client.js';
 import { useAuth } from './context/Auth.jsx';
-import { Badge, DataTable, Field, LineChart, Notice, PageHead, Screen, WaitScreen, forgetHotelName, useApi, useEditPage } from './ui.jsx';
+import { Badge, DataTable, Field, LineChart, Notice, PageHead, Screen, WaitScreen, forgetHotelName, useApi, useEditPage, usePagedApi, Pagination } from './ui.jsx';
 
 const qs = (o) => new URLSearchParams(Object.fromEntries(Object.entries(o).filter(([, v]) => v !== '' && v != null))).toString();
 const day = (offset) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(new Date(Date.now() + offset * 864e5));
@@ -152,13 +152,15 @@ export function Users() {
   const base = isAdmin ? '/users' : '/staff';
   const [filters, setFilters] = useState({});
   // Admin chỉ quản lý tài khoản quản lý khách sạn.
-  const list = useApi(`${base}?${qs({ ...filters, ...(isAdmin ? { role: 'manager' } : {}), limit: 50 })}`);
+  const list = usePagedApi(`${base}?${qs({ ...filters, ...(isAdmin ? { role: 'manager' } : {}), limit: 50 })}`);
   const options = useApi('/options');
   const E = useEditPage(list.data);
   const [msg, setMsg] = useState('');
   const roleName = (k) => options.data?.roles.find((r) => r.key === k)?.name || k;
   const toggle = async (u) => {
-    try { await api(`${base}/${u._id}`, { method: 'PATCH', body: { status: u.status === 'active' ? 'suspended' : 'active' } }); setMsg(''); list.reload(); }
+    const reason = isAdmin ? undefined : window.prompt('Reason for changing staff status (required):');
+    if (!isAdmin && !reason?.trim()) return;
+    try { await api(`${base}/${u._id}`, { method: 'PATCH', body: { status: u.status === 'active' ? 'suspended' : 'active', ...(reason ? { reason: reason.trim() } : {}) } }); setMsg(''); list.reload(); }
     catch (e) { setMsg(e); }
   };
   if (E.missing) return <WaitScreen loading={list.loading} onClose={E.close} />;
@@ -166,9 +168,9 @@ export function Users() {
   return (
     <>
       <PageHead title={isAdmin ? 'Hotel manager accounts' : 'Staff'} sub={isAdmin ? 'Create, update and deactivate Hotel Manager accounts' : 'Receptionists and housekeeping at your hotel'} action={isAdmin ? 'Add hotel manager' : 'Add staff'} onAction={E.add} />
-      <Filters onApply={setFilters} statuses={['active', 'suspended', 'deleted']} />
+      <Filters onApply={setFilters} statuses={isAdmin ? ['active', 'suspended', 'deleted'] : ['active', 'suspended']} />
       <Notice error={msg || null} />
-      <Loading s={list} />
+      <Loading s={list} /><Pagination list={list} />
       {list.data && (
         <DataTable cols={['Name', 'Username', 'Email', 'Role', 'Status', '']} rows={list.data.map((u) => [
           u.customerProfile?.fullName || '—', u.username, u.email, roleName(u.role), u.status,
@@ -193,6 +195,7 @@ function UserForm({ user, isStaff, base, options, onClose, onSaved }) {
     e.preventDefault();
     const f = Object.fromEntries(new FormData(e.target));
     const body = { fullName: f.fullName, email: f.email, phone: f.phone, role, status: f.status };
+    if (isStaff && !creating && f.reason?.trim()) body.reason = f.reason.trim();
     if (creating) { body.username = f.username; body.password = f.password; delete body.status; }
     if (scope === 'hotel') { Object.assign(body, { position: f.position, shift: f.shift, hireDate: f.hireDate || null }); }
     try { await api(creating ? base : `${base}/${user._id}`, { method: creating ? 'POST' : 'PATCH', body }); onSaved(); } catch (x) { setErr(x); }
@@ -211,7 +214,8 @@ function UserForm({ user, isStaff, base, options, onClose, onSaved }) {
             {options?.roles.filter((r) => isStaff || r.key === 'manager' || r.key === user.role).map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
           </select>
         </Field>
-        {!creating && user.role !== 'admin' && <Field label="Status"><select name="status" defaultValue={user.status}><option>active</option><option>suspended</option><option>deleted</option></select></Field>}
+        {!creating && user.role !== 'admin' && <Field label="Status"><select name="status" defaultValue={user.status}><option>active</option><option>suspended</option>{!isStaff && <option>deleted</option>}</select></Field>}
+        {isStaff && !creating && <Field label="Reason for status change" error={fe('reason')}><input name="reason" maxLength={500} placeholder="Required when changing status" /></Field>}
         {scope === 'hotel' && <>
           <Field label="Position"><input name="position" defaultValue={ep.position} /></Field>
           <Field label="Shift"><input name="shift" defaultValue={ep.shift} /></Field>
@@ -227,7 +231,7 @@ function UserForm({ user, isStaff, base, options, onClose, onSaved }) {
 // Quản lý mã giảm giá.
 export function Coupons() {
   const [filters, setFilters] = useState({});
-  const list = useApi(`/promotions?${qs({ ...filters, limit: 50 })}`);
+  const list = usePagedApi(`/promotions?${qs({ ...filters, limit: 50 })}`);
   const E = useEditPage(list.data);
   const [msg, setMsg] = useState('');
   const act = async (fn) => { try { await fn(); setMsg(''); list.reload(); } catch (e) { setMsg(e); } };
@@ -238,7 +242,7 @@ export function Coupons() {
       <PageHead title="Coupons" sub="Promotions and discount codes for your hotel" action="Create coupon" onAction={E.add} />
       <Filters onApply={setFilters} statuses={['active', 'inactive']} />
       <Notice error={msg || null} />
-      <Loading s={list} />
+      <Loading s={list} /><Pagination list={list} />
       {list.data && (
         <DataTable cols={['Code', 'Discount', 'Min. spend', 'Used', 'Valid', 'Status', '']} rows={list.data.map((c) => [
           c.code, c.discountType === 'percentage' ? `${c.discountValue}%` : money(c.discountValue), c.minimumSpend ? money(c.minimumSpend) : '—',
@@ -346,6 +350,7 @@ export function Occupancy() {
       <Loading s={rep} />
       {d && (
         <>
+          {d.warnings?.map((warning) => <p className="notice" key={warning}>{warning}</p>)}
           {/* Tỷ lệ tính theo đêm phòng có khách trên đêm phòng bán được, loại phòng ngừng hoạt động hoặc bảo trì. */}
           <div className="kpis">
             <div className="kpi"><p>Occupancy rate</p><strong>{pctFmt(d.totals.rate)}</strong><small className="muted">{d.from} → {d.to}</small></div>

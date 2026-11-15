@@ -88,7 +88,7 @@ async function publicSummary(req, res) {
   res.json({ data: {
     depositPercent: deposit?.deposit?.value ?? null,
     cancellationTiers: (cancellation?.cancellationTiers || []).map(({ minHoursBeforeCheckIn, refundPercent }) => ({ minHoursBeforeCheckIn, refundPercent })),
-    checkInTime: cancellation?.checkInTime || DEFAULT_CHECK_IN, checkOutTime: cancellation?.checkOutTime || null,
+    checkInTime: cancellation?.checkInTime || DEFAULT_CHECK_IN, checkOutTime: cancellation?.checkOutTime || "12:00",
   } });
 }
 module.exports = { publicSummary, listing, create, cancellationListing, createCancellation, hotelInfo, updateHotelInfo };

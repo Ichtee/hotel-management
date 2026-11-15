@@ -1,3 +1,5 @@
+const { hotelTransaction } = require("./hotelOperations");
+const { allocatedFilter } = require("./paymentBalance");
 const Booking = require("../models/Booking");
 const Payment = require("../models/Payment");
 const Refund = require("../models/Refund");
@@ -7,7 +9,7 @@ const reference = (b) => b.bookingReference || String(b._id).slice(-8).toUpperCa
 const HOLD_GRACE = 15 * 60000;
 // Chỉ cộng các khoản thanh toán đã xác minh thành công.
 const paidAmount = async (bookingId) =>
-  (await Payment.aggregate([{ $match: { bookingId, status: "success" } }, { $group: { _id: null, sum: { $sum: "$amount" } } }]))[0]?.sum || 0;
+  (await Payment.aggregate([{ $match: { bookingId, ...allocatedFilter } }, { $group: { _id: null, sum: { $sum: "$amount" } } }]))[0]?.sum || 0;
 // Lỗi gửi thông báo không làm thất bại khoản thanh toán đã xử lý.
 const tell = (event, accountId, data, refs) =>
   notify(event, accountId, data, refs).catch((e) => console.error("Notification failed:", e.message));
@@ -18,38 +20,40 @@ async function announce(payment, success) {
 }
 // Chuyển trạng thái nguyên tử để thông báo thanh toán gửi lại không ghi tiền lần nữa.
 async function settle(order, result) {
-  const success = result.status === "success";
-  const ref = result.transactionRef ? { transactionRef: result.transactionRef } : {};
-  const payment = await Payment.findOneAndUpdate(
-    // Vẫn nhận tiền của đơn đã bị thay thế nếu khách thanh toán mã QR cũ.
-    { _id: order._id, status: success ? { $in: ["pending", "cancelled"] } : "pending" },
-    { $set: { ...ref, ...(success ? { status: "success", paidAt: new Date() } : { status: "failed", failureReason: result.failureReason || "Declined by the payment gateway" }) } },
-    { new: true },
-  );
-  if (!payment) return { duplicate: true };
-  if (success && payment.kind === "deposit") {
-    // Xác nhận cọc trong thời gian giữ phòng hoặc 15 phút gia hạn cho đơn đã chờ tại cổng.
-    // Cần đồng bộ thời gian gia hạn này với kiểm tra phòng trống.
-    const now = Date.now();
-    const confirmed = await Booking.updateOne(
-      {
-        _id: payment.bookingId,
-        status: "pending",
-        $or: [{ holdExpiresAt: { $gt: new Date(now) } }, { holdExpiresAt: { $gt: new Date(Math.max(now - HOLD_GRACE, payment.createdAt)) } }],
-      },
-      { $set: { status: "confirmed" }, $unset: { holdExpiresAt: 1 } },
+  return hotelTransaction(async () => {
+    const success = result.status === "success";
+    const ref = result.transactionRef ? { transactionRef: result.transactionRef } : {};
+    const payment = await Payment.findOneAndUpdate(
+      // Vẫn nhận tiền của đơn đã bị thay thế nếu khách thanh toán mã QR cũ.
+      { _id: order._id, status: success ? { $in: ["pending", "cancelled"] } : "pending" },
+      { $set: { ...ref, ...(success ? { status: "success", paidAt: new Date() } : { status: "failed", failureReason: result.failureReason || "Declined by the payment gateway" }) } },
+      { new: true },
     );
-    if (confirmed.modifiedCount) {
-      const booking = await Booking.findById(payment.bookingId).select("customerId bookingReference");
-      await tell("booking_confirmed", booking.customerId, { reference: reference(booking) }, { bookingId: booking._id });
-    } else {
-      // Tạo hồ sơ hoàn tiền cho cọc đến sau khi booking hết hạn, bị hủy hoặc đã trả đủ.
-      await Payment.updateOne({ _id: payment._id }, { isLateDeposit: true });
-      await Refund.create({ paymentId: payment._id, bookingId: payment.bookingId, amount: payment.amount, status: "requested", reason: "Deposit confirmed after the room hold expired" });
+    if (!payment) return { duplicate: true, payment: await Payment.findById(order._id) };
+    if (success && payment.kind === "deposit") {
+      // Xác nhận cọc trong thời gian giữ phòng hoặc 15 phút gia hạn cho đơn đã chờ tại cổng.
+      // Cần đồng bộ thời gian gia hạn này với kiểm tra phòng trống.
+      const now = Date.now();
+      const confirmed = await Booking.updateOne(
+        {
+          _id: payment.bookingId,
+          status: "pending",
+          $or: [{ holdExpiresAt: { $gt: new Date(now) } }, { holdExpiresAt: { $gt: new Date(Math.max(now - HOLD_GRACE, payment.createdAt)) } }],
+        },
+        { $set: { status: "confirmed" }, $unset: { holdExpiresAt: 1 } },
+      );
+      if (confirmed.modifiedCount) {
+        const booking = await Booking.findById(payment.bookingId).select("customerId bookingReference");
+        await tell("booking_confirmed", booking.customerId, { reference: reference(booking) }, { bookingId: booking._id });
+      } else {
+        // Tạo hồ sơ hoàn tiền cho cọc đến sau khi booking hết hạn, bị hủy hoặc đã trả đủ.
+        await Payment.updateOne({ _id: payment._id }, { isLateDeposit: true });
+        await Refund.create({ paymentId: payment._id, bookingId: payment.bookingId, amount: payment.amount, status: "requested", reason: "Deposit confirmed after the room hold expired" });
+      }
     }
-  }
-  await announce(payment, success);
-  return { payment };
+    await announce(payment, success);
+    return { payment };
+  });
 }
 // Tra cứu trạng thái thật từ SePay để xử lý thông báo hoặc bù thông báo bị mất.
 async function reconcile(payment, transactionRef) {

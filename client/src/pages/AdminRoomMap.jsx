@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { roomApi } from '../api/roomApi.js';
-import { api } from '../api/client.js';
-import { Screen, WaitScreen, useScreen } from '../ui.jsx';
+import { apiAll } from '../api/client.js';
+import { Screen, WaitScreen, Notice, useScreen } from '../ui.jsx';
 
 const STATUS_CONFIG = {
   available: { label: 'Available', color: '#1f7a4c', desc: 'Ready for guest check-in' },
@@ -21,6 +21,7 @@ export default function AdminRoomMap() {
   const [newRoomTypeId, setNewRoomTypeId] = useState('');
   const [toastMessage, setToastMessage] = useState('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -28,17 +29,19 @@ export default function AdminRoomMap() {
   };
 
   const loadData = async () => {
-    setLoading(true);
+    setLoading(true); setError(null);
     try {
       const [roomsRes, typesRes, allTypesRes] = await Promise.allSettled([
         // Chỉ định số bản ghi vì API mặc định phân trang theo mười mục.
         roomApi.getRooms({ limit: 100 }),
         roomApi.getRoomTypes(),
         // API phòng chỉ trả mã loại phòng; lấy tên từ mọi loại phòng, kể cả loại đã tắt.
-        api('/room-types?limit=100')
+        apiAll('/room-types')
       ]);
       const typeNames = Object.fromEntries((allTypesRes.status === 'fulfilled' ? allTypesRes.value.data || [] : []).map((t) => [String(t._id), t.name]));
 
+      const failed = [roomsRes, typesRes, allTypesRes].find(r => r.status === 'rejected');
+      if (failed) setError(failed.reason);
       if (typesRes.status === 'fulfilled') {
         const rawTypes = Array.isArray(typesRes.value) ? typesRes.value : (typesRes.value?.data || []);
         if (rawTypes.length > 0) {
@@ -67,7 +70,7 @@ export default function AdminRoomMap() {
         }
       }
     } catch (err) {
-      console.warn('Error loading room map data:', err);
+      setError(err);
     } finally {
       setLoading(false);
     }
@@ -211,6 +214,7 @@ export default function AdminRoomMap() {
   );
   return (
     <div className="room-map-page">
+      <Notice error={error} />
       {toastMessage && (
         <div style={{
           position: 'fixed', bottom: '24px', right: '24px', zIndex: 9999,

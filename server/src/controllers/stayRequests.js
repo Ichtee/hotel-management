@@ -1,3 +1,5 @@
+const { hotelDay } = require('../services/roomInventory');
+const { transactional } = require('../services/hotelOperations');
 const Booking = require("../models/Booking");
 const RoomType = require("../models/RoomType");
 const Request = require("../models/CheckInOutRequest");
@@ -9,7 +11,8 @@ const { dropPhotos } = idPhoto;
 const { audit } = require("../services/audit");
 
 const parseTime = (value) => {
-  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) v.fail("Enter a valid requested time.", "requestedTime");
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(Z|[+-]\d{2}:[0-5]\d)$/.test(value) || !Number.isFinite(Date.parse(value))) v.fail("Enter a valid requested time with a timezone.", "requestedTime");
+  v.date(value.slice(0, 10), 'requestedTime');
   return new Date(value);
 };
 const bookingMoment = (date, time) => new Date(`${new Date(date).toISOString().slice(0, 10)}T${time}:00+07:00`);
@@ -17,7 +20,7 @@ const bookingMoment = (date, time) => new Date(`${new Date(date).toISOString().s
 const quiet = (p) => p.catch((e) => console.error("Notification failed:", e.message));
 
 // Cho yêu cầu nhận phòng trước giờ nhận của booking đã xác nhận; yêu cầu trả khi đang ở.
-async function create(req, res) {
+async function create(req) {
   v.keys(req.body, ["type", "requestedTime", "note", "numberOfGuests", "mainGuestName", "mainGuestIdNumber", "idPhoto"]);
   const booking = await Booking.findOne({ _id: v.id(req.params.id), customerId: req.user._id });
   if (!booking) throw new v.HttpError(404, "Booking not found.");
@@ -30,10 +33,14 @@ async function create(req, res) {
   if (await Request.exists({ bookingId: booking._id, type, status: { $in: ["pending", "approved"] } }))
     throw new v.HttpError(409, "There is already an open request of this type for this booking. Withdraw it first.");
   const requestedTime = parseTime(req.body.requestedTime);
+  const expectedDay = new Date(type === 'check_in' ? booking.checkInDate : booking.checkOutDate).toISOString().slice(0, 10);
+  // Yêu cầu phải thuộc đúng ngày lưu trú và chưa xảy ra.
+  if (requestedTime <= new Date() || hotelDay(requestedTime) !== expectedDay)
+    v.fail('Choose a future time on the booked arrival or departure date.', 'requestedTime');
   const data = { bookingId: booking._id, customerId: req.user._id, type, requestedTime, note: v.text(req.body.note || "", "note", 0, 1000) };
   if (type === "check_in") {
     const roomType = await RoomType.findById(booking.rooms[0].roomTypeId).select("maxOccupancy");
-    data.numberOfGuests = v.number(req.body.numberOfGuests, "numberOfGuests", 1, roomType?.maxOccupancy || 20);
+    data.numberOfGuests = v.number(req.body.numberOfGuests, "numberOfGuests", 1, roomType?.maxOccupancy || booking.rooms[0].guestCount);
     data.mainGuestName = v.name(req.body.mainGuestName, "mainGuestName");
     // Số giấy tờ không bắt buộc ở bước này; lễ tân đối chiếu bản gốc khi nhận phòng.
     if (req.body.mainGuestIdNumber) data.mainGuestIdNumber = v.idNumber(req.body.mainGuestIdNumber, "mainGuestIdNumber");
@@ -54,7 +61,7 @@ async function create(req, res) {
   const request = await Request.create(data);
   const reference = booking.bookingReference;
   await quiet(notifyRole("stay_request_submitted", "receptionist", { reference, type, auto: !data.earlyOrLate }, { bookingId: booking._id }));
-  res.status(201).json({ data: request, message: "Your request has been sent to the front desk. You will be notified of the decision." });
+  return { data: request, message: "Your request has been sent to the front desk. You will be notified of the decision." };
 }
 
 // Khách rút yêu cầu đang mở mà không bị tính phí.
@@ -111,4 +118,4 @@ async function closeForBooking(bookingId, status = "completed") {
   await dropPhotos({ bookingId, status: { $in: ["pending", "approved"] } });
   await Request.updateMany({ bookingId, status: { $in: ["pending", "approved"] } }, { $set: { status } });
 }
-module.exports = { create, withdraw, listing, handle, closeForBooking, photoUploadParams, photoLink };
+module.exports = { create: transactional(create, 201), withdraw, listing, handle, closeForBooking, photoUploadParams, photoLink };

@@ -27,7 +27,8 @@ let db,
   admin,
   manager,
   customer,
-  staff;
+  staff,
+  housekeeper;
 const send = (agent, method, url, body = {}) =>
   agent[method](url).set("Origin", origin).send(body);
 async function login(email) {
@@ -48,6 +49,7 @@ before(async () => {
     ["manager", "manager"],
     ["customer", "customer"],
     ["staff", "receptionist"],
+    ["housekeeper", "housekeeping"],
   ]) {
     await User.create({
       username,
@@ -68,6 +70,7 @@ before(async () => {
   manager = await login("manager@example.com");
   customer = await login("customer@example.com");
   staff = await login("staff@example.com");
+  housekeeper = await login("housekeeper@example.com");
 });
 after(async () => {
   await store?.close();
@@ -673,7 +676,7 @@ test("deposit payment: verified callback confirms the booking; forged, mismatche
   assert.equal(await Notification.countDocuments({ bookingId: booking._id, type: "payment_result" }), 1);
   await send(customer, "post", url, { method: "bank_transfer" }).expect(409);
   assert.equal((await customer.get(`/api/payments/${first.paymentId}`).expect(200)).body.data.status, "success");
-  await manager.get(`/api/payments/${first.paymentId}`).expect(404);
+  await manager.get(`/api/payments/${first.paymentId}`).expect(200); // quyền doanh thu cho phép xem thanh toán
 });
 test("deposit payment: a declined payment can be retried; a deposit confirmed after the hold expired becomes a refund case", async () => {
   const booking = await payBooking();
@@ -1093,7 +1096,7 @@ test("UC34 catalogs, UC31 -> UC38 proposed penalty, supplementary invoice after 
   const left = await payBooking({ status: "checked_out", holdExpiresAt: undefined, actualCheckOutAt: new Date(), rooms: [{ roomTypeId: type._id, roomId: room._id, priceAtBooking: 1000 }] });
   await Payment.create({ bookingId: left._id, kind: "final", amount: 2000, method: "cash", status: "success", paidAt: new Date() });
   assert.ok((await staff.get("/api/room-issues/options").expect(200)).body.meta.compensationItems.some((i) => i.name === "Lamp shade"));
-  const reported = (await send(staff, "post", "/api/room-issues", { roomId: room.id, title: "Lamp shade torn", description: "Found at turnover", chargeItemId: shade._id }).expect(201)).body.data;
+  const reported = (await send(housekeeper, "post", "/api/room-issues", { roomId: room.id, title: "Lamp shade torn", description: "Found at turnover", chargeItemId: shade._id }).expect(201)).body.data;
   assert.equal(reported.penalty.status, "proposed");
   const RoomIssue = require("../src/models/RoomIssue");
   assert.deepEqual([reported.issue, await RoomIssue.countDocuments({ roomId: room._id })], [null, 0]); // UC31 (a): the room stays sellable
@@ -1112,13 +1115,13 @@ test("UC34 catalogs, UC31 -> UC38 proposed penalty, supplementary invoice after 
   assert.deepEqual(mine.penalties.map((p) => [p.itemName, p.status]), [["Lamp shade", "paid"]]);
   assert.deepEqual(mine.invoices.map((i) => [i.kind, i.totalAmount]), [["supplementary", 250]]);
   // a quantity multiplies the compensation price; a Proposed line stays hidden from the customer
-  const two = (await send(staff, "post", "/api/room-issues", { roomId: room.id, title: "Shades", description: "Two torn", chargeItemId: shade._id, quantity: 2 }).expect(201)).body.data;
+  const two = (await send(housekeeper, "post", "/api/room-issues", { roomId: room.id, title: "Shades", description: "Two torn", chargeItemId: shade._id, quantity: 2 }).expect(201)).body.data;
   assert.equal(two.penalty.proposedAmount, 500);
   assert.equal(two.penalty.itemName, "Lamp shade x2");
   assert.equal((await customer.get(`/api/bookings/${left.id}`).expect(200)).body.data.penalties.length, 1);
-  await send(staff, "post", "/api/room-issues", { roomId: room.id, title: "Shades", chargeItemId: shade._id, quantity: 0 }).expect(400);
+  await send(housekeeper, "post", "/api/room-issues", { roomId: room.id, title: "Shades", chargeItemId: shade._id, quantity: 0 }).expect(400);
   // UC31 (b): a room that cannot be used still opens the issue and goes to Maintenance, with the item proposed in the same report
-  const unusable = (await send(staff, "post", "/api/room-issues", { roomId: room.id, title: "Room cannot be used (Lamp shade)", description: "Glass everywhere", unusable: true, chargeItemId: shade._id }).expect(201)).body.data;
+  const unusable = (await send(housekeeper, "post", "/api/room-issues", { roomId: room.id, title: "Room cannot be used (Lamp shade)", description: "Glass everywhere", unusable: true, chargeItemId: shade._id }).expect(201)).body.data;
   assert.deepEqual([Boolean(unusable.issue), unusable.maintenanceApplied, unusable.penalty.status], [true, true, "proposed"]);
   await Room.updateOne({ _id: room._id }, { status: "available" });
   // M2 room writes are no longer public

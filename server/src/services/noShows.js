@@ -1,3 +1,4 @@
+const { hotelTransaction } = require('./hotelOperations');
 const Booking = require("../models/Booking");
 const Request = require("../models/CheckInOutRequest");
 const { dropPhotos } = require("./idPhoto");
@@ -13,4 +14,4 @@ async function processNoShows(now = new Date()) {
   await Request.updateMany({ bookingId: { $in: due }, status: { $in: ["pending", "approved"] } }, { $set: { status: "cancelled" } });
   return { markedNoShow: result.modifiedCount };
 }
-module.exports = { processNoShows };
+module.exports = { processNoShows: (...args) => hotelTransaction(() => processNoShows(...args)) };

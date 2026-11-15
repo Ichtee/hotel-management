@@ -1,3 +1,4 @@
+const { transactional } = require("../services/hotelOperations");
 const { createCipheriv, createDecipheriv, createHash, randomBytes } = require("node:crypto");
 const Booking = require("../models/Booking");
 const Payment = require("../models/Payment");
@@ -60,12 +61,15 @@ async function waiting(req, id) {
 
 // Liệt kê khoản chờ hoàn trước, theo thứ tự cũ nhất.
 async function listing(req, res) {
+  v.keys(req.query, ["status", "page", "limit"]);
+  const { page, limit } = v.pagination({ limit: '100', ...req.query });
   const status = v.choice(req.query.status || "requested", "status", ["requested", "completed"]);
-  const rows = await load({ status }).sort(status === "requested" ? { createdAt: 1 } : { processedAt: -1 }).limit(200);
-  res.json({ data: rows.map(view) });
+  const rows = await load({ status }).sort(status === "requested" ? { createdAt: 1 } : { processedAt: -1 }).skip((page - 1) * limit).limit(limit);
+  const total = await Refund.countDocuments({ status });
+  res.json({ data: rows.map(view), meta: { page, limit, total, pages: Math.max(1, Math.ceil(total / limit)) } });
 }
 // Tài khoản nhận hoàn tiền phải đứng tên người đặt phòng.
-async function setAccount(req, res) {
+async function setAccount(req) {
   v.keys(req.body, ["bank", "accountNumber", "holderName"]);
   const bank = v.text(req.body.bank, "bank", 2, 100);
   const accountNumber = v.code(req.body.accountNumber, "accountNumber", /^\d{6,20}$/, "Account number: 6–20 digits, no spaces.");
@@ -78,19 +82,19 @@ async function setAccount(req, res) {
   refund.bankAccount = { bank, accountNumber: seal(accountNumber), holderName, enteredBy: req.user._id, enteredAt: new Date() };
   await refund.save();
   await audit(req.user._id, replaced ? "refund.account_replaced" : "refund.account_entered", "refund", refund._id, { bank, last4: accountNumber.slice(-4) });
-  res.json({ data: view(refund) });
+  return { data: view(refund) };
 }
 // Ghi từng lần liên hệ khách; không tự nhắc lại hoặc hết hạn khoản hoàn.
-async function addContact(req, res) {
+async function addContact(req) {
   v.keys(req.body, ["note"]);
   const note = v.text(req.body.note, "note", 1, 500);
   const refund = await waiting(req, req.params.id);
   refund.contacts.push({ note, by: req.user._id });
   await refund.save();
-  res.status(201).json({ data: view(refund) });
+  return { data: view(refund) };
 }
 // Ghi mã chuyển khoản đã thực hiện ngoài hệ thống; giữ nguyên số tiền hoàn.
-async function record(req, res) {
+async function record(req) {
   v.keys(req.body, ["billPhoto", "note"]);
   if (!idPhoto.ownsPhoto(req.user._id, req.body.billPhoto, "refund")) v.fail("Upload the photo of the transfer bill.", "billPhoto");
   const note = req.body.note === undefined ? undefined : v.text(req.body.note, "note", 0, 500);
@@ -115,7 +119,7 @@ async function record(req, res) {
   const booking = await Booking.findById(refund.bookingId._id).select("bookingReference customerId");
   await notify("refund_completed", booking.customerId, { reference: reference(booking), amount: done.amount }, { bookingId: booking._id });
   await audit(req.user._id, "refund.completed", "refund", done._id, { amount: done.amount });
-  res.json({ data: { ...view(refund), status: done.status, hasBill: true, processedAt: done.processedAt }, message: "Refund recorded. The customer has been notified of the amount." });
+  return { data: { ...view(refund), status: done.status, hasBill: true, processedAt: done.processedAt }, message: "Refund recorded. The customer has been notified of the amount." };
 }
 // Signed parameters for one direct, private upload of the bill to Cloudinary (the photo never passes through this server).
 async function billUploadParams(req, res) {
@@ -129,4 +133,4 @@ async function billLink(req, res) {
   await audit(req.user._id, "refund.bill_viewed", "refund", r._id, {});
   res.json({ data: { url: idPhoto.downloadUrl(r.billPhoto) } });
 }
-module.exports = { listing, setAccount, addContact, record, billUploadParams, billLink };
+module.exports = { listing, setAccount: transactional(setAccount), addContact: transactional(addContact, 201), record: transactional(record, 200), billUploadParams, billLink };

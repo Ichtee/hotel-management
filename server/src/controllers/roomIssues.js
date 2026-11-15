@@ -10,9 +10,11 @@ const Penalty = require("../models/Penalty");
 const CompensationItem = require("../models/CompensationItem");
 const { notifyRole } = require("../services/notifications");
 
-async function create(req, res) {
+async function create(req) {
   v.keys(req.body, ["roomId", "title", "description", "unusable", "chargeItemId", "quantity"]);
   const chargeItemId = req.body.chargeItemId ? v.id(req.body.chargeItemId, "chargeItemId") : null;
+  if (chargeItemId && !req.role.permissions.includes('damages.report')) throw new v.HttpError(403, 'You do not have permission to report damage.');
+  if ((!chargeItemId || req.body.unusable === true) && !req.role.permissions.includes('room_issues.report')) throw new v.HttpError(403, 'You do not have permission to report room issues.');
   const quantity = req.body.quantity === undefined || req.body.quantity === "" ? 1 : Number(req.body.quantity);
   if (!Number.isInteger(quantity) || quantity < 1 || quantity > 20) v.fail("Quantity must be a whole number from 1 to 20.", "quantity");
   const input = { roomId: v.id(req.body.roomId, "roomId"), title: v.text(req.body.title, "title", 2, 120), description: v.text(req.body.description, "description", 0, 2000) };
@@ -22,7 +24,7 @@ async function create(req, res) {
   // Hư hỏng vật phẩm chỉ tạo bồi thường đề xuất; không đưa phòng vào bảo trì nếu vẫn sử dụng được.
   if (chargeItemId && !unusable) {
     if (!(await Room.exists({ _id: input.roomId }))) throw new v.HttpError(404, "Room not found.");
-    return res.status(201).json({ data: { issue: null, maintenanceApplied: false, penalty: await proposePenalty(input, chargeItemId, req.user._id, quantity) } });
+    return { data: { issue: null, maintenanceApplied: false, penalty: await proposePenalty(input, chargeItemId, req.user._id, quantity) } };
   }
   const result = await hotelTransaction(async (session) => {
     const room = await Room.findById(input.roomId).session(session);
@@ -34,7 +36,8 @@ async function create(req, res) {
       const before = room.toObject();
       // Kiểm tra thiếu phòng cho booking sắp tới trước khi đưa phòng ra khỏi nguồn bán.
       let shortfall = false;
-      try { await assertCapacity(room.roomTypeId, room._id, session); } catch { shortfall = true; }
+      try { await assertCapacity(room.roomTypeId, room._id, session); }
+      catch (error) { if (error.code !== 'MSG-61') throw error; shortfall = true; }
       room.status = "maintenance";
       await room.save({ session });
       maintenanceApplied = true;
@@ -46,7 +49,7 @@ async function create(req, res) {
     return { issue, maintenanceApplied, events };
   });
   const penalty = chargeItemId ? await proposePenalty(result.issue, chargeItemId, req.user._id, quantity) : null;
-  res.status(201).json({ data: { issue: result.issue, maintenanceApplied: result.maintenanceApplied, penalty }, meta: { notificationStored: await deliver(result.events) } });
+  return { data: { issue: result.issue, maintenanceApplied: result.maintenanceApplied, penalty }, meta: { notificationStored: await deliver(result.events) } };
 }
 
 async function listing(req, res) {
@@ -85,4 +88,4 @@ async function proposePenalty(issue, itemId, reportedBy, quantity = 1) {
   return penalty;
 }
 
-module.exports = { create, listing, options };
+module.exports = { create: require("../services/hotelOperations").transactional(create, 201), listing, options };

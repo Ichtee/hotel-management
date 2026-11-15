@@ -29,6 +29,21 @@ export async function api(path, { body, method = "GET", signal } = {}) {
   }
   return result;
 }
+
+// Chỉ dùng cho danh mục và sơ đồ cần toàn bộ dữ liệu; danh sách thường phân trang trên màn hình.
+export async function apiAll(path, options) {
+  const first = await api(path, options);
+  if (!Array.isArray(first.data) || !(first.meta?.pages > 1)) return first;
+  const [pathname, search] = path.split('?');
+  const query = new URLSearchParams(search);
+  const data = [...first.data];
+  for (let page = first.meta.page + 1; page <= first.meta.pages; page++) {
+    query.set('page', page);
+    const result = await api(`${pathname}?${query}`, options);
+    data.push(...result.data);
+  }
+  return { ...first, data };
+}
 export const money = (value) =>
   new Intl.NumberFormat("en-US", {
     style: "currency",

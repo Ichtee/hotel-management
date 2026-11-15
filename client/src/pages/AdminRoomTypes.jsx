@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { api, dateLabel, inputDate, money } from '../api/client.js';
-import { DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useEditPage, useScreen } from '../ui.jsx';
+import { DataTable, Field, Notice, PageHead, Screen, WaitScreen, useApi, useEditPage, useScreen, usePagedApi, Pagination } from '../ui.jsx';
 
 const BEDS = ['King bed', 'Queen bed', '2 single beds', '2 queen beds'];
 
 /* UC24 room types (add, edit, deactivate, delete when nothing is linked) and UC25 seasonal prices. */
 export default function AdminRoomTypes() {
-  const list = useApi('/room-types?limit=100');
+  const list = usePagedApi('/room-types?limit=100');
   const E = useEditPage(list.data);
   const sc = useScreen();
   const [msg, setMsg] = useState(null);
@@ -29,7 +29,7 @@ export default function AdminRoomTypes() {
   return (
     <>
       <PageHead title="Room types" sub="Categories, capacity, amenities and base price. Seasonal rates override the base price for their dates." action="Add room type" onAction={E.add} />
-      <Notice error={list.error} ok={msg} />
+      <Notice error={list.error} ok={msg} /><Pagination list={list} />
       {list.loading ? <p className="muted">Loading…</p> : !list.data?.length ? <p className="empty">No room types yet.</p> : (
         <DataTable cols={['', 'Room type', 'Bed & guests', 'Base / night', 'Status', '']} rows={list.data.map((t) => [
           t.images?.[0] ? <img key="i" src={t.images[0]} alt="" width="64" height="44" style={{ objectFit: 'cover', borderRadius: 6, display: 'block' }} /> : <span key="i" className="img-ph" style={{ display: 'block', width: 64, height: 44, borderRadius: 6 }} />,
@@ -88,7 +88,7 @@ function RoomTypeForm({ type, onClose, onSaved }) {
     <div className="full"><Field label="Name" error={fe.name}><input name="name" defaultValue={type.name} required maxLength={100} /></Field></div>
     <Field label="Bed" error={fe.bedType}><select name="bedType" defaultValue={type.bedType || 'King bed'}>{[...new Set([...BEDS, type.bedType].filter(Boolean))].map((b) => <option key={b}>{b}</option>)}</select></Field>
     <Field label="Size (m²)" error={fe.roomSizeSqm}><input name="roomSizeSqm" type="number" min="1" defaultValue={type.roomSizeSqm || 30} required /></Field>
-    <Field label="Max guests" error={fe.maxOccupancy}><input name="maxOccupancy" type="number" min="1" max="10" defaultValue={type.maxOccupancy || 2} required /></Field>
+    <Field label="Max guests" error={fe.maxOccupancy}><input name="maxOccupancy" type="number" min="1" max="100" defaultValue={type.maxOccupancy || 2} required /></Field>
     <Field label="Base price (VND / night)" error={fe.basePrice}><input name="basePrice" type="number" min="1000" step="1000" defaultValue={type.basePrice || ''} required /></Field>
     <div className="full"><Field label="Amenities (comma separated)" error={fe.amenities}><input name="amenities" defaultValue={(type.amenities || ['Free WiFi', 'Air conditioning']).join(', ')} /></Field></div>
     <div className="full"><Field label="Photo from your computer (JPG, PNG or WebP, max 5 MB)"><input name="imageFile" type="file" accept="image/jpeg,image/png,image/webp" /></Field></div>

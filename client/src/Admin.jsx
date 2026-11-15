@@ -13,7 +13,7 @@ import NotificationBell, { NotificationsPage } from './Notifications.jsx';
 import { AuditLog, Catalog, Reviews, StaffPermissions } from './ManagerPages.jsx';
 import './admin.css';
 import { useAuth } from './context/Auth.jsx';
-import { Badge, BrandName, DataTable, Field, LineChart, Notice, PageHead, Screen, useApi, useScreen } from './ui.jsx';
+import { Badge, BrandName, DataTable, Field, LineChart, Notice, PageHead, Screen, useApi, useScreen, usePagedApi, Pagination, useAllApi } from './ui.jsx';
 import { AuthShell, SignIn, ForgotPassword } from './AuthForms.jsx';
 import { Coupons, DepositPolicy, Occupancy, Profile, ChangePassword, Revenue, Users } from './AdminPages.jsx';
 import { Cancellations, Refunds } from './Cancellations.jsx';
@@ -114,8 +114,8 @@ function Stat({ label, value, hint, href }) {
 
 // Tổng hợp khách đến và rời đi trong ngày, gồm cả booking quá hạn.
 function useFrontDesk(enabled) {
-  const arrivals = useApi('/bookings/search?view=arrivals&limit=100', enabled);
-  const inHouse = useApi('/bookings/search?status=checked_in&limit=100', enabled);
+  const arrivals = useAllApi('/bookings/search?view=arrivals&limit=100', enabled);
+  const inHouse = useAllApi('/bookings/search?status=checked_in&limit=100', enabled);
   const end = new Date(`${vnDay(0)}T23:59:59+07:00`);
   const departures = (inHouse.data || []).filter((b) => new Date(b.checkOutDate) <= end);
   return { arrivals, inHouse, departures, reload: () => { arrivals.reload(); inHouse.reload(); } };
@@ -148,8 +148,8 @@ function Dashboard() {
   const fd = useFrontDesk(desk);
   const canRev = user.permissions.includes('revenue.read');
   const rev = useApi(`/reports/revenue?from=${vnDay(-13)}&to=${vnDay(0)}&groupBy=day`, canRev);
-  const rooms = useApi('/rooms?limit=100', user.role === 'manager');
-  const cx = useApi('/frontdesk/cancellations', user.permissions.includes('cancellations.review'));
+  const rooms = useAllApi('/rooms?limit=100', user.role === 'manager');
+  const cx = useAllApi('/frontdesk/cancellations', user.permissions.includes('cancellations.review'));
   const sc = useScreen();
   // Hiện số nhiệm vụ hoặc tài khoản theo vai trò đang đăng nhập.
   const mine = useApi('/housekeeping/tasks/mine', user.permissions.includes('cleaning_tasks.own.read'));
@@ -173,7 +173,7 @@ function Dashboard() {
         {canRev && <Stat label="Revenue today" value={series.length ? money(series[series.length - 1].net) : null} hint="Receipts minus refunds" href="#/admin/revenue" />}
       </div>
       {desk && <div className="qgrid">
-        <Queue title="Today’s arrivals" rows={fd.arrivals.data || []} loading={fd.arrivals.loading} empty="No arrivals waiting." action="Check in" onAction={user.permissions.includes('stays.check_in') ? (b) => sc.go('check-in', b._id) : null} />
+        <Queue title="Today’s arrivals" rows={fd.arrivals.data || []} loading={fd.arrivals.loading} empty="No arrivals waiting." action="Check in" onAction={user.permissions.includes('stays.check_in') && user.permissions.includes('rooms.assign') ? (b) => sc.go('check-in', b._id) : null} />
         <Queue title="Today’s departures" rows={fd.departures} loading={fd.inHouse.loading} empty="No departures due." action="Check out" onAction={user.permissions.includes('stays.check_out') ? (b) => sc.go('check-out', b._id) : null} />
       </div>}
       <div className="dgrid">
@@ -242,6 +242,7 @@ const VIEW_HINT = {
 };
 function Bookings() {
   const { user } = useAuth();
+  const can = (permission) => user.permissions.includes(permission);
   // Lưu bộ lọc vào URL để mở đúng danh sách từ liên kết và bảng điều khiển.
   const f = new URLSearchParams(location.hash.split('?')[1] || '').get('view') || 'all';
   const [search, setSearch] = useState('');
@@ -263,7 +264,7 @@ function Bookings() {
   const live = useApi(`/bookings/search?${query}`);
   const bookingsList = live.data || [];
   const pages = live.meta?.pages || 1;
-  if (sc.name === 'new') return <WalkInBooking onClose={sc.close} onCreated={(b) => location.replace(`#/admin/bookings?screen=check-in&id=${b._id}`)} />;
+  if (sc.name === 'new' && can('bookings.walk_in.create')) return <WalkInBooking onClose={sc.close} onCreated={(b) => location.replace(`#/admin/bookings?screen=check-in&id=${b._id}`)} />;
   if (sc.name) return <BookingScreen sc={sc} onDone={live.reload} />;
 
   return (
@@ -271,7 +272,7 @@ function Bookings() {
       <PageHead
         title="Bookings"
         sub="All reservations, newest first"
-        action={user.role === 'receptionist' ? 'New booking' : null}
+        action={can('bookings.walk_in.create') ? 'New booking' : null}
         onAction={() => sc.go('new')}
       />
       <div className="filter-groups">
@@ -311,15 +312,14 @@ function Bookings() {
           money(b.totalAmount),
           b.status,
           <RowActions key={b._id} actions={[
-            b.status === 'confirmed' && ['Check in', () => sc.go('check-in', b._id)],
-            b.status === 'checked_in' && ['Check out', () => sc.go('check-out', b._id)],
-            // Booking đã trả phòng thì không sửa nữa: hoá đơn đã phát hành theo thông tin lúc trả phòng.
-            ['pending', 'confirmed', 'checked_in'].includes(b.status) && [b.status === 'checked_in' ? 'Extend / edit' : 'Edit', () => sc.go('edit', b._id)],
-            ['confirmed', 'checked_in'].includes(b.status) && [b.status === 'confirmed' ? 'Change room type' : 'Change room', () => sc.go('change-room', b._id)],
-            b.status === 'checked_in' && ['Add service', () => sc.go('service', b._id)],
-            ['checked_in', 'checked_out'].includes(b.status) && ['Penalties', () => sc.go('penalties', b._id)],
-            b.status === 'checked_out' && ['Generate invoice', () => generateInvoice(b)],
-            b.status === 'confirmed' && ['Cancel', () => sc.go('cancel', b._id)],
+            can('stays.check_in') && can('rooms.assign') && b.status === 'confirmed' && ['Check in', () => sc.go('check-in', b._id)],
+            can('stays.check_out') && b.status === 'checked_in' && ['Check out', () => sc.go('check-out', b._id)],
+            can('bookings.managed.update') && ['pending', 'confirmed', 'checked_in'].includes(b.status) && [b.status === 'checked_in' ? 'Extend / edit' : 'Edit', () => sc.go('edit', b._id)],
+            can('rooms.change') && ['confirmed', 'checked_in'].includes(b.status) && [b.status === 'confirmed' ? 'Change room type' : 'Change room', () => sc.go('change-room', b._id)],
+            can('booking_services.record') && b.status === 'checked_in' && ['Add service', () => sc.go('service', b._id)],
+            can('penalties.record') && ['checked_in', 'checked_out'].includes(b.status) && ['Penalties', () => sc.go('penalties', b._id)],
+            can('invoices.print') && b.status === 'checked_out' && ['Generate invoice', () => generateInvoice(b)],
+            can('bookings.managed.cancel') && b.status === 'confirmed' && ['Cancel', () => sc.go('cancel', b._id)],
           ].filter(Boolean)} />
         ])}
       />
@@ -339,11 +339,16 @@ function Bookings() {
 
 // Mỗi thao tác lễ tân có URL riêng để mở lại đúng booking.
 const BOOKING_TASKS = { 'check-in': CheckInBooking, 'check-out': CheckOutBooking, cancel: CancelBooking, edit: EditBooking, 'change-room': ChangeRoom, service: AddService, penalties: Penalties };
+const TASK_PERMISSION = { 'check-in': 'stays.check_in', 'check-out': 'stays.check_out', cancel: 'bookings.managed.cancel', edit: 'bookings.managed.update', 'change-room': 'rooms.change', service: 'booking_services.record', penalties: 'penalties.record' };
 function BookingScreen({ sc, onDone }) {
-  const b = useApi(`/bookings/${sc.id}`);
+  const { user } = useAuth();
+  const permitted = user.permissions.includes(TASK_PERMISSION[sc.name]) && (sc.name !== 'check-in' || user.permissions.includes('rooms.assign'));
+  const b = useApi(`/bookings/${sc.id}`, permitted);
+  if (!permitted) return <Screen title="Booking" onClose={sc.close}><Notice error="You do not have permission for this action." /></Screen>;
   const Task = BOOKING_TASKS[sc.name];
   if (!Task) return <Screen title="Not found" onClose={sc.close}><p className="muted">This page does not exist.</p></Screen>;
   if (b.loading || b.error) return <Screen title="Booking" onClose={sc.close}>{b.loading ? <p className="muted">Loading booking…</p> : <Notice error={b.error} />}</Screen>;
+  if (sc.name === 'edit' && b.data.status === 'checked_out') return <Screen title="Booking" onClose={sc.close}><Notice error="A checked-out booking cannot be edited." /></Screen>;
   return <Task booking={b.data} onClose={() => { onDone(); sc.close(); }} />;
 }
 
@@ -366,12 +371,12 @@ function RowActions({ actions }) {
 
 function CustomerAccounts() {
   const [query, setQuery] = useState(''); const [status, setStatus] = useState(''); const sc = useScreen();
-  const list = useApi(`/customers?limit=100&q=${encodeURIComponent(query)}${status ? `&status=${status}` : ''}`);
+  const list = usePagedApi(`/customers?limit=100&q=${encodeURIComponent(query)}${status ? `&status=${status}` : ''}`);
   const selected = (list.data || []).find((u) => u._id === sc.id);
   if (sc.name === 'status') return selected ? <CustomerStatus customer={selected} onClose={() => { list.reload(); sc.close(); }} /> : <Screen title="Customer" onClose={sc.close}><p className="muted">{list.loading ? 'Loading…' : 'Customer not found.'}</p></Screen>;
   return <><PageHead title="Customer accounts" sub="Search customers and manage the blacklist" />
     <form className="chips" onSubmit={(e) => e.preventDefault()}><input className="list-search" style={{ marginBottom: 0 }} aria-label="Search customers" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Name, username or email" /><select aria-label="Customer status" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option><option value="active">Active</option><option value="suspended">Blacklisted</option></select></form>
-    <Notice error={list.error} />
+    <Notice error={list.error} /><Pagination list={list} />
     <DataTable cols={['Name', 'Username', 'Email', 'Phone', 'Status', '']} rows={(list.data || []).map((u) => [u.customerProfile?.fullName || '—', u.username, u.email, u.phone || '—', u.status, <button key={u._id} className={`btn sm${u.status === 'active' ? ' danger' : ''}`} onClick={() => sc.go('status', u._id)}>{u.status === 'active' ? 'Blacklist' : 'Restore'}</button>])} />
   </>;
 }
@@ -384,15 +389,21 @@ function CustomerStatus({ customer, onClose }) {
 
 // Chia khoản còn thiếu qua tiền mặt, POS và chuyển khoản tại quầy.
 function SettleBalance({ booking, balance, onPaid }) {
+  const { user } = useAuth();
+  const pendingPayment = useRef(null);
   const [method, setMethod] = useState('cash'); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
   const [amount, setAmount] = useState(balance); const [received, setReceived] = useState('');
   const change = Number(received) - Number(amount);
   useEffect(() => setAmount(balance), [balance]);
   const submit = async (e) => {
     e.preventDefault(); const form = e.target; const f = Object.fromEntries(new FormData(form)); setSaving(true); setError(null);
-    try { await api(`/frontdesk/bookings/${booking._id}/payments`, { method: 'POST', body: { method, amount: Number(f.amount), transactionRef: method === 'cash' ? undefined : f.transactionRef } }); form.reset(); setReceived(''); onPaid(); }
+    const body = { method, amount: Number(f.amount), transactionRef: method === 'cash' ? undefined : f.transactionRef };
+    const fingerprint = JSON.stringify(body);
+    if (pendingPayment.current?.fingerprint !== fingerprint) pendingPayment.current = { fingerprint, key: crypto.randomUUID() };
+    try { await api(`/frontdesk/bookings/${booking._id}/payments`, { method: 'POST', body: { ...body, idempotencyKey: pendingPayment.current.key } }); pendingPayment.current = null; form.reset(); setReceived(''); onPaid(); }
     catch (x) { setError(x); } finally { setSaving(false); }
   };
+  if (!user.permissions.includes("payments.settle")) return <p className="muted">An employee with payment permission must collect the balance.</p>;
   return <form className="form" onSubmit={submit}>
     <Field label="Payment method"><select value={method} onChange={(e) => setMethod(e.target.value)}><option value="cash">Cash</option><option value="pos">Card (POS)</option><option value="bank_transfer">Bank transfer</option></select></Field>
     <Field label={`Amount (VND) · ${money(Number(amount) || 0)}`} error={error?.fields?.amount}><input key={balance} name="amount" type="number" min="1" max={balance} step="1" defaultValue={balance} onChange={(e) => setAmount(e.target.value)} required /></Field>
@@ -416,9 +427,9 @@ function FinalBill({ bill }) {
       ...rows.map((l, i) => <div key={`${title}${i}`} className="bill-line"><dt>{l.name}</dt><dd>{money(l.amount)}</dd></div>),
     ])}
     <div className="tot"><dt>Total</dt><dd><strong>{money(bill.totalAmount)}</strong></dd></div>
-    {bill.payments.map((p) => <div key={p._id}><dt>Less: {PAY_LABEL[p.kind]} ({METHOD_LABEL[p.method] || p.method}){p.paidAt ? ` · ${dateLabel(p.paidAt)}` : ''}</dt><dd>−{money(p.amount)}</dd></div>)}
-    {!bill.payments.length && <div><dt>Paid so far</dt><dd>{money(0)}</dd></div>}
-    <div className="tot"><dt>Balance due</dt><dd><strong>{money(bill.balance)}</strong></dd></div>
+    {bill.payments?.map((p) => <div key={p._id}><dt>Less: {PAY_LABEL[p.kind]} ({METHOD_LABEL[p.method] || p.method}){p.paidAt ? ` · ${dateLabel(p.paidAt)}` : ''}</dt><dd>−{money(p.amount)}</dd></div>)}
+    {bill.payments?.length === 0 && <div><dt>Paid so far</dt><dd>{money(0)}</dd></div>}
+    {bill.balance !== undefined && <div className="tot"><dt>Balance due</dt><dd><strong>{money(bill.balance)}</strong></dd></div>}
     {bill.proposed.length > 0 && <>
       <div className="bill-head bill-pending"><dt>Reported by Housekeeping, not in the total until you confirm</dt><dd /></div>
       {bill.proposed.map((p) => <div key={p._id} className="bill-line bill-pending"><dt>{p.itemName}</dt><dd>+{money(p.proposedAmount)}?</dd></div>)}
@@ -427,6 +438,8 @@ function FinalBill({ bill }) {
 }
 // Tính phí trả muộn và yêu cầu kiểm tra phòng; chỉ trả phòng khi đủ tiền và đã xử lý kiểm tra.
 function CheckOutBooking({ booking, onClose }) {
+  const { user } = useAuth();
+  const canHandlePenalties = user.permissions.includes('penalties.record');
   const [penalties, setPenalties] = useState(false);
   const [bill, setBill] = useState(null); const [error, setError] = useState(null); const [saving, setSaving] = useState(false); const [skip, setSkip] = useState(false); const [done, setDone] = useState(null);
   const load = () => api(`/front-desk/bookings/${booking._id}/check-out/start`, { method: 'POST' }).then((r) => setBill(r.data)).catch(setError);
@@ -443,14 +456,15 @@ function CheckOutBooking({ booking, onClose }) {
     <div className="modal-actions"><button className="btn primary" onClick={onClose}>Close</button></div>
   </Screen>;
   // Xử lý bồi thường ngay trong luồng trả phòng rồi tính lại hóa đơn.
-  if (penalties) return <Penalties booking={booking} onClose={() => { setPenalties(false); load(); }} />;
+  if (penalties && canHandlePenalties) return <Penalties booking={booking} onClose={() => { setPenalties(false); load(); }} />;
   if (!bill) return <Screen title="Check out customer" onClose={onClose}>{error ? <Notice error={error} /> : <p className="muted">Requesting the room inspection and preparing the final bill…</p>}</Screen>;
   const inspected = bill.inspection?.status === 'completed';
   return <Screen title={`Check out · ${booking.bookingReference}`} onClose={onClose}>
     <h2 className="bill-title">Final bill</h2>
     <FinalBill bill={bill} />
+    {bill.balance === undefined && <p className="muted">Ask an employee with payment access to check and collect any outstanding balance.</p>}
     <p role="status">Room inspection: <Badge v={bill.inspection?.status || 'pending'} />{bill.inspection?.assignedTo ? ` · ${bill.inspection.assignedTo}` : ' · no staff responsible yet'} <button type="button" className="btn sm" onClick={load}>Refresh</button></p>
-    {bill.proposedPenalties > 0 && <p className="note bad-note">{bill.proposedPenalties} damage / loss item(s) reported by Housekeeping. Confirm (adds to the total) or waive each one first. <button type="button" className="btn sm" onClick={() => setPenalties(true)}>Open penalties</button></p>}
+    {bill.proposedPenalties > 0 && <p className="note bad-note">{bill.proposedPenalties} damage / loss item(s) reported by Housekeeping. Confirm (adds to the total) or waive each one first. {canHandlePenalties && <button type="button" className="btn sm" onClick={() => setPenalties(true)}>Open penalties</button>}</p>}
     {bill.balance > 0 && <SettleBalance booking={booking} balance={bill.balance} onPaid={load} />}
     <form className="form" onSubmit={submit}>
       {!inspected && <label className="check full"><input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} /> The guest cannot wait: skip the inspection (closed as "Skipped at check-out"; damage found later is handled with the guest)</label>}
@@ -464,7 +478,9 @@ function CheckOutBooking({ booking, onClose }) {
 
 // Ghi nhận, giảm hoặc miễn khoản bồi thường do housekeeping đề xuất.
 function Penalties({ booking, onClose }) {
-  const after = booking.status === 'checked_out'; const bill = useApi(`/bookings/${booking._id}`, after);
+  const { user } = useAuth();
+  const canReadPayment = user.permissions.some(p => ['payments.status.read', 'revenue.read'].includes(p));
+  const after = booking.status === 'checked_out'; const bill = useApi(`/bookings/${booking._id}`, after && canReadPayment);
   const list = useApi(`/frontdesk/bookings/${booking._id}/penalties`); const catalog = useApi('/frontdesk/compensation-items'); const [pick, setPick] = useState(''); const [qty, setQty] = useState(1); const [amt, setAmt] = useState(''); const [error, setError] = useState(null); const [saving, setSaving] = useState(false);
   const act = async (path, method, body) => { setSaving(true); setError(null); try { await api(path, { method, body }); list.reload(); if (after) bill.reload(); return true; } catch (x) { setError(x); return false; } finally { setSaving(false); } };
   const submit = async (e) => { e.preventDefault(); const form = e.target; const f = Object.fromEntries(new FormData(form)); if (await act(`/frontdesk/bookings/${booking._id}/penalties`, 'POST', { itemName: pick && pick !== 'other' ? `${(catalog.data || []).find((i) => i._id === pick)?.name}${Number(qty) > 1 ? ` x${qty}` : ''}` : f.itemName, amount: Number(amt), description: f.description || undefined })) form.reset(); setPick(''); setQty(1); setAmt(''); };
@@ -531,7 +547,7 @@ function CheckInBooking({ booking, onClose }) {
   return <Screen title={`Check in ${booking.bookingReference}`} onClose={onClose}><form className="form" onSubmit={submit}>
     {pre && <p className="full note">Pre-filled from the guest's check-in request: verify it against the original ID document. {pre.hasIdPhoto && <IdPhotoLink requestId={pre._id} />}</p>}
     <Field label="Available room"><select name="roomId" required><option value="">Select a room</option>{rooms.data?.map((r) => <option key={r._id} value={r._id}>Room {r.roomNumber} · Floor {r.floor}</option>)}</select></Field>
-    <Field label="Number of guests"><input name="guestCount" type="number" min="1" defaultValue={pre?.guestCount || booking.rooms?.[0]?.guestCount || 1} required /></Field><Field label="ID / passport number"><input name="idDocumentNo" defaultValue={pre?.idDocumentNo || ''} pattern="[A-Za-z0-9]{6,20}" title="6–20 letters or digits, no spaces." required /></Field>
+    <Field label="Number of guests"><input name="guestCount" type="number" min="1" max={booking.rooms?.[0]?.roomTypeId?.maxOccupancy} defaultValue={pre?.guestCount || booking.rooms?.[0]?.guestCount || 1} required /></Field><Field label="ID / passport number"><input name="idDocumentNo" defaultValue={pre?.idDocumentNo || ''} pattern="[A-Za-z0-9]{6,20}" title="6–20 letters or digits, no spaces." required /></Field>
     <div className="full"><Notice error={rooms.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving || !rooms.data?.length}>{saving ? 'Checking in…' : 'Confirm check-in'}</button></div>
   </form></Screen>;
 }
@@ -563,13 +579,14 @@ function EditBooking({ booking, onClose }) {
     <p className="full muted">{b.status === 'checked_in' ? 'Extra nights are priced at the rate of each night and need no deposit.' : 'The deposit already paid does not change; the difference is paid at check-out.'}</p>
     {b.couponCode && <label className="check full"><input type="checkbox" name="dropCoupon" /> If the coupon {b.couponCode} no longer applies to the new stay, the guest agrees to continue without the discount</label>}
     <Field label="Guest full name"><input name="fullName" defaultValue={b.guestName} required /></Field><Field label="Phone"><input name="phone" defaultValue={b.guestPhone} required /></Field>{b.status === 'checked_in' && <Field label="ID / passport number"><input name="idDocumentNo" defaultValue={b.guestIdDocumentNo} required /></Field>}
-    <><Field label="Check-in"><input name="checkInDate" type="date" defaultValue={b.checkInDate?.slice(0, 10)} required disabled={b.status === 'checked_in'} /></Field><Field label="Check-out"><input name="checkOutDate" type="date" defaultValue={b.checkOutDate?.slice(0, 10)} required /></Field><Field label="Guests"><input name="guestCount" type="number" min="1" defaultValue={b.rooms?.[0]?.guestCount || 1} required /></Field></>
+    <><Field label="Check-in"><input name="checkInDate" type="date" defaultValue={b.checkInDate?.slice(0, 10)} required disabled={b.status === 'checked_in'} /></Field><Field label="Check-out"><input name="checkOutDate" type="date" defaultValue={b.checkOutDate?.slice(0, 10)} required /></Field><Field label="Guests"><input name="guestCount" type="number" min="1" max={b.rooms?.[0]?.roomTypeId?.maxOccupancy} defaultValue={b.rooms?.[0]?.guestCount || 1} required /></Field></>
     <div className="full"><Notice error={detail.error || error} /></div><div className="full modal-actions"><button type="button" className="btn" onClick={onClose}>Cancel</button><button className="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button></div>
   </form></Screen>;
 }
 
 // Đặt phòng tại quầy bắt đầu hôm nay; chỉ chọn loại còn trống suốt kỳ lưu trú rồi chuyển sang nhận phòng.
 function WalkInBooking({ onClose, onCreated }) {
+  const { user } = useAuth();
   const today = vnDay(0);
   const [stay, setStay] = useState({ checkOutDate: vnDay(1), guestCount: '1', roomTypeId: '' }); const [coupon, setCoupon] = useState('');
   const set = (k) => (e) => setStay({ ...stay, [k]: e.target.value });
@@ -597,9 +614,9 @@ function WalkInBooking({ onClose, onCreated }) {
     <form className="form" onSubmit={submit}>
       <p className="full muted">Walk-in booking for tonight ({dateLabel(today)}) · no deposit · the check-in opens after it is created</p>
       <Field label="Check-out"><input type="date" min={vnDay(1)} value={stay.checkOutDate} onChange={set('checkOutDate')} required /></Field>
-      <Field label="Guests"><input type="number" min="1" max="20" value={stay.guestCount} onChange={set('guestCount')} required /></Field>
+      <Field label="Guests"><input type="number" min="1" max="100" value={stay.guestCount} onChange={set('guestCount')} required /></Field>
       <Field label="Available room type"><select value={stay.roomTypeId} onChange={set('roomTypeId')} required disabled={types.loading}><option value="">{types.data && !types.data.length ? 'No room type is available' : 'Select a room type'}</option>{types.data?.map((t) => <option key={t._id} value={t._id}>{t.name} · up to {t.maxOccupancy} guest{t.maxOccupancy > 1 ? 's' : ''} · {money(t.stayAmount)} · {t.roomsLeft} left</option>)}</select></Field>
-      <Field label="Coupon code (optional)"><input onBlur={(e) => setCoupon(e.target.value.toUpperCase())} pattern="[A-Za-z0-9]{2,30}" title="2–30 letters or digits, no spaces." autoCapitalize="characters" /></Field>
+      {user.permissions.includes("coupons.apply") && <Field label="Coupon code (optional)"><input onBlur={(e) => setCoupon(e.target.value.toUpperCase())} pattern="[A-Za-z0-9]{2,30}" title="2–30 letters or digits, no spaces." autoCapitalize="characters" /></Field>}
       {quote && <p className="full note">{quote.couponError ? `${quote.couponError} The booking continues without the discount. ` : ''}Total {money(quote.totalAmount)}{quote.discountAmount > 0 ? ` (discount ${money(quote.discountAmount)})` : ''}, paid at check-out.</p>}
       <Field label="Guest full name"><input name="fullName" required /></Field>
       <Field label="Phone"><input name="phone" inputMode="tel" required /></Field>
@@ -616,7 +633,7 @@ const STAMP = (d) => (d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', 
 
 function Payments() {
   const [status, setStatus] = useState('');
-  const list = useApi(`/frontdesk/payments${status ? `?status=${status}` : ''}`);
+  const list = usePagedApi(`/frontdesk/payments${status ? `?status=${status}` : ''}`);
   const rows = list.data || [];
   // Cọc đã hoàn không còn được tính vào số tiền đang giữ.
   const received = rows.filter((p) => p.status === 'success').reduce((a, p) => a + p.amount, 0);
@@ -626,9 +643,9 @@ function Payments() {
       <div className="chips" role="group" aria-label="Filter by status">
         {[['', 'All'], ['success', 'Paid'], ['pending', 'Pending'], ['failed', 'Failed'], ['refunded', 'Refunded']].map(([v, l]) => <button key={l} className={status === v ? 'chip on' : 'chip'} aria-pressed={status === v} onClick={() => setStatus(v)}>{l}</button>)}
       </div>
-      <Notice error={list.error} />
+      <Notice error={list.error} /><Pagination list={list} />
       {list.loading ? <p className="muted">Loading…</p> : rows.length === 0 ? <p className="empty">No payments yet.</p> : <>
-        <p className="muted">{rows.length} payments · net received {money(received)}</p>
+        <p className="muted">{rows.length} payments on this page · received {money(received)}</p>
         <DataTable cols={['Date', 'Booking', 'Guest', 'Type', 'Method', 'Amount', 'Status']} rows={rows.map((p) => [STAMP(p.paidAt || p.createdAt), p.bookingId?.bookingReference || '—', p.bookingId?.guestName || '—', p.kind, METHOD[p.method] || p.method, money(p.amount), p.status === 'success' ? 'paid' : p.status])} />
       </>}
     </>

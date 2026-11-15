@@ -15,6 +15,7 @@ async function start() {
     throw new Error("CLIENT_ORIGIN is required in production.");
   await connectDatabase();
   await seedRoles();
+  await require('./services/roomHistory').initializeRoomHistory();
   const { app } = createApp({
     mongoUri: process.env.MONGO_URI,
     jwtSecret:

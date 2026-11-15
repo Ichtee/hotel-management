@@ -43,6 +43,8 @@ const schema = new Schema({
   checkOutDate: { type: Date, required: true },
   actualCheckInAt: Date,
   actualCheckOutAt: Date,
+  // Lưu các lần ở phòng thực tế để đổi phòng không làm sai công suất quá khứ.
+  roomStays: [{ _id: false, roomId: { type: Schema.Types.ObjectId, ref: 'Room', required: true }, from: { type: Date, required: true }, to: Date }],
   checkedInBy: { type: Schema.Types.ObjectId, ref: 'User' },
   checkedOutBy: { type: Schema.Types.ObjectId, ref: 'User' },
   // Booking trực tuyến chờ cọc giữ phòng 15 phút.
@@ -149,5 +151,6 @@ schema.index({ status: 1, holdExpiresAt: 1 });
 schema.index({ 'rooms.roomId': 1, status: 1, checkInDate: 1, checkOutDate: 1 });
 schema.index({ 'rooms.roomTypeId': 1, status: 1, checkOutDate: 1 });
 schema.index({ customerId: 1, createdAt: -1 });
+schema.index({ status: 1, actualCheckInAt: 1, actualCheckOutAt: 1 });
 
 module.exports = mongoose.model('Booking', schema);

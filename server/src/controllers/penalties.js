@@ -1,3 +1,4 @@
+const { transactional } = require("../services/hotelOperations");
 const Booking = require("../models/Booking");
 const Penalty = require("../models/Penalty");
 const CompensationItem = require("../models/CompensationItem");
@@ -23,7 +24,7 @@ async function items(req, res) {
   res.json({ data: await CompensationItem.find({ isActive: true }).sort({ name: 1 }).lean() });
 }
 // Khoản bồi thường lễ tân nhập trực tiếp được xác nhận và cộng vào hóa đơn ngay.
-async function record(req, res) {
+async function record(req) {
   v.keys(req.body, ["itemName", "amount", "description"]);
   const booking = await billable(v.id(req.params.id));
   const amount = v.number(req.body.amount, "amount", 1, 1e9);
@@ -36,10 +37,10 @@ async function record(req, res) {
   });
   await charge(booking._id, amount);
   await audit(req.user._id, "penalty.confirmed", "penalty", penalty._id, { bookingId: booking._id, amount });
-  res.status(201).json({ data: penalty });
+  return { data: penalty };
 }
 // Xác nhận, giảm hoặc miễn khoản bồi thường do housekeeping đề xuất.
-async function review(req, res) {
+async function review(req) {
   v.keys(req.body, ["action", "amount", "reason"]);
   const action = v.choice(req.body.action, "action", ["confirm", "waive"]);
   const proposed = await Penalty.findById(v.id(req.params.id));
@@ -56,6 +57,6 @@ async function review(req, res) {
   if (action === "confirm") await charge(booking._id, penalty.amount);
   else if (before.status === "confirmed") await charge(booking._id, -before.amount);
   await audit(req.user._id, `penalty.${action === "confirm" ? "confirmed" : "waived"}`, "penalty", penalty._id, { bookingId: booking._id, proposedAmount: penalty.proposedAmount, amount: penalty.amount, reason: penalty.waivedReason });
-  res.json({ data: penalty });
+  return { data: penalty };
 }
-module.exports = { items, listing, record, review };
+module.exports = { items, listing, record: transactional(record, 201), review: transactional(review, 200) };

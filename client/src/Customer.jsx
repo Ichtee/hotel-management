@@ -466,13 +466,14 @@ function RoomDetail({ id, q }) {
 function Checkout({ q, user }) {
   const { user: authUser } = useAuth();
   const currentUser = user || authUser;
+  const canCoupon = currentUser?.role === 'customer' || currentUser?.permissions?.includes('coupons.apply');
 
   const { room: r, loading: checkoutLoading } = useRoomType(q.room);
   const policies = usePolicies();
   const nights = nightsBetween(q.in, q.out);
   const [saving, setSaving] = useState(false);
   // Máy chủ tính giá từng đêm, giảm giá và cọc; mã không hợp lệ thì tiếp tục với giá gốc.
-  const [typed, setTyped] = useState(q.coupon || ''); const [coupon, setCoupon] = useState(q.coupon || '');
+  const [typed, setTyped] = useState(canCoupon ? q.coupon || '' : ''); const [coupon, setCoupon] = useState(canCoupon ? q.coupon || '' : '');
   const [quote, setQuote] = useState({ loading: true });
   useEffect(() => {
     let live = true;
@@ -537,10 +538,10 @@ function Checkout({ q, user }) {
           <Pic className="thumb" src={r.img} alt="" />
           <h2>{r.name}</h2>
           <p className="muted">{dateLabel(q.in)} → {dateLabel(q.out)} · {nights} night(s) · {q.guests} guest(s)</p>
-          <div className="promo-actions">
+          {canCoupon && <div className="promo-actions">
             <input aria-label="Promo code" placeholder="Promo code" pattern="[A-Za-z0-9]{2,30}" title="2–30 letters or digits, no spaces." value={typed} onChange={(e) => setTyped(e.target.value)} autoCapitalize="characters" />
             <button type="button" className="btn" onClick={() => setCoupon(typed.toUpperCase())} disabled={quote.loading}>Apply</button>
-          </div>
+          </div>}
           {price?.couponError && <p className="note bad-note" role="alert">{price.couponError} The booking continues without the discount.</p>}
           {quote.error && <p className="note bad-note" role="alert">{quote.error}</p>}
           {price && !price.available && <p className="note bad-note" role="alert">This room type is no longer available for these dates. <a href={`#/rooms?${new URLSearchParams({ in: q.in, out: q.out, guests: q.guests })}`}>See what is available</a></p>}
